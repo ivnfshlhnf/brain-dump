@@ -10,6 +10,39 @@ export interface Dump {
   modality: Modality;
 }
 
+/** The organized, editable artifact derived from one or more Dumps.
+ *  See CONTEXT.md. Frontmatter holds the v1 schema; the body holds the
+ *  cleaned content plus Summary/Key points/Related sections. */
+export interface Note {
+  title: string;
+  tags: string[];
+  createdAt: number; // ms epoch — the source Dump's capture time
+  modality: Modality;
+  source: string; // Obsidian wikilink to the source Dump
+  category: string;
+  summary: string;
+  body: string; // cleaned/organized content
+  keyPoints: string[];
+  related: string[]; // wikilinks / urls
+}
+
+/** The structured result an LLM returns when Organizing a Dump into a Note. */
+export interface OrganizeOutput {
+  title: string;
+  tags: string[];
+  category: string;
+  summary: string;
+  keyPoints: string[];
+  related: string[];
+  body: string; // cleaned/organized content
+}
+
+/** The cloud-LLM seam. The operation layer depends on this interface; tests
+ *  pass a deterministic fake, the app passes the real cloud Organizer. */
+export interface Organizer {
+  organize(content: string, modality: Modality): Promise<OrganizeOutput>;
+}
+
 /** A minimal read/write interface over the LiveSync CouchDB store.
  *  Satisfied by a PouchDB instance (http adapter in the app, memory adapter in tests). */
 export interface DocStore {

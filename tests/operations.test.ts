@@ -4,9 +4,17 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { createHash } from 'node:crypto';
 import PouchDB from 'pouchdb-core';
 import memory from 'pouchdb-adapter-memory';
-import { capture } from '../src/lib/operations';
+import { capture, organizeDump } from '../src/lib/operations';
 import { docIdForPath, writeFile } from '../src/lib/livesync';
-import { DEFAULT_SETTINGS, type Settings, type DocStore } from '../src/lib/types';
+import {
+  DEFAULT_SETTINGS,
+  type Settings,
+  type DocStore,
+  type Dump,
+  type Organizer,
+  type OrganizeOutput,
+  type Modality,
+} from '../src/lib/types';
 
 PouchDB.plugin(memory);
 
@@ -95,5 +103,106 @@ describe('capture (Seam A)', () => {
     const cs: Settings = { ...settings, caseSensitive: true };
     expect(docIdForPath('_dumps/Foo.md', cs)).toBe('/_dumps/Foo.md');
     expect(docIdForPath('Brain Dump/Note.md', cs)).toBe('Brain Dump/Note.md');
+  });
+});
+
+describe('organizeDump (Seam A)', () => {
+  // Deterministic Organize fake — no real LLM call. Records what it was asked.
+  const sampleOutput: OrganizeOutput = {
+    title: 'Water the plants',
+    tags: ['home', 'plants'],
+    category: 'Home',
+    summary: 'A reminder to water the plants.',
+    keyPoints: ['Water the plants regularly'],
+    related: ['[[plants]]'],
+    body: 'I keep forgetting to water the plants.',
+  };
+
+  let organizeCalls: Array<{ content: string; modality: Modality }> = [];
+  const organizer: Organizer = {
+    organize: async (content, modality) => {
+      organizeCalls.push({ content, modality });
+      return sampleOutput;
+    },
+  };
+
+  const dump: Dump = {
+    id: fixedId,
+    content: 'I keep forgetting to water the plants',
+    createdAt: fixedNow,
+    modality: 'text',
+  };
+
+  const deps = (org: Organizer = organizer) => ({ db, settings, organizer: org, hash: sha1Hex });
+
+  beforeEach(() => {
+    organizeCalls = [];
+  });
+
+  it('organizes a Dump into a Note in the managed folder as a metadata doc + a content-addressed chunk doc', async () => {
+    const result = await organizeDump(dump, deps());
+
+    expect(result.path).toBe('Brain Dump/2026-08-21-water-the-plants.md');
+    expect(result.metadataId).toBe('brain dump/2026-08-21-water-the-plants.md');
+
+    const meta = await db.get<{ type: string; path: string; children: string[]; eden: object }>(
+      result.metadataId,
+    );
+    expect(meta.type).toBe('plain');
+    expect(meta.path).toBe(result.path); // original case preserved
+    expect(meta.children).toHaveLength(1);
+    expect(meta.eden).toEqual({});
+
+    const chunk = await db.get<{ type: string; data: string; _id: string }>(meta.children[0]);
+    expect(chunk.type).toBe('leaf');
+    expect(chunk._id).toBe('h:' + createHash('sha1').update(chunk.data).digest('hex'));
+  });
+
+  it('writes the v1 frontmatter schema and Summary/Key points/Related body sections', async () => {
+    const result = await organizeDump(dump, deps());
+    const meta = await db.get<{ children: string[] }>(result.metadataId);
+    const chunk = await db.get<{ data: string }>(meta.children[0]);
+    const file = chunk.data;
+
+    // v1 frontmatter schema (type shape from the design session).
+    expect(file).toContain('title: Water the plants');
+    expect(file).toContain('tags: [home, plants]');
+    expect(file).toContain(`created: ${fixedNow}`);
+    expect(file).toContain('modality: text');
+    expect(file).toContain('category: Home');
+    expect(file).toContain('summary: A reminder to water the plants.');
+    // Body is the cleaned content, then the structured sections.
+    expect(file).toContain('I keep forgetting to water the plants.');
+    expect(file).toContain('## Summary');
+    expect(file).toContain('## Key points');
+    expect(file).toContain('- Water the plants regularly');
+    expect(file).toContain('## Related');
+    expect(file).toContain('- [[plants]]');
+  });
+
+  it('links back to the source Dump via an Obsidian wikilink', async () => {
+    const result = await organizeDump(dump, deps());
+    const meta = await db.get<{ children: string[] }>(result.metadataId);
+    const chunk = await db.get<{ data: string }>(meta.children[0]);
+    // source is a wikilink to the source Dump, by vault path without extension.
+    expect(chunk.data).toContain('source: [[_dumps/20260821-203045-aaaaaa]]');
+    expect(result.note.source).toBe('[[_dumps/20260821-203045-aaaaaa]]');
+  });
+
+  it('uses the <YYYY-MM-DD>-<title-slug>.md filename, slugifying the organized title', async () => {
+    // Edge cases (special chars, stray hyphens) are exercised through the operation,
+    // not by unit-testing the slug helper directly (spec: test via the operation layer).
+    const fussy: Organizer = {
+      organize: async () => ({ ...sampleOutput, title: '  What?! A thought...  ' }),
+    };
+    const result = await organizeDump(dump, deps(fussy));
+    expect(result.path).toBe('Brain Dump/2026-08-21-what-a-thought.md');
+  });
+
+  it('calls the organizer with the dump content and modality, not a real LLM', async () => {
+    await organizeDump(dump, deps());
+    expect(organizeCalls).toHaveLength(1);
+    expect(organizeCalls[0].content).toBe('I keep forgetting to water the plants');
+    expect(organizeCalls[0].modality).toBe('text');
   });
 });
