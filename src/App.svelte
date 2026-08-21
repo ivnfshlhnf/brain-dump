@@ -2,7 +2,8 @@
   import { onMount } from 'svelte';
   import { loadSettings, saveSettings } from './lib/settings';
   import { createRemoteDb } from './lib/db';
-  import { capture, type CaptureDeps } from './lib/operations';
+  import { capture, organizeDump } from './lib/operations';
+  import { createOrganizer } from './lib/llm';
   import { defaultSha1Hex } from './lib/livesync';
   import { DEFAULT_SETTINGS, type Settings } from './lib/types';
 
@@ -20,15 +21,23 @@
     busy = true;
     status = '';
     try {
-      const deps: CaptureDeps = {
-        db: createRemoteDb(settings),
+      const db = createRemoteDb(settings);
+      const hash = defaultSha1Hex;
+      const captured = await capture(text, {
+        db,
         settings,
         now: () => Date.now(),
         newId: () => crypto.randomUUID(),
-        hash: defaultSha1Hex,
-      };
-      const result = await capture(text, deps);
-      status = `Captured dump to ${result.path}`;
+        hash,
+      });
+      // Initial Organize: turn the Dump into a Note in the managed folder.
+      const organized = await organizeDump(captured.dump, {
+        db,
+        settings,
+        organizer: createOrganizer(settings),
+        hash,
+      });
+      status = `Captured dump to ${captured.path}; Note at ${organized.path}`;
       text = '';
     } catch (e) {
       status = `Error: ${(e as Error).message}`;
@@ -62,6 +71,9 @@
     <label>Password <input type="password" bind:value={settings.couchdbPassword} /></label>
     <label>Managed folder <input bind:value={settings.managedFolder} /></label>
     <label>Case-sensitive <input type="checkbox" bind:checked={settings.caseSensitive} /></label>
+    <label>LLM provider <input bind:value={settings.llmProvider} placeholder="https://api.ollama.cloud" /></label>
+    <label>LLM model <input bind:value={settings.llmModel} placeholder="llama3.1" /></label>
+    <label>LLM API key <input type="password" bind:value={settings.llmApiKey} /></label>
     <button on:click={saveConfig}>Save settings</button>
   {/if}
 
