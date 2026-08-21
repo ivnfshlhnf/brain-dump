@@ -17,7 +17,7 @@ export interface CaptureResult {
   chunkId: string;
 }
 
-/** Capture a text brain-dump: save a verbatim Dump to _dumps/ in LiveSync format. */
+/** Capture a text brain-dump: write a verbatim Dump to _dumps/ in LiveSync format. */
 export async function capture(text: string, deps: CaptureDeps): Promise<CaptureResult> {
   const content = text.trim();
   if (!content) throw new Error('Cannot capture an empty brain-dump.');
