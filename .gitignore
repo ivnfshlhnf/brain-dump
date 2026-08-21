@@ -1,0 +1,8 @@
+node_modules
+dist
+dist-ssr
+.svelte-kit
+*.local
+.DS_Store
+dev.db
+*.log

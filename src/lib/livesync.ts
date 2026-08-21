@@ -1,0 +1,69 @@
+// Writes files to the LiveSync CouchDB store in LiveSync's internal document format.
+// See ADR-0001. Each file is one metadata doc plus one content-addressed chunk doc.
+import type { DocStore, Settings } from './types';
+
+export type HashFn = (content: string) => Promise<string>;
+
+/** Default chunk hash: SHA-1 hex (Web Crypto). Must match the user's LiveSync hash. */
+export async function defaultSha1Hex(content: string): Promise<string> {
+  const data = new TextEncoder().encode(content);
+  const buf = await crypto.subtle.digest('SHA-1', data);
+  return toHex(new Uint8Array(buf));
+}
+
+function toHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/** Compute the LiveSync metadata doc _id from a vault-relative path. */
+export function docIdForPath(path: string, settings: Settings): string {
+  let id = path;
+  if (id.startsWith('_')) id = '/' + id; // underscore-leading folders get a leading slash
+  if (!settings.caseSensitive) id = id.toLowerCase();
+  return id;
+}
+
+export interface WrittenDoc {
+  metadataId: string;
+  chunkId: string;
+}
+
+/** Write a file (a Dump or a Note) as a metadata doc + a single content-addressed chunk doc. */
+export async function writeFile(
+  db: DocStore,
+  path: string,
+  content: string,
+  opts: { ctime: number; mtime: number; hash: HashFn; settings: Settings },
+): Promise<WrittenDoc> {
+  const chunkId = 'h:' + (await opts.hash(content));
+
+  // Content-addressed chunk: if an identical chunk already exists, that's dedup — keep it.
+  const chunkDoc: Record<string, unknown> = { _id: chunkId, type: 'leaf', data: content };
+  try {
+    await db.put(chunkDoc);
+  } catch (e) {
+    if (!isConflict(e)) throw e;
+  }
+
+  const metadataId = docIdForPath(path, opts.settings);
+  const metadataDoc: Record<string, unknown> = {
+    _id: metadataId,
+    path, // original-case vault-relative path
+    children: [chunkId],
+    ctime: opts.ctime,
+    mtime: opts.mtime,
+    size: content.length,
+    type: 'plain',
+    eden: {},
+  };
+  await db.put(metadataDoc);
+
+  return { metadataId, chunkId };
+}
+
+function isConflict(e: unknown): boolean {
+  const err = e as { status?: number; name?: string };
+  return err.status === 409 || err.name === 'conflict';
+}
