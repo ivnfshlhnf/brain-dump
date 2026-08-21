@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { loadSettings, saveSettings } from './lib/settings';
   import { createRemoteDb } from './lib/db';
-  import { capture, organizeDump } from './lib/operations';
+  import { beginCapture, addContext, finalizeCapture, type CaptureSession } from './lib/operations';
   import { createOrganizer } from './lib/llm';
   import { defaultSha1Hex } from './lib/livesync';
+  import { createAutosaver } from './lib/autosave';
   import { DEFAULT_SETTINGS, type Settings } from './lib/types';
 
   let settings: Settings = { ...DEFAULT_SETTINGS };
@@ -13,37 +14,94 @@
   let view: 'capture' | 'config' = 'capture';
   let busy = false;
 
+  // The in-flight capture review session: holds the captured Dump, the initial
+  // Organize preview (held while Context is added), and the new-vs-append match.
+  let session: CaptureSession | null = null;
+  let context = '';
+
+  // 5s inactivity → finalize; close → flush. saveAndFinalize always resolves
+  // (it catches its own errors), so the autosaver's run never rejects.
+  const autosaver = createAutosaver({ save: saveAndFinalize });
+  let onBeforeUnload: (() => void) | null = null;
+
+  // The store + hash deps shared by every operation call. Built per call so a
+  // settings change between capture and save is picked up.
+  function storeDeps() {
+    return { db: createRemoteDb(settings), settings, hash: defaultSha1Hex };
+  }
+
   onMount(async () => {
     settings = await loadSettings();
+    // beforeunload can't await promises, so flush is best-effort: the Dump was
+    // already persisted at capture, so if the close-time save doesn't land the
+    // Note is generated from the surviving Dump later (the save-failure path).
+    onBeforeUnload = () => {
+      if (session && !session.saved) void autosaver.flush();
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+  });
+
+  onDestroy(() => {
+    if (onBeforeUnload) window.removeEventListener('beforeunload', onBeforeUnload);
+    if (session && !session.saved) void autosaver.flush();
   });
 
   async function captureDump() {
     busy = true;
     status = '';
     try {
-      const db = createRemoteDb(settings);
-      const hash = defaultSha1Hex;
-      const captured = await capture(text, {
-        db,
-        settings,
+      session = await beginCapture(text, {
+        ...storeDeps(),
+        organizer: createOrganizer(settings),
         now: () => Date.now(),
         newId: () => crypto.randomUUID(),
-        hash,
       });
-      // Initial Organize: turn the Dump into a Note in the managed folder.
-      const organized = await organizeDump(captured.dump, {
-        db,
-        settings,
-        organizer: createOrganizer(settings),
-        hash,
-      });
-      status = `Captured dump to ${captured.path}; Note at ${organized.path}`;
+      context = '';
       text = '';
+      // Arm the 5s inactivity timer at capture, so a Dump with no added Context
+      // still finalizes on its own.
+      autosaver.schedule();
+      status = `Captured. Preview: "${session.preview.title}" — ${matchLabel(session)}`;
     } catch (e) {
       status = `Error: ${(e as Error).message}`;
     } finally {
       busy = false;
     }
+  }
+
+  // Each Context edit rewrites the Dump (original preserved) and reschedules the 5s
+  // inactivity timer. The preview is held — no re-organize per keystroke.
+  async function onContextInput() {
+    if (!session || session.saved) return;
+    try {
+      session = await addContext(session, context, storeDeps());
+      autosaver.schedule();
+    } catch (e) {
+      status = `Error: ${(e as Error).message}`;
+    }
+  }
+
+  async function saveAndFinalize() {
+    if (!session || session.saved) return;
+    try {
+      const result = await finalizeCapture(session, {
+        ...storeDeps(),
+        organizer: createOrganizer(settings),
+      });
+      session = result.session;
+      if (result.ok) {
+        status = `Saved Note: ${result.note.title}`;
+      } else {
+        // The Dump persists; the Note will be generated from it later.
+        status = `Save failed — Dump kept: ${result.error.message}`;
+      }
+    } catch (e) {
+      status = `Error: ${(e as Error).message}`;
+    }
+  }
+
+  function matchLabel(s: CaptureSession): string {
+    return s.match.kind === 'new' ? 'new Note' : 'append to existing';
   }
 
   async function saveConfig() {
@@ -59,11 +117,37 @@
   </nav>
 
   {#if view === 'capture'}
-    <textarea
-      bind:value={text}
-      placeholder="Dump a thought..."
-      disabled={busy}></textarea>
-    <button on:click={captureDump} disabled={busy || !text.trim()}>Capture</button>
+    {#if !session}
+      <textarea
+        bind:value={text}
+        placeholder="Dump a thought..."
+        disabled={busy}></textarea>
+      <button on:click={captureDump} disabled={busy || !text.trim()}>Capture</button>
+    {:else}
+      <!-- Note preview (the initial Organize) shown alongside the match decision -->
+      <section class="preview">
+        <h2>{session.preview.title}</h2>
+        <p class="match">{session.match.kind === 'new' ? 'New Note' : 'Append to existing'}</p>
+        <p class="summary">{session.preview.summary}</p>
+        {#if session.preview.keyPoints.length}
+          <ul>{#each session.preview.keyPoints as p}<li>{p}</li>{/each}</ul>
+        {/if}
+        {#if session.preview.tags.length}
+          <p class="tags">{#each session.preview.tags as t}<span>{t}</span>{/each}</p>
+        {/if}
+      </section>
+
+      <label class="context">
+        Add Context (preserves your original; saved after 5s idle or on close)
+        <textarea bind:value={context} on:input={onContextInput} disabled={session.saved}></textarea>
+      </label>
+
+      {#if session.saved}
+        <p class="saved">Saved — Dump frozen.</p>
+      {/if}
+      <button on:click={() => autosaver.flush()} disabled={session.saved}>Save now</button>
+      <button on:click={() => { session = null; autosaver.cancel(); }}>New capture</button>
+    {/if}
   {:else}
     <label>CouchDB URL <input bind:value={settings.couchdbUrl} placeholder="http://localhost:5984" /></label>
     <label>Database <input bind:value={settings.couchdbDb} placeholder="obsidiannotes" /></label>

@@ -2,10 +2,13 @@
 
 export type Modality = 'text' | 'voice';
 
-/** A raw, immutable record of a single brain-dump. */
+/** A raw record of a single brain-dump. During the capture session the user may
+ *  add Context, which edits the Dump while preserving the verbatim original inside
+ *  it (`content`). Once the Note is saved the Dump is frozen and never changes. */
 export interface Dump {
   id: string;
-  content: string; // verbatim capture
+  content: string; // verbatim capture — the original, preserved inside the Dump
+  context: string; // added Context during the review session; '' until added
   createdAt: number; // ms epoch
   modality: Modality;
 }
