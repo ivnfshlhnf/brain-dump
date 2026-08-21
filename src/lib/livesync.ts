@@ -58,9 +58,21 @@ export async function writeFile(
     type: 'plain',
     eden: {},
   };
-  await db.put(metadataDoc);
+  await putMetadata(db, metadataDoc);
 
   return { metadataId, chunkId };
+}
+
+/** Upsert a metadata doc: on a 409 (the path already exists, e.g. adding Context
+ *  rewrites the Dump), re-fetch its `_rev` and retry. Fresh writes hit the fast path. */
+async function putMetadata(db: DocStore, doc: Record<string, unknown>): Promise<void> {
+  try {
+    await db.put(doc);
+  } catch (e) {
+    if (!isConflict(e)) throw e;
+    const existing = await db.get<{ _rev: string }>(doc._id as string);
+    await db.put({ ...doc, _rev: existing._rev });
+  }
 }
 
 function isConflict(e: unknown): boolean {
