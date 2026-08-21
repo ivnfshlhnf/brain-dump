@@ -5,7 +5,7 @@
 // `llmProvider` holds the provider's base URL (e.g. an Ollama-compatible host).
 // Uses Ollama's /api/chat with `format: 'json'` so the model returns strict JSON
 // we can map onto OrganizeOutput. Provider/model/key are confirmed at config time.
-import type { Modality, Organizer, OrganizeOutput, Settings } from './types';
+import type { Modality, Organizer, OrganizeOutput, Settings, Matcher, NoteCandidate, MatchSuggestion } from './types';
 
 export function createOrganizer(settings: Settings): Organizer {
   return {
@@ -14,6 +14,52 @@ export function createOrganizer(settings: Settings): Organizer {
       return parseOrganizeOutput(reply);
     },
   };
+}
+
+export function createMatcher(settings: Settings): Matcher {
+  return {
+    async match(topic, candidates): Promise<MatchSuggestion> {
+      // No candidates → no match to suggest. (The operation layer also guards this,
+      // but keeping the LLM call out of the empty case avoids a wasted round-trip.)
+      if (candidates.length === 0) return { kind: 'new' };
+      const reply = await chat(settings, buildMatchPrompt(topic, candidates));
+      return parseMatchSuggestion(reply, candidates);
+    },
+  };
+}
+
+function buildMatchPrompt(
+  topic: { title: string; tags: string[]; summary: string },
+  candidates: NoteCandidate[],
+): string {
+  const listing = candidates
+    .map((c, i) => `${i}: ${c.path}\n   title: ${c.title}\n   tags: [${c.tags.join(', ')}]\n   summary: ${c.summary}`)
+    .join('\n\n');
+  return [
+    'You match a new brain-dump against existing Notes by tags and topic. Reply ONLY with a JSON',
+    'object — no prose, no markdown fences — with exactly these fields:',
+    '- kind: "append" if one existing Note is clearly the same topic, else "new"',
+    '- index: the number of the matching Note from the list below, or -1 for "new"',
+    'Prefer "new" when in doubt; only "append" for a clear same-topic match.',
+    `The new dump: title="${topic.title}" tags=[${topic.tags.join(', ')}] summary="${topic.summary}"`,
+    'Existing Notes:',
+    listing,
+  ].join('\n');
+}
+
+/** Parse the model's match reply onto a MatchSuggestion, validating the chosen
+ *  index against the candidate list — a bad/out-of-range index falls back to "new". */
+function parseMatchSuggestion(raw: string, candidates: NoteCandidate[]): MatchSuggestion {
+  const json = JSON.parse(stripFences(raw)) as { kind?: string; index?: unknown };
+  const idx = num(json.index);
+  if (json.kind === 'append' && idx >= 0 && idx < candidates.length) {
+    return { kind: 'append', path: candidates[idx].path };
+  }
+  return { kind: 'new' };
+}
+
+function num(v: unknown): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : -1;
 }
 
 function buildOrganizePrompt(content: string, modality: Modality): string {

@@ -2,8 +2,8 @@
   import { onMount, onDestroy } from 'svelte';
   import { loadSettings, saveSettings } from './lib/settings';
   import { createRemoteDb } from './lib/db';
-  import { beginCapture, addContext, finalizeCapture, type CaptureSession } from './lib/operations';
-  import { createOrganizer } from './lib/llm';
+  import { beginCapture, addContext, finalizeCapture, refreshNoteMetadata, type CaptureSession } from './lib/operations';
+  import { createOrganizer, createMatcher } from './lib/llm';
   import { defaultSha1Hex } from './lib/livesync';
   import { createAutosaver } from './lib/autosave';
   import { DEFAULT_SETTINGS, type Settings } from './lib/types';
@@ -18,6 +18,13 @@
   // Organize preview (held while Context is added), and the new-vs-append match.
   let session: CaptureSession | null = null;
   let context = '';
+  // The vault path of the last saved Note — used by the explicit Refresh metadata action.
+  let savedNotePath: string | null = null;
+  // Append requires explicit user confirmation (spec: "the user confirms … with one
+  // action"). The 5s autosave may finalize a 'new' decision on its own, but an 'append'
+  // decision is held until the user taps Append — so the autosave no-ops an
+  // unconfirmed append rather than silently appending.
+  let appendConfirmed = false;
 
   // 5s inactivity → finalize; close → flush. saveAndFinalize always resolves
   // (it catches its own errors), so the autosaver's run never rejects.
@@ -53,13 +60,17 @@
       session = await beginCapture(text, {
         ...storeDeps(),
         organizer: createOrganizer(settings),
+        matcher: createMatcher(settings),
         now: () => Date.now(),
         newId: () => crypto.randomUUID(),
       });
       context = '';
       text = '';
+      savedNotePath = null;
+      appendConfirmed = false;
       // Arm the 5s inactivity timer at capture, so a Dump with no added Context
-      // still finalizes on its own.
+      // still finalizes on its own. For an 'append' match the autosave no-ops until
+      // the user confirms (see saveAndFinalize) — the Dump's Context is still saved.
       autosaver.schedule();
       status = `Captured. Preview: "${session.preview.title}" — ${matchLabel(session)}`;
     } catch (e) {
@@ -83,14 +94,24 @@
 
   async function saveAndFinalize() {
     if (!session || session.saved) return;
+    // An 'append' decision is held until the user confirms it (one tap on Append).
+    // The autosave may fire on its own for a 'new' decision, but never appends
+    // unconfirmed — the Dump's Context is already persisted, so the Note append
+    // simply waits for the user.
+    if (session.match.kind === 'append' && !appendConfirmed) return;
     try {
       const result = await finalizeCapture(session, {
         ...storeDeps(),
         organizer: createOrganizer(settings),
+        now: () => Date.now(),
       });
       session = result.session;
       if (result.ok) {
-        status = `Saved Note: ${result.note.title}`;
+        savedNotePath = result.written.path;
+        status =
+          session.match.kind === 'append'
+            ? `Appended to: ${session.match.suggestion?.title ?? result.note.title}`
+            : `Saved Note: ${result.note.title}`;
       } else {
         // The Dump persists; the Note will be generated from it later.
         status = `Save failed — Dump kept: ${result.error.message}`;
@@ -100,8 +121,48 @@
     }
   }
 
+  // The one-tap confirm for an append suggestion: mark confirmed, then finalize now.
+  async function confirmAppend() {
+    if (!session || session.saved) return;
+    appendConfirmed = true;
+    await autosaver.flush();
+  }
+
+  // Override the match decision to 'new' — the user declines the append suggestion
+  // and chooses to found a fresh Note instead. Reschedules the autosave.
+  function chooseNewNote() {
+    if (!session || session.saved) return;
+    session = { ...session, match: { kind: 'new' } };
+    appendConfirmed = false;
+    autosaver.schedule();
+    status = 'Will save as a new Note.';
+  }
+
+  // Explicit, user-triggered metadata refresh — re-derives title/tags/summary from
+  // the saved Note's body. Never automatic; the append itself never refreshes.
+  async function refreshMetadata() {
+    if (!savedNotePath) return;
+    busy = true;
+    try {
+      await refreshNoteMetadata(savedNotePath, {
+        db: createRemoteDb(settings),
+        settings,
+        organizer: createOrganizer(settings),
+        hash: defaultSha1Hex,
+        now: () => Date.now(),
+      });
+      status = `Refreshed metadata: ${savedNotePath}`;
+    } catch (e) {
+      status = `Refresh failed: ${(e as Error).message}`;
+    } finally {
+      busy = false;
+    }
+  }
+
   function matchLabel(s: CaptureSession): string {
-    return s.match.kind === 'new' ? 'new Note' : 'append to existing';
+    return s.match.kind === 'new'
+      ? 'new Note'
+      : `append to “${s.match.suggestion?.title ?? 'existing'}”`;
   }
 
   async function saveConfig() {
@@ -127,7 +188,13 @@
       <!-- Note preview (the initial Organize) shown alongside the match decision -->
       <section class="preview">
         <h2>{session.preview.title}</h2>
-        <p class="match">{session.match.kind === 'new' ? 'New Note' : 'Append to existing'}</p>
+        <p class="match">
+          {#if session.match.kind === 'append'}
+            Append to “{session.match.suggestion?.title}”
+          {:else}
+            New Note
+          {/if}
+        </p>
         <p class="summary">{session.preview.summary}</p>
         {#if session.preview.keyPoints.length}
           <ul>{#each session.preview.keyPoints as p}<li>{p}</li>{/each}</ul>
@@ -136,6 +203,14 @@
           <p class="tags">{#each session.preview.tags as t}<span>{t}</span>{/each}</p>
         {/if}
       </section>
+
+      {#if session.match.kind === 'append' && !session.saved}
+        <!-- Confirm new-vs-append with one action: keep the append, or override to a new Note -->
+        <div class="confirm">
+          <button class="primary" on:click={confirmAppend}>Append</button>
+          <button on:click={chooseNewNote}>Save as new Note</button>
+        </div>
+      {/if}
 
       <label class="context">
         Add Context (preserves your original; saved after 5s idle or on close)
@@ -146,6 +221,10 @@
         <p class="saved">Saved — Dump frozen.</p>
       {/if}
       <button on:click={() => autosaver.flush()} disabled={session.saved}>Save now</button>
+      {#if session.saved && savedNotePath}
+        <!-- Explicit metadata refresh — never automatic -->
+        <button on:click={refreshMetadata} disabled={busy}>Refresh metadata</button>
+      {/if}
       <button on:click={() => { session = null; autosaver.cancel(); }}>New capture</button>
     {/if}
   {:else}

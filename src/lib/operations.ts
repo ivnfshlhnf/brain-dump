@@ -1,6 +1,6 @@
 // The operation layer — the seam the UI calls and the unit under test (Seam A).
-import type { DocStore, Dump, Note, Organizer, Settings } from './types';
-import { writeFile } from './livesync';
+import type { DocStore, Dump, Modality, Note, NoteCandidate, Organizer, Matcher, Settings } from './types';
+import { writeFile, modifyFile } from './livesync';
 
 /** The `## Context` block appended after the verbatim original, when Context exists. */
 function contextBlock(ctx: string): string {
@@ -171,8 +171,11 @@ export function sourceWikilink(dump: Dump, settings: Settings): string {
   return `[[${settings.dumpsFolder}/${basename}]]`;
 }
 
-/** Note file: v1 frontmatter schema + cleaned body + Summary/Key points/Related sections. */
-export function noteFileContent(note: Note): string {
+/** The v1 frontmatter block (the `---`-fenced schema), with the blank-line separator
+ *  that precedes the body. Shared by Note creation and the explicit metadata refresh. */
+export function noteFrontmatter(
+  note: Pick<Note, 'title' | 'tags' | 'createdAt' | 'modality' | 'source' | 'category' | 'summary'>,
+): string {
   return `---
 title: ${note.title}
 tags: [${note.tags.join(', ')}]
@@ -183,7 +186,12 @@ category: ${note.category}
 summary: ${note.summary}
 ---
 
-${note.body}
+`;
+}
+
+/** Note file: v1 frontmatter schema + cleaned body + Summary/Key points/Related sections. */
+export function noteFileContent(note: Note): string {
+  return `${noteFrontmatter(note)}${note.body}
 
 ## Summary
 
@@ -209,7 +217,7 @@ ${note.related.map((r) => `- ${r}`).join('\n')}
  *  decides 'new'; ticket 04 adds 'append' with the suggested existing Note. */
 export interface MatchDecision {
   kind: 'new' | 'append';
-  note?: Note; // the suggested existing Note when 'append'
+  suggestion?: NoteCandidate; // the suggested existing Note when 'append'
 }
 
 /** An in-flight capture review session: the captured Dump, the initial Organize
@@ -221,9 +229,10 @@ export interface CaptureSession {
   saved: boolean; // true once the Note has been written and the Dump frozen
 }
 
-/** Deps to begin a capture review session (capture's deps plus the Organizer). */
+/** Deps to begin a capture review session (capture's deps plus the Organizer and Matcher). */
 export interface BeginCaptureDeps extends CaptureDeps {
   organizer: Organizer;
+  matcher: Matcher;
 }
 
 /** Deps to add Context to a session's Dump (rewrite the Dump file). */
@@ -233,23 +242,27 @@ export interface ContextDeps {
   hash: (content: string) => Promise<string>;
 }
 
-/** Deps to finalize a session (final Organize + write the Note). */
+/** Deps to finalize a session (final Organize + write/append the Note). `now` stamps
+ *  the appended section and the file mtime on the append path. */
 export interface FinalizeDeps {
   db: DocStore;
   settings: Settings;
   organizer: Organizer;
   hash: (content: string) => Promise<string>;
+  now: () => number;
 }
 
 /** Begin a capture review session: save the verbatim Dump immediately, run the
- *  initial Organize for the preview, and return the new-vs-append decision. */
+ *  initial Organize for the preview, and match it (LLM-assisted, by tags/topic)
+ *  against the existing Notes to offer new-vs-append. */
 export async function beginCapture(
   text: string,
   deps: BeginCaptureDeps,
 ): Promise<CaptureSession> {
   const { dump } = await capture(text, deps);
   const preview = await organizeNote(dump, deps.organizer, deps.settings);
-  return { dump, preview, match: { kind: 'new' }, saved: false };
+  const match = await matchNote(preview, deps.db, deps.settings, deps.matcher);
+  return { dump, preview, match, saved: false };
 }
 
 /** Add Context to the Dump: rewrites the Dump file preserving the verbatim original
@@ -278,9 +291,10 @@ export type FinalizeResult =
   | { ok: false; note: Note; session: CaptureSession; error: Error };
 
 /** Finalize a capture: run the final Organize over the full Dump (original +
- *  Context), write the Note, and freeze the Dump. If the final save fails, the
- *  Dump persists (Context already written) and the Note is generated from it
- *  later — the session stays unsaved so the user can retry. */
+ *  Context), then either found a new Note or append a dated section to the matched
+ *  existing Note, and freeze the Dump. If the final save fails, the Dump persists
+ *  (Context already written) and the Note is generated from it later — the session
+ *  stays unsaved so the user can retry. */
 export async function finalizeCapture(
   session: CaptureSession,
   deps: FinalizeDeps,
@@ -289,9 +303,211 @@ export async function finalizeCapture(
 
   const note = await organizeNote(session.dump, deps.organizer, deps.settings);
   try {
-    const written = await writeNote(note, deps.db, deps.settings, deps.hash);
+    const written =
+      session.match.kind === 'append' && session.match.suggestion
+        ? await appendDumpToNote(note, session.match.suggestion.path, deps)
+        : await writeNote(note, deps.db, deps.settings, deps.hash);
     return { ok: true, note, written, session: { ...session, saved: true } };
   } catch (error) {
     return { ok: false, note, error: error as Error, session: { ...session, saved: false } };
   }
+}
+
+// --- Append a Dump to an existing Note (ticket 04) -----------------------
+// Matching is LLM-assisted (by tags/topic) against the existing Notes in the
+// managed folder; embedding-based matching is deferred until Retrieve (06).
+// Appending adds a new dated section to the Note body and never overwrites the
+// user's edits — writes use optimistic concurrency (write with the current `_rev`;
+// on a 409, re-fetch, re-apply the append, retry). Metadata refresh (re-deriving
+// title/tags/summary) is explicit and user-triggered, never automatic.
+
+/** The frontmatter fields parsed out of a Note file, in the v1 schema shape. */
+export interface ParsedFrontmatter {
+  title: string;
+  tags: string[];
+  summary: string;
+  category: string;
+  created: number;
+  modality: Modality;
+  source: string;
+}
+
+/** Split a Note file into its frontmatter block, the raw fields, and the body that
+ *  follows. The body is returned verbatim (preserving any user edits). */
+export function splitFrontmatter(content: string): {
+  frontmatter: string;
+  body: string;
+  fields: Record<string, string>;
+} {
+  const m = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  if (!m) return { frontmatter: '', body: content, fields: {} };
+  const fields: Record<string, string> = {};
+  for (const line of m[1].split(/\r?\n/)) {
+    const i = line.indexOf(':');
+    if (i < 0) continue;
+    fields[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  return { frontmatter: m[0], body: content.slice(m[0].length), fields };
+}
+
+/** Parse the v1 frontmatter out of a Note file. `tags: [a, b]` is split into an
+ *  array; everything else is a scalar. Tolerant of a missing frontmatter block. */
+export function parseFrontmatter(content: string): ParsedFrontmatter {
+  const { fields } = splitFrontmatter(content);
+  const tagsRaw = (fields.tags ?? '').trim();
+  const tags = tagsRaw
+    .replace(/^\[|\]$/g, '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return {
+    title: fields.title ?? '',
+    tags,
+    summary: fields.summary ?? '',
+    category: fields.category ?? '',
+    created: Number(fields.created ?? 0),
+    modality: fields.modality === 'voice' ? 'voice' : 'text',
+    source: fields.source ?? '',
+  };
+}
+
+/** Read the existing Notes in the managed folder as match candidates — a projection
+ *  (path/title/tags/summary) enough to judge tags/topic overlap. The `path`
+ *  (original-case, from the metadata doc) identifies the Note for the append.
+ *  Each Note's chunk is fetched (a full-vault read, per ADR-0002); the body is
+ *  discarded after parsing the frontmatter. */
+export async function readNoteCandidates(
+  db: DocStore,
+  settings: Settings,
+): Promise<NoteCandidate[]> {
+  const all = await db.allDocs<{ path?: string; type?: string; children?: string[] }>({
+    include_docs: true,
+  });
+  const candidates: NoteCandidate[] = [];
+  for (const row of all.rows) {
+    const doc = row.doc;
+    if (!doc || doc.type !== 'plain' || typeof doc.path !== 'string') continue;
+    if (!doc.path.startsWith(`${settings.managedFolder}/`)) continue;
+    const chunkId = doc.children?.[0];
+    if (!chunkId) continue;
+    const chunk = await db.get<{ data: string }>(chunkId);
+    const fm = parseFrontmatter(chunk.data);
+    candidates.push({ path: doc.path, title: fm.title, tags: fm.tags, summary: fm.summary });
+  }
+  return candidates;
+}
+
+/** Match a new Dump's preview against the existing Notes: LLM-assisted, by
+ *  tags/topic. With no existing Notes the decision is 'new' (no matcher call).
+ *  A suggestion whose path is no longer a known candidate falls back to 'new'. */
+export async function matchNote(
+  preview: Note,
+  db: DocStore,
+  settings: Settings,
+  matcher: Matcher,
+): Promise<MatchDecision> {
+  const candidates = await readNoteCandidates(db, settings);
+  if (candidates.length === 0) return { kind: 'new' };
+  const suggestion = await matcher.match(
+    { title: preview.title, tags: preview.tags, summary: preview.summary },
+    candidates,
+  );
+  if (suggestion.kind === 'new') return { kind: 'new' };
+  const candidate = candidates.find((c) => c.path === suggestion.path);
+  return candidate ? { kind: 'append', suggestion: candidate } : { kind: 'new' };
+}
+
+/** `<YYYY-MM-DD> <HH:MM:SS> UTC` — the stamp on an appended section (UTC, like the
+ *  filenames, so it is deterministic across machines). */
+function formatStamp(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())} ${pad2(
+    d.getUTCHours(),
+  )}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())} UTC`;
+}
+
+/** A new dated section for the Note body: a timestamped heading, the organized
+ *  body of the appended Dump, and a traceability link back to the source Dump.
+ *
+ *  The stamp is the Dump's capture time (`note.createdAt`), not the moment of the
+ *  append: the section *is* the Dump, so it is dated by when the thought occurred —
+ *  the meaningful date for a journal-style entry. The append action's time is
+ *  recorded as the file's `mtime` instead. */
+export function datedSection(note: Note): string {
+  return `## Appended ${formatStamp(note.createdAt)}\n\n${note.body.trim()}\n\n_Source: ${note.source}_`;
+}
+
+export interface AppendDeps {
+  db: DocStore;
+  settings: Settings;
+  hash: (content: string) => Promise<string>;
+  now: () => number;
+}
+
+/** Append a Dump's organized content to an existing Note as a new dated section.
+ *  Optimistic concurrency: writes with the current `_rev`; on a 409, re-fetches the
+ *  fresh Note content and re-applies the append, so a concurrent edit survives. The
+ *  frontmatter (title/tags/summary) is untouched — metadata refresh is explicit. */
+export async function appendDumpToNote(
+  note: Note,
+  notePath: string,
+  deps: AppendDeps,
+): Promise<WriteResult> {
+  const section = datedSection(note);
+  const { metadataId, chunkId } = await modifyFile(
+    deps.db,
+    notePath,
+    (current) => `${current.trimEnd()}\n\n${section}\n`,
+    { mtime: deps.now(), hash: deps.hash, settings: deps.settings },
+  );
+  return { path: notePath, metadataId, chunkId };
+}
+
+export interface RefreshDeps {
+  db: DocStore;
+  settings: Settings;
+  organizer: Organizer;
+  hash: (content: string) => Promise<string>;
+  now: () => number;
+}
+
+/** Explicit, user-triggered metadata refresh: re-organize the Note's full body and
+ *  re-derive the frontmatter (title/tags/category/summary) from it, preserving the
+ *  body byte-for-byte. Never called automatically — the append never refreshes.
+ *
+ *  The Organize runs once per user action: the re-derived frontmatter is computed on
+ *  the first attempt and cached, then re-applied to the (possibly fresher) body on
+ *  each 409 retry. A concurrent body edit therefore survives (the body is preserved);
+ *  only the derived metadata may be one revision stale, which is acceptable for an
+ *  explicit, best-effort refresh. */
+export async function refreshNoteMetadata(
+  notePath: string,
+  deps: RefreshDeps,
+): Promise<WriteResult> {
+  let frontmatter: string | null = null; // re-derived once, reused across 409 retries
+  const { metadataId, chunkId } = await modifyFile(
+    deps.db,
+    notePath,
+    async (current) => {
+      if (frontmatter === null) {
+        const fm = parseFrontmatter(current);
+        const { body } = splitFrontmatter(current);
+        const out = await deps.organizer.organize(body, fm.modality);
+        frontmatter = noteFrontmatter({
+          title: out.title,
+          tags: out.tags,
+          createdAt: fm.created,
+          modality: fm.modality,
+          source: fm.source,
+          category: out.category,
+          summary: out.summary,
+        });
+      }
+      // Re-apply the once-derived frontmatter to the freshest body (preserved verbatim).
+      const { body } = splitFrontmatter(current);
+      return `${frontmatter}${body}`;
+    },
+    { mtime: deps.now(), hash: deps.hash, settings: deps.settings },
+  );
+  return { path: notePath, metadataId, chunkId };
 }

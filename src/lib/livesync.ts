@@ -75,7 +75,58 @@ async function putMetadata(db: DocStore, doc: Record<string, unknown>): Promise<
   }
 }
 
+/** A 409 from CouchDB — either PouchDB's `status: 409` or its `name: 'conflict'`. */
 function isConflict(e: unknown): boolean {
   const err = e as { status?: number; name?: string };
   return err.status === 409 || err.name === 'conflict';
+}
+
+/** Modify an EXISTING file's content with optimistic concurrency (ticket 04). Reads
+ *  the current metadata doc + its chunk, applies `modify` to the current content,
+ *  and writes a new content-addressed chunk plus the metadata doc carrying the known
+ *  `_rev`. On a 409 (a concurrent edit landed between our read and write), re-fetches
+ *  the fresh metadata + fresh content and re-applies `modify` to that — so the user's
+ *  concurrent edits are preserved, not clobbered. Throws after `maxAttempts` retries.
+ *
+ *  Unlike `writeFile` (which creates a fresh file and upserts on conflict), this is a
+ *  read-modify-write: the file must already exist, and the transform is re-applied to
+ *  the freshest content on each retry. */
+export async function modifyFile(
+  db: DocStore,
+  path: string,
+  modify: (current: string) => string | Promise<string>,
+  opts: { mtime: number; hash: HashFn; settings: Settings; maxAttempts?: number },
+): Promise<WrittenDoc> {
+  const metadataId = docIdForPath(path, opts.settings);
+  const maxAttempts = opts.maxAttempts ?? 5;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // Read the current metadata doc (carries _rev) + its chunk (carries the content).
+    const meta = await db.get<
+      Record<string, unknown> & { _rev: string; children: string[] }
+    >(metadataId);
+    const chunk = await db.get<{ data: string }>(meta.children[0]);
+
+    // Re-apply the transform to the freshest content — preserves concurrent edits.
+    const newContent = await modify(chunk.data);
+    const newChunkId = 'h:' + (await opts.hash(newContent));
+
+    // Content-addressed chunk: an identical chunk already existing is dedup — keep it.
+    try {
+      await db.put({ _id: newChunkId, type: 'leaf', data: newContent });
+    } catch (e) {
+      if (!isConflict(e)) throw e;
+    }
+
+    // Write the metadata doc with the _rev we read. A 409 here means a concurrent
+    // edit landed: loop, re-fetch fresh content, and re-apply the transform.
+    try {
+      await db.put({ ...meta, children: [newChunkId], mtime: opts.mtime, size: newContent.length });
+      return { metadataId, chunkId: newChunkId };
+    } catch (e) {
+      if (!isConflict(e)) throw e;
+    }
+  }
+
+  throw new Error(`modifyFile: exceeded ${maxAttempts} conflict retries for ${path}`);
 }

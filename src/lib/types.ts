@@ -46,6 +46,31 @@ export interface Organizer {
   organize(content: string, modality: Modality): Promise<OrganizeOutput>;
 }
 
+/** A lightweight projection of an existing Note used for matching — path, title,
+ *  tags, summary (enough to judge tags/topic overlap). The `path` is the vault-relative
+ *  path and identifies the Note. Reading candidates does fetch each Note's chunk (a
+ *  full-vault read, per ADR-0002); this projection discards the body. */
+export interface NoteCandidate {
+  path: string; // vault-relative path — identifies the existing Note
+  title: string;
+  tags: string[];
+  summary: string;
+}
+
+/** The LLM's raw new-vs-append suggestion. `append` carries the candidate `path`;
+ *  the operation layer validates the path is still a known candidate before trusting it. */
+export type MatchSuggestion = { kind: 'new' } | { kind: 'append'; path: string };
+
+/** The LLM-assisted matching seam. Given the new Dump's topic (the initial Organize
+ *  preview's title/tags/summary) and the existing Note candidates, decide new vs
+ *  append. Embedding-based matching is deferred until Retrieve (06) lands. */
+export interface Matcher {
+  match(
+    topic: { title: string; tags: string[]; summary: string },
+    candidates: NoteCandidate[],
+  ): Promise<MatchSuggestion>;
+}
+
 /** A minimal read/write interface over the LiveSync CouchDB store.
  *  Satisfied by a PouchDB instance (http adapter in the app, memory adapter in tests). */
 export interface DocStore {

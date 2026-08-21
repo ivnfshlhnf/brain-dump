@@ -9,9 +9,13 @@ import memory from 'pouchdb-adapter-memory';
 import { beginCapture, addContext, finalizeCapture, type CaptureSession } from '../src/lib/operations';
 import { createAutosaver, AUTOSAVE_DELAY_MS } from '../src/lib/autosave';
 import { docIdForPath } from '../src/lib/livesync';
-import { DEFAULT_SETTINGS, type Settings, type DocStore, type Organizer, type OrganizeOutput } from '../src/lib/types';
+import { DEFAULT_SETTINGS, type Settings, type DocStore, type Organizer, type OrganizeOutput, type Matcher } from '../src/lib/types';
 
 PouchDB.plugin(memory);
+
+// Ticket 04: beginCapture matches the preview against existing Notes. The
+// autosave flow writes a new Note, so it passes a matcher that always suggests new.
+const newOnlyMatcher: Matcher = { match: async () => ({ kind: 'new' }) };
 
 function sha1Hex(c: string): Promise<string> {
   return Promise.resolve(createHash('sha1').update(c).digest('hex'));
@@ -45,8 +49,8 @@ beforeEach(() => {
   };
 });
 
-const beginDeps = () => ({ db, settings, organizer, now: () => fixedNow, newId: () => fixedId, hash: sha1Hex });
-const finalizeDeps = () => ({ db, settings, organizer, hash: sha1Hex });
+const beginDeps = () => ({ db, settings, organizer, matcher: newOnlyMatcher, now: () => fixedNow, newId: () => fixedId, hash: sha1Hex });
+const finalizeDeps = () => ({ db, settings, organizer, hash: sha1Hex, now: () => fixedNow });
 
 /** Whether the final Note has been written to the managed folder (observable outcome). */
 async function noteWritten(slug: string): Promise<boolean> {

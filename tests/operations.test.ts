@@ -14,9 +14,15 @@ import {
   type Organizer,
   type OrganizeOutput,
   type Modality,
+  type Matcher,
 } from '../src/lib/types';
 
 PouchDB.plugin(memory);
+
+// Ticket 04: beginCapture now matches the preview against existing Notes. The
+// ticket-03 flow expects a 'new' decision, so these tests pass a matcher that
+// always suggests new (the matching behaviour itself is covered in append.test.ts).
+const newOnlyMatcher: Matcher = { match: async () => ({ kind: 'new' }) };
 
 function sha1Hex(content: string): Promise<string> {
   return Promise.resolve(createHash('sha1').update(content).digest('hex'));
@@ -243,6 +249,7 @@ describe('capture review flow (Seam A — ticket 03)', () => {
     db,
     settings,
     organizer,
+    matcher: newOnlyMatcher,
     now: () => fixedNow,
     newId: () => id,
     hash: sha1Hex,
@@ -253,6 +260,7 @@ describe('capture review flow (Seam A — ticket 03)', () => {
     settings,
     organizer,
     hash: sha1Hex,
+    now: () => fixedNow,
   });
 
   async function dumpChunk(session: { dump: Dump }): Promise<{ data: string }> {
