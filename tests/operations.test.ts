@@ -36,7 +36,7 @@ beforeEach(() => {
 });
 
 describe('capture (Seam A)', () => {
-  it('saves a verbatim Dump to _dumps/ as a metadata doc + a content-addressed chunk doc', async () => {
+  it('captures a verbatim Dump to _dumps/ as a metadata doc + a content-addressed chunk doc', async () => {
     const result = await capture('I keep forgetting to water the plants', depsWithId(fixedId));
 
     expect(result.path.startsWith('_dumps/')).toBe(true);

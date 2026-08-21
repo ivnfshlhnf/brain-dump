@@ -16,7 +16,7 @@
     settings = await loadSettings();
   });
 
-  async function saveDump() {
+  async function captureDump() {
     busy = true;
     status = '';
     try {
@@ -28,7 +28,7 @@
         hash: defaultSha1Hex,
       };
       const result = await capture(text, deps);
-      status = `Saved dump to ${result.path}`;
+      status = `Captured dump to ${result.path}`;
       text = '';
     } catch (e) {
       status = `Error: ${(e as Error).message}`;
@@ -54,22 +54,14 @@
       bind:value={text}
       placeholder="Dump a thought..."
       disabled={busy}></textarea>
-    <button on:click={saveDump} disabled={busy || !text.trim()}>Save</button>
+    <button on:click={captureDump} disabled={busy || !text.trim()}>Capture</button>
   {:else}
     <label>CouchDB URL <input bind:value={settings.couchdbUrl} placeholder="http://localhost:5984" /></label>
     <label>Database <input bind:value={settings.couchdbDb} placeholder="obsidiannotes" /></label>
     <label>Username <input bind:value={settings.couchdbUser} /></label>
     <label>Password <input type="password" bind:value={settings.couchdbPassword} /></label>
     <label>Managed folder <input bind:value={settings.managedFolder} /></label>
-    <label>Dumps folder <input bind:value={settings.dumpsFolder} /></label>
     <label>Case-sensitive <input type="checkbox" bind:checked={settings.caseSensitive} /></label>
-    <label>
-      Hash algorithm
-      <select bind:value={settings.hashAlgorithm}>
-        <option value="sha1">sha1</option>
-        <option value="xxhash">xxhash</option>
-      </select>
-    </label>
     <button on:click={saveConfig}>Save settings</button>
   {/if}
 
