@@ -71,6 +71,20 @@ export interface Matcher {
   ): Promise<MatchSuggestion>;
 }
 
+/** The offline queue seam: Dumps captured with no connection wait here until a
+ *  reconnect syncs them to CouchDB and Organizes them into Notes. A queued Dump is
+ *  a Dump — it carries the id and capture time assigned at capture, so once synced
+ *  it is dated by when the thought occurred, not by when the connection came back.
+ *  The operation layer depends on this interface; the app passes the durable
+ *  IndexedDB outbox (see `outbox.ts`). */
+export interface OutboxStore {
+  /** Queue a Dump, keyed by its id — re-adding the same Dump replaces it. */
+  add(dump: Dump): Promise<void>;
+  /** Queued Dumps in capture order (FIFO). */
+  list(): Promise<Dump[]>;
+  remove(id: string): Promise<void>;
+}
+
 /** A minimal read/write interface over the LiveSync CouchDB store.
  *  Satisfied by a PouchDB instance (http adapter in the app, memory adapter in tests). */
 export interface DocStore {

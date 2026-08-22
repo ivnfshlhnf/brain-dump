@@ -1,5 +1,15 @@
 // The operation layer — the seam the UI calls and the unit under test (Seam A).
-import type { DocStore, Dump, Modality, Note, NoteCandidate, Organizer, Matcher, Settings } from './types';
+import type {
+  DocStore,
+  Dump,
+  Modality,
+  Note,
+  NoteCandidate,
+  Organizer,
+  Matcher,
+  OutboxStore,
+  Settings,
+} from './types';
 import { writeFile, modifyFile } from './livesync';
 
 /** The `## Context` block appended after the verbatim original, when Context exists. */
@@ -13,6 +23,21 @@ function contextBlock(ctx: string): string {
 export function dumpText(dump: Dump): string {
   const ctx = dump.context.trim();
   return ctx ? `${dump.content}\n\n${contextBlock(ctx)}` : dump.content;
+}
+
+/** The store-side deps every write needs: where to write, how to name it, how to
+ *  hash its content. */
+export interface StoreDeps {
+  db: DocStore;
+  settings: Settings;
+  hash: (content: string) => Promise<string>;
+}
+
+/** The verbatim text of a Capture, rejecting an empty brain-dump. */
+function captureText(text: string): string {
+  const content = text.trim();
+  if (!content) throw new Error('Cannot capture an empty brain-dump.');
+  return content;
 }
 
 /** The vault-relative path plus the LiveSync doc ids written for one file. */
@@ -64,17 +89,23 @@ async function writeAt(
 
 /** Capture a text brain-dump: write a verbatim Dump to _dumps/ in LiveSync format. */
 export async function capture(text: string, deps: CaptureDeps): Promise<CaptureResult> {
-  const content = text.trim();
-  if (!content) throw new Error('Cannot capture an empty brain-dump.');
+  const content = captureText(text);
 
   const createdAt = deps.now();
   const id = deps.newId();
   const dump: Dump = { id, content, context: '', createdAt, modality: 'text' };
 
-  const path = `${deps.settings.dumpsFolder}/${dumpFilename(createdAt, id)}`;
-  const written = await writeAt(deps.db, path, dumpFileContent(dump), createdAt, deps);
+  const written = await writeDump(dump, deps);
 
   return { dump, ...written };
+}
+
+/** Write a Dump to the Dumps folder in LiveSync format. Idempotent for a given Dump:
+ *  the path is derived from its id and capture time, so re-writing the same Dump
+ *  (a Context edit, or a retried outbox sync) rewrites that one file. */
+export async function writeDump(dump: Dump, deps: StoreDeps): Promise<WriteResult> {
+  const path = `${deps.settings.dumpsFolder}/${dumpFilename(dump.createdAt, dump.id)}`;
+  return writeAt(deps.db, path, dumpFileContent(dump), dump.createdAt, deps);
 }
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -236,11 +267,7 @@ export interface BeginCaptureDeps extends CaptureDeps {
 }
 
 /** Deps to add Context to a session's Dump (rewrite the Dump file). */
-export interface ContextDeps {
-  db: DocStore;
-  settings: Settings;
-  hash: (content: string) => Promise<string>;
-}
+export type ContextDeps = StoreDeps;
 
 /** Deps to finalize a session (final Organize + write/append the Note). `now` stamps
  *  the appended section and the file mtime on the append path. */
@@ -280,8 +307,7 @@ export async function addContext(
   if (!ctx) return session; // no-op: empty Context does not edit the Dump
 
   const dump: Dump = { ...session.dump, context: ctx };
-  const path = `${deps.settings.dumpsFolder}/${dumpFilename(dump.createdAt, dump.id)}`;
-  await writeAt(deps.db, path, dumpFileContent(dump), dump.createdAt, deps);
+  await writeDump(dump, deps);
 
   return { ...session, dump };
 }
@@ -510,4 +536,128 @@ export async function refreshNoteMetadata(
     { mtime: deps.now(), hash: deps.hash, settings: deps.settings },
   );
   return { path: notePath, metadataId, chunkId };
+}
+
+// --- Offline outbox (ticket 05) ------------------------------------------
+// Organize is an online-time step: a Capture with no connection cannot produce a
+// preview, so the Dump is queued in the IndexedDB outbox and the user is told it is
+// saved and will be Organized on reconnect. On reconnect the queued Dumps sync to
+// CouchDB and are Organized into Notes without the user's involvement.
+//
+// Because an unattended drain has nobody to confirm an append with (the one-tap
+// new-vs-append confirm from ticket 04), a drained Dump always founds a new Note.
+
+/** What the user is told when a Capture is queued with no connection. */
+export const OFFLINE_CAPTURE_MESSAGE = 'saved, will organize when online';
+
+/** What the user is told when a Capture that started online failed and fell back to
+ *  the outbox. The user is not offline, so saying so would be a lie — the honest
+ *  promise is a retry. */
+export const CAPTURE_RETRY_MESSAGE = 'saved, will organize on the next retry';
+
+/** Why a Capture ended up in the outbox: there was no connection, or the online
+ *  attempt failed mid-flight. The distinction is the user's to see — it is the
+ *  difference between "you're offline" and "something went wrong". */
+export type QueuedReason = 'offline' | 'capture-failed';
+
+/** The result of a Capture that may have been offline: either a normal review
+ *  session (online — preview + match) or a queued Dump (no preview). */
+export type CaptureOutcome =
+  | { kind: 'session'; session: CaptureSession }
+  | { kind: 'queued'; dump: Dump; reason: QueuedReason; message: string; error?: Error };
+
+export interface OfflineCaptureDeps extends BeginCaptureDeps {
+  outbox: OutboxStore;
+  isOnline: () => boolean;
+}
+
+/** Capture a thought whether or not there is a connection.
+ *
+ *  Online, this is the normal review flow (`beginCapture`): Dump saved, initial
+ *  Organize, preview, new-vs-append match. Offline, the Dump is queued in the outbox
+ *  and no preview is produced.
+ *
+ *  The Dump is never lost: if the capture fails *after* `isOnline()` said yes (the
+ *  connection dropped, the LLM is down, the credentials are wrong), it falls back to
+ *  the outbox rather than surfacing an error with nothing saved. That outcome is
+ *  reported as `capture-failed`, not `offline`, and carries the underlying error —
+ *  the caller must not tell an online user they are offline. The queued Dump keeps
+ *  the id and capture time the failed attempt used, so a later drain rewrites that
+ *  same Dump file rather than creating a second one. */
+export async function captureOrQueue(
+  text: string,
+  deps: OfflineCaptureDeps,
+): Promise<CaptureOutcome> {
+  const content = captureText(text);
+  const dump: Dump = {
+    id: deps.newId(),
+    content,
+    context: '',
+    createdAt: deps.now(),
+    modality: 'text',
+  };
+
+  if (!deps.isOnline()) {
+    await deps.outbox.add(dump);
+    return { kind: 'queued', dump, reason: 'offline', message: OFFLINE_CAPTURE_MESSAGE };
+  }
+
+  // Pin the id and time the queued Dump already holds, so a fallback and its later
+  // drain address the same Dump file.
+  const pinned: BeginCaptureDeps = { ...deps, now: () => dump.createdAt, newId: () => dump.id };
+  try {
+    return { kind: 'session', session: await beginCapture(content, pinned) };
+  } catch (error) {
+    await deps.outbox.add(dump);
+    return {
+      kind: 'queued',
+      dump,
+      reason: 'capture-failed',
+      message: CAPTURE_RETRY_MESSAGE,
+      error: error as Error,
+    };
+  }
+}
+
+/** One queued Dump that reached the vault as a Note. */
+export interface DrainedDump {
+  dump: Dump;
+  note: Note;
+  dumpWrite: WriteResult;
+  noteWrite: WriteResult;
+}
+
+export interface DrainResult {
+  organized: DrainedDump[];
+  failed: Array<{ dump: Dump; error: Error }>;
+}
+
+export interface DrainDeps extends StoreDeps {
+  organizer: Organizer;
+  outbox: OutboxStore;
+  isOnline: () => boolean;
+}
+
+/** Drain the outbox on reconnect: sync each queued Dump to CouchDB and Organize it
+ *  into a Note, oldest capture first. A Dump is removed from the outbox only once its
+ *  Note has been written, so a failure mid-drain (the LLM is down, the connection
+ *  drops again) leaves it queued for the next attempt — it is never lost. Both steps
+ *  are idempotent for a given Dump: it is written at a path derived from its id and
+ *  capture time, so a retry rewrites the same file. */
+export async function drainOutbox(deps: DrainDeps): Promise<DrainResult> {
+  const result: DrainResult = { organized: [], failed: [] };
+  if (!deps.isOnline()) return result;
+
+  for (const dump of await deps.outbox.list()) {
+    try {
+      const dumpWrite = await writeDump(dump, deps);
+      const note = await organizeNote(dump, deps.organizer, deps.settings);
+      const noteWrite = await writeNote(note, deps.db, deps.settings, deps.hash);
+      await deps.outbox.remove(dump.id);
+      result.organized.push({ dump, note, dumpWrite, noteWrite });
+    } catch (error) {
+      result.failed.push({ dump, error: error as Error });
+    }
+  }
+  return result;
 }

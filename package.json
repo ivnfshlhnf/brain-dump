@@ -20,6 +20,7 @@
     "@sveltejs/vite-plugin-svelte": "^5.1.1",
     "@types/node": "^26.2.0",
     "@types/pouchdb-core": "^7.0.15",
+    "fake-indexeddb": "^6.2.5",
     "pouchdb-adapter-memory": "^9.0.0",
     "svelte": "^5.56.10",
     "svelte-check": "^4.7.6",

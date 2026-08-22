@@ -2,7 +2,15 @@
   import { onMount, onDestroy } from 'svelte';
   import { loadSettings, saveSettings } from './lib/settings';
   import { createRemoteDb } from './lib/db';
-  import { beginCapture, addContext, finalizeCapture, refreshNoteMetadata, type CaptureSession } from './lib/operations';
+  import {
+    captureOrQueue,
+    addContext,
+    finalizeCapture,
+    refreshNoteMetadata,
+    drainOutbox,
+    type CaptureSession,
+  } from './lib/operations';
+  import { createIndexedDbOutbox } from './lib/outbox';
   import { createOrganizer, createMatcher } from './lib/llm';
   import { defaultSha1Hex } from './lib/livesync';
   import { createAutosaver } from './lib/autosave';
@@ -25,11 +33,24 @@
   // decision is held until the user taps Append — so the autosave no-ops an
   // unconfirmed append rather than silently appending.
   let appendConfirmed = false;
+  // The durable offline queue. A Capture with no connection lands here and is
+  // Organized on reconnect; `queuedCount` keeps the user informed that it is safe.
+  const outbox = createIndexedDbOutbox();
+  let queuedCount = 0;
+  let queueError = '';
+  let draining = false;
+  // While Dumps are queued, retry on a timer as well as on the `online` event: a
+  // capture that failed while `navigator.onLine` was already true (a flaky
+  // connection, a captive portal, an LLM outage) never fires `online`, and the spec
+  // promises offline captures organize themselves without the user's intervention.
+  const RETRY_INTERVAL_MS = 60_000;
+  let retryTimer: ReturnType<typeof setInterval> | null = null;
 
   // 5s inactivity → finalize; close → flush. saveAndFinalize always resolves
   // (it catches its own errors), so the autosaver's run never rejects.
   const autosaver = createAutosaver({ save: saveAndFinalize });
   let onBeforeUnload: (() => void) | null = null;
+  let onOnline: (() => void) | null = null;
 
   // The store + hash deps shared by every operation call. Built per call so a
   // settings change between capture and save is picked up.
@@ -46,10 +67,19 @@
       if (session && !session.saved) void autosaver.flush();
     };
     window.addEventListener('beforeunload', onBeforeUnload);
+
+    // Reconnect drains the outbox automatically — offline Dumps become Notes with
+    // no user intervention. Also drained at startup, for a queue left by a past session.
+    onOnline = () => void drain();
+    window.addEventListener('online', onOnline);
+    await refreshQueueState();
+    if (navigator.onLine && queuedCount) void drain();
   });
 
   onDestroy(() => {
     if (onBeforeUnload) window.removeEventListener('beforeunload', onBeforeUnload);
+    if (onOnline) window.removeEventListener('online', onOnline);
+    stopRetrying();
     if (session && !session.saved) void autosaver.flush();
   });
 
@@ -57,13 +87,30 @@
     busy = true;
     status = '';
     try {
-      session = await beginCapture(text, {
+      const outcome = await captureOrQueue(text, {
         ...storeDeps(),
         organizer: createOrganizer(settings),
         matcher: createMatcher(settings),
+        outbox,
+        isOnline: () => navigator.onLine,
         now: () => Date.now(),
         newId: () => crypto.randomUUID(),
       });
+
+      // Queued: the Dump is safe, there is no preview, and no review session opens.
+      // A capture that failed while online says so — and names the error — rather
+      // than claiming the user is offline.
+      if (outcome.kind === 'queued') {
+        text = '';
+        await refreshQueueState();
+        status =
+          outcome.reason === 'offline'
+            ? `Captured — ${outcome.message}.`
+            : `Captured — ${outcome.message}. Capture failed: ${outcome.error?.message}`;
+        return;
+      }
+
+      session = outcome.session;
       context = '';
       text = '';
       savedNotePath = null;
@@ -159,6 +206,54 @@
     }
   }
 
+  // Read the queue and arm or disarm the retry timer to match it. A failure to read
+  // the outbox is surfaced, never swallowed to a reassuring zero — the banner exists
+  // to tell the user their Dumps are safe, so it must not hide that it can't tell.
+  async function refreshQueueState() {
+    try {
+      queuedCount = (await outbox.list()).length;
+      queueError = '';
+    } catch (e) {
+      queueError = `Could not read the offline queue: ${(e as Error).message}`;
+    }
+    if (queuedCount) startRetrying();
+    else stopRetrying();
+  }
+
+  function startRetrying() {
+    if (retryTimer) return;
+    retryTimer = setInterval(() => void drain(), RETRY_INTERVAL_MS);
+  }
+
+  function stopRetrying() {
+    if (!retryTimer) return;
+    clearInterval(retryTimer);
+    retryTimer = null;
+  }
+
+  // Sync the queued Dumps to CouchDB and Organize them into Notes. A Dump that
+  // fails (the LLM or the connection is still down) stays queued for the next drain.
+  async function drain() {
+    if (draining) return;
+    draining = true;
+    try {
+      const result = await drainOutbox({
+        ...storeDeps(),
+        organizer: createOrganizer(settings),
+        outbox,
+        isOnline: () => navigator.onLine,
+      });
+      await refreshQueueState();
+      if (result.organized.length) {
+        status = `Organized ${result.organized.length} queued Dump(s) into Notes.`;
+      } else if (result.failed.length) {
+        status = `${result.failed.length} queued Dump(s) still waiting: ${result.failed[0].error.message}`;
+      }
+    } finally {
+      draining = false;
+    }
+  }
+
   function matchLabel(s: CaptureSession): string {
     return s.match.kind === 'new'
       ? 'new Note'
@@ -178,6 +273,10 @@
   </nav>
 
   {#if view === 'capture'}
+    {#if queuedCount}
+      <p class="queued">{queuedCount} Dump(s) saved — they will be Organized when online.</p>
+    {/if}
+    {#if queueError}<p class="queued">{queueError}</p>{/if}
     {#if !session}
       <textarea
         bind:value={text}
