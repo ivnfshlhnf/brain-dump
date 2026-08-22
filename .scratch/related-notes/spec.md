@@ -245,9 +245,10 @@ to ship without a vector index, and retroactively removes Retrieve's known scali
   questions a day is around $9/month and grows linearly with the vault. The recurring cost is
   survivable — the latency is what makes the cache mandatory rather than merely nice.
 
-- **Unresolved before ticket 01 starts:** whether the CouchDB account can create a second
-  database. This is a build-time fact to confirm, not a design decision, but it selects
-  between the primary storage decision and its fallback.
+- **Resolved before ticket 01 starts:** whether the CouchDB account can create a second
+  database. Test connection was run against the real server on 2026-08-23 and confirmed it can,
+  so the sibling-database decision in ADR-0004 stands on evidence. The per-device fallback stays
+  documented as an alternative but should not be built speculatively.
 
 - **Domain vocabulary:** this spec uses the terms defined in `CONTEXT.md` (Dump, Note, Context,
   Organize, Append, Related, Retrieve, Capture, Modality). Implementation should use the same

@@ -82,12 +82,11 @@ uncached path, and ~8 KB per 1536-dimension vector versus ~20 KB as JSON floats.
 - **Degradation: a cache failure is never fatal.** A read or write error against the cache
   database is logged and falls through to embedding normally — the diagnostics log records
   it so a silently-disabled cache is visible rather than mysterious.
-- **Build-time check, now self-service:** the user's CouchDB account (`cemonk_couchdb`, not an
-  admin) may lack permission to create a database. The Config screen's **Test connection**
-  reports this directly — it creates and removes a throwaway database and says whether the
-  account may. Run it before starting this ticket. If creation is refused, the fallback is a
-  per-device cache behind the same wrapper interface, which costs one full embed per device
-  instead of one per vault.
+- **Build-time check: resolved.** Test connection was run against the real server on
+  2026-08-23 and reported that the account may create a database. Build the sibling-database
+  path; the per-device fallback is not needed here and should not be implemented speculatively.
+  Keep the failure path graceful — if the database cannot be reached or created at runtime, log
+  it and embed normally — but do not build a second storage backend on spec.
 
 ## Testing Decisions
 
