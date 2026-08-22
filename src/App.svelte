@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { loadSettings, saveSettings } from './lib/settings';
-  import { createRemoteDb, createDatabaseAdmin } from './lib/db';
+  import { createRemoteDb, createDatabaseAdmin, createEmbeddingsDb } from './lib/db';
   import {
     captureOrQueue,
     addContext,
@@ -17,6 +17,7 @@
   import { createAutosaver } from './lib/autosave';
   import { createLog, createDevFileSink, type Log, type LogEvent } from './lib/logger';
   import { checkConnections, type HealthReport, type CheckResult } from './lib/health';
+  import { createCachingEmbedder } from './lib/embedding-cache';
   import { DEFAULT_SETTINGS, type Settings, type Citation } from './lib/types';
 
   // Diagnostics. In dev the sink POSTs each event to the Vite middleware, which appends
@@ -292,7 +293,7 @@
     try {
       const result = await retrieve(question, {
         ...storeDeps(),
-        embedder: createEmbedder(settings, log),
+        embedder: cachedEmbedder(),
         answerer: createAnswerer(settings, log),
       });
       answer = result.answer;
@@ -320,6 +321,18 @@
       return `LLM provider must be http(s), not "${parsed.protocol}"`;
     }
     return null;
+  }
+
+  /** The cloud embedder behind the content-addressed cache (ADR-0004). With no embeddings
+   *  database configured the cache is skipped and the cloud embedder is used directly. */
+  function cachedEmbedder() {
+    return createCachingEmbedder({
+      inner: createEmbedder(settings, log),
+      store: settings.embeddingsDb.trim() ? createEmbeddingsDb(settings) : undefined,
+      settings,
+      hash: defaultSha1Hex,
+      log,
+    });
   }
 
   async function saveConfig() {
@@ -471,6 +484,7 @@
     <label>Username <input bind:value={settings.couchdbUser} /></label>
     <label>Password <input type="password" bind:value={settings.couchdbPassword} /></label>
     <label>Managed folder <input bind:value={settings.managedFolder} /></label>
+    <label>Embeddings database <input bind:value={settings.embeddingsDb} /></label>
     <label>Case-sensitive <input type="checkbox" bind:checked={settings.caseSensitive} /></label>
     <label>LLM provider <input bind:value={settings.llmProvider} /></label>
     <label>LLM model <input bind:value={settings.llmModel} /></label>

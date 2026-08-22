@@ -32,8 +32,10 @@ can add **Context**, which edits the Dump while preserving your verbatim origina
 → five seconds after you stop typing (or when you close the tab) the Note is re-organized
 from the full Dump, written, and the Dump is frozen.
 
-**Retrieve** takes a question, reads your entire vault, embeds it fresh, ranks the top 5
-documents, and asks the model to synthesize an answer citing them.
+**Retrieve** takes a question, reads your entire vault, ranks the top 5 documents by embedding
+similarity, and asks the model to synthesize an answer citing them. Embeddings are cached by
+content in the app's own CouchDB database, so each document is embedded once rather than once
+per question ([ADR-0004](./docs/adr/0004-embedding-cache-sibling-database.md)).
 
 **Offline**, a capture is queued in an IndexedDB outbox and shows "saved, will organize when
 online." On reconnect it syncs and Organizes automatically.
@@ -73,6 +75,7 @@ Open the app, go to **Config**, and fill in:
 | Database | The LiveSync database name |
 | Username / Password | CouchDB credentials |
 | Managed folder | Where Notes go. Default `Brain Dump` |
+| Embeddings database | The app's own CouchDB database for cached embeddings, beside your vault database — never inside it. Default `brain-dump-embeddings`. Leave blank to disable caching |
 | Case-sensitive | Must match LiveSync's "Handle files as Case-Sensitive" setting (its default is **off**) |
 | LLM provider | The **full** OpenAI-compatible base URL, including scheme and version path. Defaults to `https://openrouter.ai/api/v1`. A value without a scheme resolves against the app's own origin and every LLM call 404s |
 | LLM model | Must support `response_format: { type: 'json_object' }`. Defaults to `deepseek/deepseek-v4-flash` |
@@ -185,10 +188,6 @@ test — behavior lives there, not in the component.
 ## Known limitations
 
 - **Text only.** Voice capture and spoken answers are iteration 2.
-- **No persistent vector index yet.** Every Retrieve re-embeds the whole vault, so query cost
-  and latency grow with vault size. A content-addressed cache in a sibling CouchDB database is
-  specified in [ADR-0004](./docs/adr/0004-embedding-cache-sibling-database.md) and the
-  related-notes feature's ticket 01.
 - **A Note's `## Related` section is always empty.** The Organizer is only ever shown the
   Dump's own text, never the vault, so it cannot name a Note it has never seen. The
   related-notes feature's ticket 02 fixes this by ranking against the vault instead of

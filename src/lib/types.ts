@@ -156,6 +156,9 @@ export interface Settings {
   llmModel: string;
   llmApiKey: string;
   embedderModel: string;
+  /** The app-owned CouchDB database holding cached embeddings — a sibling of the vault
+   *  database, never the vault itself (ADR-0004). */
+  embeddingsDb: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -176,4 +179,5 @@ export const DEFAULT_SETTINGS: Settings = {
   llmModel: 'deepseek/deepseek-v4-flash',
   llmApiKey: '',
   embedderModel: 'openai/text-embedding-3-small',
+  embeddingsDb: 'brain-dump-embeddings',
 };

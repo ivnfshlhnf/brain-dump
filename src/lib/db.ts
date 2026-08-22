@@ -65,3 +65,15 @@ function toBase64(s: string): string {
   if (typeof btoa === 'function') return btoa(s);
   return Buffer.from(s, 'utf8').toString('base64');
 }
+
+/** The app's own embeddings database, a sibling of the vault database (ADR-0004).
+ *
+ *  The http adapter creates the database on first use, which is why the Config screen's
+ *  database-creation check matters: without that permission this would fail, and the caching
+ *  embedder would fall through to embedding everything on every call. */
+export function createEmbeddingsDb(settings: Settings): DocStore {
+  const url = `${settings.couchdbUrl.replace(/\/+$/, '')}/${settings.embeddingsDb}`;
+  return new PouchDB(url, {
+    auth: { username: settings.couchdbUser, password: settings.couchdbPassword },
+  }) as unknown as DocStore;
+}
