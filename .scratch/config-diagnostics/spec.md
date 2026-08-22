@@ -45,10 +45,11 @@ The app explains its own configuration failures, at two moments.
 suggestions that look like defaults — so a fresh install is already pointed at a working
 provider and model, and only CouchDB and the API key need typing. Saving settings rejects a
 provider URL that could never work, naming the field while it is still on screen. A **Test
-connection** action checks CouchDB, the chat model, and the embedder **independently** and
-reports three separate results, so a failure names one field instead of sending the user back
-to guessing. The two cloud checks make real requests and spend a small amount of provider
-credit, and the UI says so.
+connection** action checks each external dependency **independently** and reports a separate
+result for each, so a failure names one field instead of sending the user back to guessing.
+The two cloud checks make real requests and spend a small amount of provider credit, and the
+UI says so. A further check answers whether the CouchDB account may create a database, by
+creating a throwaway one and removing it again — deleting only what it created itself.
 
 **After something goes wrong anyway.** The app keeps a structured event log of what it
 attempted and what came back — and critically, for a failed cloud request, the **resolved
@@ -80,48 +81,55 @@ Credentials never reach it at all.
    a button never quietly costs me money.
 9. As the user, I want the connection test to prove my chat model returns usable structured
    output, so that a model that cannot do the job is caught before it organizes anything.
-10. As the user, I want the connection test to fail on an embedder that returns an empty
+10. As the user, I want to know whether my CouchDB account may create a database, so that a
+    planned feature's storage question is answered by pressing a button rather than by
+    discovering it mid-implementation.
+11. As the user, I want a check that tests database creation to leave nothing behind, so that
+    testing my configuration does not litter my server.
+12. As the user, I want a check to never delete a database it did not create, so that
+    diagnosing my configuration can never destroy my data.
+13. As the user, I want the connection test to fail on an embedder that returns an empty
     vector, so that a silently useless embedder is caught rather than ranking my vault at
     random.
-11. As the user, I want an error message to name the address the app actually contacted, so
+14. As the user, I want an error message to name the address the app actually contacted, so
     that a misdirected request is obvious rather than mysterious.
-12. As the user, I want a record of what the app tried, so that I can understand a failure
+15. As the user, I want a record of what the app tried, so that I can understand a failure
     after it has happened rather than only while it is happening.
-13. As the user, I want to read that record inside the app, so that I can diagnose a problem
+16. As the user, I want to read that record inside the app, so that I can diagnose a problem
     on my phone where there is no browser console.
-14. As the user, I want to copy the whole record in one action, so that I can hand it to
+17. As the user, I want to copy the whole record in one action, so that I can hand it to
     someone helping me without transcribing it.
-15. As the user, I want to clear the record, so that I can reproduce a problem against a clean
+18. As the user, I want to clear the record, so that I can reproduce a problem against a clean
     slate.
-16. As the user, I want my captured thoughts kept out of that record, so that diagnostics do
+19. As the user, I want my captured thoughts kept out of that record, so that diagnostics do
     not become a second copy of my private notes.
-17. As the user, I want my API key and passwords kept out of that record, so that it is safe
+20. As the user, I want my API key and passwords kept out of that record, so that it is safe
     to share.
-18. As the user, I want diagnostics to never break a capture, so that the machinery for
+21. As the user, I want diagnostics to never break a capture, so that the machinery for
     explaining failures cannot itself cause one.
-19. As the user, I want a failed capture to still preserve my thought, so that a
+22. As the user, I want a failed capture to still preserve my thought, so that a
     misconfiguration costs me an explanation and not a memory.
-20. As the user, I want the app to distinguish "you are offline" from "something else failed
+23. As the user, I want the app to distinguish "you are offline" from "something else failed
     while you were online", so that I am not told a falsehood about my connection.
-21. As the maintainer, I want the event record written to a file in the project folder during
+24. As the maintainer, I want the event record written to a file in the project folder during
     development, so that I can follow it with standard tools instead of scraping a console.
-22. As the maintainer, I want that file in newline-delimited JSON, so that it is both readable
+25. As the maintainer, I want that file in newline-delimited JSON, so that it is both readable
     by eye and parseable by a script or an agent.
-23. As an agent working on this repo, I want to read a failure record directly from the
+26. As an agent working on this repo, I want to read a failure record directly from the
     filesystem, so that I can diagnose a problem without asking the user to paste a stack
     trace.
-24. As the maintainer, I want the file log to exist only in development, so that a shipped
+27. As the maintainer, I want the file log to exist only in development, so that a shipped
     build has no endpoint that writes anywhere.
-25. As the maintainer, I want the log file kept out of version control, so that a record
+28. As the maintainer, I want the log file kept out of version control, so that a record
     describing a real vault is never committed.
-26. As the maintainer, I want logging to be an injected dependency with a no-op default, so
+29. As the maintainer, I want logging to be an injected dependency with a no-op default, so
     that adding instrumentation to a code path never forces every caller and test to supply
     one.
-27. As the maintainer, I want the operation layer's own instrumentation covered by tests, so
+30. As the maintainer, I want the operation layer's own instrumentation covered by tests, so
     that the events I rely on when debugging cannot silently stop being emitted.
-28. As the maintainer, I want configuration validation to live where it can be tested, so
+31. As the maintainer, I want configuration validation to live where it can be tested, so
     that the rule is pinned by a test rather than by a component.
-29. As the maintainer, I want the connection check driven as an operation like any other, so
+32. As the maintainer, I want the connection check driven as an operation like any other, so
     that this feature does not add a test seam of its own.
 
 ## Implementation Decisions
@@ -174,6 +182,16 @@ spec exists to specify.)*
 - **[shipped] Errors are reduced to their message before reaching the UI or the log**, never
   passed through as objects, since a thrown response could otherwise carry request headers —
   and therefore the API key — into both.
+
+- **[shipped] A fourth check: may this account create a database?** CouchDB requires
+  server-admin rights to create one, and the answer decides how the planned embedding cache is
+  stored. Roles alone do not determine it reliably across server configurations, so the check
+  asks: it creates a throwaway database and removes it again. **It only ever deletes a database
+  it created itself** — if the probe name is already taken it reports that and deletes nothing,
+  because a check that could destroy a real database would be far worse than an unanswered
+  question. A failed cleanup still reports the success and names the leftover to remove by
+  hand. The check is skipped entirely when no server-level dependency is supplied, so it costs
+  existing callers nothing.
 
 - **Move provider validation out of the view.** The validation rule currently lives in the UI
   component, which contradicts this repo's own principle that the view is a thin shell and

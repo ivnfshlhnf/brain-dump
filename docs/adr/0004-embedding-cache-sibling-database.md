@@ -49,7 +49,10 @@ it for this purpose.
 - The app now owns a second CouchDB database. Its name is configurable, and the account must
   be able to create it — **not guaranteed**: the current user (`cemonk_couchdb`) is not an
   admin. If creation is refused the app falls back to per-device IndexedDB behind the same
-  interface, trading one embed per vault for one embed per device.
+  interface, trading one embed per vault for one embed per device. The Config screen's **Test
+  connection** answers this directly: it creates and removes a throwaway database and reports
+  whether the account may do so, so the fallback is chosen on evidence rather than discovered
+  mid-implementation.
 - The cache key includes the embedder model, so changing `embedderModel` invalidates cleanly
   rather than mixing incompatible vector spaces.
 - Base64 float32 is lossless, so ranking with the cache is bit-identical to ranking without

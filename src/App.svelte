@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { loadSettings, saveSettings } from './lib/settings';
-  import { createRemoteDb } from './lib/db';
+  import { createRemoteDb, createDatabaseAdmin } from './lib/db';
   import {
     captureOrQueue,
     addContext,
@@ -358,6 +358,7 @@
         db: createRemoteDb(settings),
         organizer: createOrganizer(settings, log),
         embedder: createEmbedder(settings, log),
+        admin: createDatabaseAdmin(settings),
         settings,
         log,
       });
@@ -375,6 +376,7 @@
       { name: 'CouchDB', result: r.couchdb },
       { name: 'Chat', result: r.chat },
       { name: 'Embeddings', result: r.embeddings },
+      ...(r.databaseCreation ? [{ name: 'Database creation', result: r.databaseCreation }] : []),
     ];
   }
 
@@ -480,7 +482,9 @@
     <p class="hint">
       Checks CouchDB, the chat model, and the embedder independently, so a failure points at
       one field. The chat and embedder checks each make one small real request and
-      <strong>spend LLM credit</strong> — a fraction of a cent per press.
+      <strong>spend LLM credit</strong> — a fraction of a cent per press. It also creates and
+      immediately removes a throwaway database, to find out whether your CouchDB account may
+      create one at all.
     </p>
     <button on:click={testConnections} disabled={testing}>
       {testing ? 'Testing…' : 'Test connection'}

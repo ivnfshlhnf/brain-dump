@@ -84,7 +84,10 @@ key. Settings persist in IndexedDB, so you enter them once per device.
 
 Press **Test connection** to check CouchDB, the chat model, and the embedder independently
 before capturing anything. The two cloud checks each make one small real request and spend a
-fraction of a cent.
+fraction of a cent. It also creates and immediately removes a throwaway database, to report
+whether your CouchDB account may create one at all — the answer decides how the planned
+embedding cache is stored ([ADR-0004](./docs/adr/0004-embedding-cache-sibling-database.md)).
+It only ever deletes a database it created itself.
 
 > **Credentials are stored in IndexedDB in plaintext.** That is an accepted trade-off for a
 > single-user personal app on a device you control; the app is not XSS-hardened. Don't host
