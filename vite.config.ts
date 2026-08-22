@@ -31,5 +31,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts'],
+    // PouchDB core is CJS; without inlining, vitest loads it as a second instance inside
+    // src/lib/db.ts, so the http adapter registered in a test is not visible to
+    // `createRemoteDb`'s private PouchDB (it throws "Invalid Adapter: undefined").
+    // Inlining keeps a single shared instance, matching the browser bundle's assumption.
+    server: { deps: { inline: ['pouchdb-core', 'pouchdb-adapter-http'] } },
   },
 });

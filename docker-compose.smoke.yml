@@ -1,0 +1,19 @@
+# A throwaway CouchDB for the LiveSync doc-format smoke test (ticket 07 / Seam B).
+# Not used by the app or the default test suite — only by tests/livesync-smoke.test.ts
+# when opted into with LIVESYNC_SMOKE=1. The test creates and destroys its own database,
+# so this just needs a running CouchDB with admin credentials.
+#
+#   docker compose -f docker-compose.smoke.yml up -d
+#   LIVESYNC_SMOKE=1 COUCHDB_URL=http://localhost:5984 \
+#     COUCHDB_USER=admin COUCHDB_PASSWORD=password \
+#     npx vitest run tests/livesync-smoke.test.ts
+#   docker compose -f docker-compose.smoke.yml down
+services:
+  couchdb:
+    image: couchdb:3
+    container_name: brain-dump-couchdb
+    ports:
+      - "5984:5984"
+    environment:
+      COUCHDB_USER: admin
+      COUCHDB_PASSWORD: password
