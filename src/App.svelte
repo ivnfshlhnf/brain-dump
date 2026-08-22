@@ -11,15 +11,16 @@
     type CaptureSession,
   } from './lib/operations';
   import { createIndexedDbOutbox } from './lib/outbox';
-  import { createOrganizer, createMatcher } from './lib/llm';
+  import { retrieve } from './lib/retrieve';
+  import { createOrganizer, createMatcher, createEmbedder, createAnswerer } from './lib/llm';
   import { defaultSha1Hex } from './lib/livesync';
   import { createAutosaver } from './lib/autosave';
-  import { DEFAULT_SETTINGS, type Settings } from './lib/types';
+  import { DEFAULT_SETTINGS, type Settings, type Citation } from './lib/types';
 
   let settings: Settings = { ...DEFAULT_SETTINGS };
   let text = '';
   let status = '';
-  let view: 'capture' | 'config' = 'capture';
+  let view: 'capture' | 'ask' | 'config' = 'capture';
   let busy = false;
 
   // The in-flight capture review session: holds the captured Dump, the initial
@@ -33,6 +34,12 @@
   // decision is held until the user taps Append — so the autosave no-ops an
   // unconfirmed append rather than silently appending.
   let appendConfirmed = false;
+  // Retrieve: a question over the whole vault, and the answer with its citations.
+  let question = '';
+  let answer = '';
+  let citations: Citation[] = [];
+  let asking = false;
+
   // The durable offline queue. A Capture with no connection lands here and is
   // Organized on reconnect; `queuedCount` keeps the user informed that it is safe.
   const outbox = createIndexedDbOutbox();
@@ -260,6 +267,27 @@
       : `append to “${s.match.suggestion?.title ?? 'existing'}”`;
   }
 
+  // Retrieve reads the whole vault (personal notes included) and writes nothing —
+  // see ADR-0002. v1 re-embeds on every question; there is no persistent index.
+  async function askQuestion() {
+    asking = true;
+    answer = '';
+    citations = [];
+    try {
+      const result = await retrieve(question, {
+        ...storeDeps(),
+        embedder: createEmbedder(settings),
+        answerer: createAnswerer(settings),
+      });
+      answer = result.answer;
+      citations = result.citations;
+    } catch (e) {
+      status = `Retrieve failed: ${(e as Error).message}`;
+    } finally {
+      asking = false;
+    }
+  }
+
   async function saveConfig() {
     await saveSettings(settings);
     status = 'Settings saved';
@@ -269,6 +297,7 @@
 <main>
   <nav>
     <button class:on={view === 'capture'} on:click={() => (view = 'capture')}>Capture</button>
+    <button class:on={view === 'ask'} on:click={() => (view = 'ask')}>Ask</button>
     <button class:on={view === 'config'} on:click={() => (view = 'config')}>Config</button>
   </nav>
 
@@ -326,6 +355,24 @@
       {/if}
       <button on:click={() => { session = null; autosaver.cancel(); }}>New capture</button>
     {/if}
+  {:else if view === 'ask'}
+    <label class="ask">
+      Ask your vault
+      <textarea bind:value={question} placeholder="What did I think about...?" disabled={asking}
+      ></textarea>
+    </label>
+    <button on:click={askQuestion} disabled={asking || !question.trim()}>Ask</button>
+    {#if answer}
+      <section class="answer">
+        <p>{answer}</p>
+        {#if citations.length}
+          <h3>Sources</h3>
+          <ul>
+            {#each citations as c}<li>{c.title} <code>{c.link}</code></li>{/each}
+          </ul>
+        {/if}
+      </section>
+    {/if}
   {:else}
     <label>CouchDB URL <input bind:value={settings.couchdbUrl} placeholder="http://localhost:5984" /></label>
     <label>Database <input bind:value={settings.couchdbDb} placeholder="obsidiannotes" /></label>
@@ -336,6 +383,7 @@
     <label>LLM provider <input bind:value={settings.llmProvider} placeholder="https://api.ollama.cloud" /></label>
     <label>LLM model <input bind:value={settings.llmModel} placeholder="llama3.1" /></label>
     <label>LLM API key <input type="password" bind:value={settings.llmApiKey} /></label>
+    <label>Embedder model <input bind:value={settings.embedderModel} placeholder="nomic-embed-text" /></label>
     <button on:click={saveConfig}>Save settings</button>
   {/if}
 

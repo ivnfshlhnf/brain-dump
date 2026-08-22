@@ -19,3 +19,8 @@ including personal notes, so answers can draw on the user's full knowledge base.
   corruption — but they **are** sent to the cloud LLM/embedder during retrieval. This is
   consistent with the cloud-LLM decision (ADR-0001's world) and worth knowing: enabling
   RAG means the provider sees your personal notes too, not just brain-dumps.
+- Retrieval's sources are the vault's **notes**, not the raw Dumps in `_dumps/`: a Dump's
+  content is already represented by the Note Organized from it, so including both would
+  double-count every brain-dump and cite an archive file the user does not browse. The
+  consequence is that a Dump whose Note has not been written yet — a failed final save, or
+  a capture still queued in the offline outbox — is not retrievable until it is Organized.

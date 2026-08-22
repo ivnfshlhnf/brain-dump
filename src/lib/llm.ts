@@ -1,11 +1,26 @@
-// The cloud-LLM Organizer. Best-effort plumbing — not unit-tested, like createRemoteDb.
-// The operation layer is driven through the Organizer interface; tests pass a
-// deterministic fake, the app passes the real cloud Organizer built here.
+// The cloud-model plumbing behind the operation layer's seams: the Organizer and
+// Matcher (Organize, new-vs-append) and the Embedder and Answerer (Retrieve).
+// Best-effort plumbing — not unit-tested, like createRemoteDb. The operation layer
+// depends only on the interfaces; tests pass deterministic fakes, the app passes the
+// real cloud implementations built here.
 //
 // `llmProvider` holds the provider's base URL (e.g. an Ollama-compatible host).
-// Uses Ollama's /api/chat with `format: 'json'` so the model returns strict JSON
-// we can map onto OrganizeOutput. Provider/model/key are confirmed at config time.
-import type { Modality, Organizer, OrganizeOutput, Settings, Matcher, NoteCandidate, MatchSuggestion } from './types';
+// Chat calls use Ollama's /api/chat with `format: 'json'` so the model returns strict
+// JSON we can map onto our output types; embeddings use /api/embed with the separately
+// configured embedder model. Provider/models/key are confirmed at config time.
+import type {
+  Modality,
+  Organizer,
+  OrganizeOutput,
+  Settings,
+  Matcher,
+  NoteCandidate,
+  MatchSuggestion,
+  Embedder,
+  Answerer,
+  AnswerOutput,
+  VaultDoc,
+} from './types';
 
 export function createOrganizer(settings: Settings): Organizer {
   return {
@@ -26,6 +41,63 @@ export function createMatcher(settings: Settings): Matcher {
       return parseMatchSuggestion(reply, candidates);
     },
   };
+}
+
+/** The cloud embedder, using the configured embedder model (Ollama's /api/embed takes
+ *  a batch of inputs and returns one vector each). v1 embeds the whole vault per
+ *  query, so this is called with many texts at once. */
+export function createEmbedder(settings: Settings): Embedder {
+  return {
+    async embed(texts): Promise<number[][]> {
+      if (texts.length === 0) return [];
+      const base = settings.llmProvider.replace(/\/+$/, '');
+      const res = await fetch(`${base}/api/embed`, {
+        method: 'POST',
+        headers: authHeaders(settings),
+        body: JSON.stringify({ model: settings.embedderModel, input: texts }),
+      });
+      if (!res.ok) throw new Error(`Embedding request failed: ${res.status} ${res.statusText}`);
+      const data = (await res.json()) as { embeddings?: number[][] };
+      return data.embeddings ?? [];
+    },
+  };
+}
+
+/** The answer-synthesis half of RAG: the question plus the most relevant vault Notes
+ *  go to the LLM, which answers and names the Notes it drew on. */
+export function createAnswerer(settings: Settings): Answerer {
+  return {
+    async answer(question, sources): Promise<AnswerOutput> {
+      const reply = await chat(settings, buildAnswerPrompt(question, sources));
+      return parseAnswerOutput(reply);
+    },
+  };
+}
+
+function buildAnswerPrompt(question: string, sources: VaultDoc[]): string {
+  const listing = sources
+    .map((s, i) => `${i}: ${s.path}\n   title: ${s.title}\n   content:\n${s.content}`)
+    .join('\n\n');
+  return [
+    "You answer a question from the user's own notes. Reply ONLY with a JSON object —",
+    'no prose, no markdown fences — with exactly these fields:',
+    '- answer: the answer in plain prose, drawn only from the notes below (string)',
+    '- sources: the numbers of the notes you actually drew on (array of numbers)',
+    'If the notes do not answer the question, say so in `answer` and return an empty `sources`.',
+    `Question: ${question}`,
+    'Notes:',
+    listing,
+  ].join('\n');
+}
+
+/** Parse the model's answer reply. The chosen source numbers are passed through as
+ *  given — the operation layer owns what may be cited and validates them there, so
+ *  an empty list stays empty (the model drew on nothing) rather than being confused
+ *  with a list of bad indexes. */
+function parseAnswerOutput(raw: string): AnswerOutput {
+  const json = JSON.parse(stripFences(raw)) as { answer?: unknown; sources?: unknown };
+  const sources = Array.isArray(json.sources) ? json.sources.map(num) : [];
+  return { answer: str(json.answer), sources };
 }
 
 function buildMatchPrompt(
@@ -79,14 +151,18 @@ function buildOrganizePrompt(content: string, modality: Modality): string {
   ].join('\n');
 }
 
+function authHeaders(settings: Settings): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    ...(settings.llmApiKey ? { Authorization: `Bearer ${settings.llmApiKey}` } : {}),
+  };
+}
+
 async function chat(settings: Settings, prompt: string): Promise<string> {
   const base = settings.llmProvider.replace(/\/+$/, '');
   const res = await fetch(`${base}/api/chat`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(settings.llmApiKey ? { Authorization: `Bearer ${settings.llmApiKey}` } : {}),
-    },
+    headers: authHeaders(settings),
     body: JSON.stringify({
       model: settings.llmModel,
       stream: false,

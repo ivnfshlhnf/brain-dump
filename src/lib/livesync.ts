@@ -1,5 +1,7 @@
-// Writes files to the LiveSync CouchDB store in LiveSync's internal document format.
-// See ADR-0001. Each file is one metadata doc plus one content-addressed chunk doc.
+// Reads and writes files in the LiveSync CouchDB store, in LiveSync's internal
+// document format. See ADR-0001. Each file is one metadata doc plus one or more
+// content-addressed chunk docs — the app writes a single chunk per file, but reads
+// tolerate the several chunks LiveSync itself writes for a larger file.
 import type { DocStore, Settings } from './types';
 
 export type HashFn = (content: string) => Promise<string>;
@@ -79,6 +81,39 @@ async function putMetadata(db: DocStore, doc: Record<string, unknown>): Promise<
 function isConflict(e: unknown): boolean {
   const err = e as { status?: number; name?: string };
   return err.status === 409 || err.name === 'conflict';
+}
+
+/** A file read back out of the vault: its original-case path and full content. */
+export interface VaultFile {
+  path: string;
+  content: string;
+}
+
+/** Read every file in the vault, reassembling each one's content from its chunks.
+ *  The app writes single-chunk files, but Obsidian LiveSync splits larger files
+ *  across several chunks — a personal note read here may be either, so the children
+ *  are concatenated in order.
+ *
+ *  `include` filters by vault-relative path before any chunk is fetched, so a
+ *  narrowed read (e.g. just the managed folder) costs only the metadata scan. */
+export async function readVaultFiles(
+  db: DocStore,
+  include: (path: string) => boolean,
+): Promise<VaultFile[]> {
+  const all = await db.allDocs<{ path?: string; type?: string; children?: string[] }>({
+    include_docs: true,
+  });
+  const files: VaultFile[] = [];
+  for (const row of all.rows) {
+    const doc = row.doc;
+    if (!doc || doc.type !== 'plain' || typeof doc.path !== 'string') continue;
+    if (!doc.children?.length || !include(doc.path)) continue;
+    const chunks = await Promise.all(
+      doc.children.map((id) => db.get<{ data: string }>(id)),
+    );
+    files.push({ path: doc.path, content: chunks.map((c) => c.data).join('') });
+  }
+  return files;
 }
 
 /** Modify an EXISTING file's content with optimistic concurrency (ticket 04). Reads

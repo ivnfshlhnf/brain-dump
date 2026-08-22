@@ -71,6 +71,52 @@ export interface Matcher {
   ): Promise<MatchSuggestion>;
 }
 
+/** A file read out of the vault for Retrieve: its vault-relative path, a display
+ *  title (the frontmatter title, or the filename for a personal note that has none),
+ *  and its full reassembled content. Deliberately not called a Note — Retrieve reads
+ *  the app's organized Notes and the user's own personal notes alike (ADR-0002), and
+ *  only the former are Notes in the glossary's sense. */
+export interface VaultDoc {
+  path: string;
+  title: string;
+  content: string;
+}
+
+/** The cloud embedder seam. v1 re-embeds on every query (no persistent index), so
+ *  this is called with the whole vault each time. Tests pass a deterministic fake. */
+export interface Embedder {
+  embed(texts: string[]): Promise<number[][]>;
+}
+
+/** The synthesized answer plus the sources it drew on, as indexes into the docs the
+ *  Answerer was given — the same shape as the Matcher's validated `index`, and
+ *  validated the same way: the operation layer owns what may be cited, so a model
+ *  that invents an index cannot produce a dead link. An empty `sources` means the
+ *  model drew on nothing, which is a real answer ("I couldn't find that"). */
+export interface AnswerOutput {
+  answer: string;
+  sources: number[];
+}
+
+/** The answer-synthesis seam (RAG's generation half). Given the question and the
+ *  most relevant vault docs, produce an answer that cites them. */
+export interface Answerer {
+  answer(question: string, sources: VaultDoc[]): Promise<AnswerOutput>;
+}
+
+/** A source the answer drew on, as a path plus an Obsidian wikilink the user can open. */
+export interface Citation {
+  path: string;
+  title: string;
+  link: string;
+}
+
+/** What Retrieve returns: a synthesized answer plus the Notes it cited. */
+export interface RetrieveResult {
+  answer: string;
+  citations: Citation[];
+}
+
 /** The offline queue seam: Dumps captured with no connection wait here until a
  *  reconnect syncs them to CouchDB and Organizes them into Notes. A queued Dump is
  *  a Dump — it carries the id and capture time assigned at capture, so once synced

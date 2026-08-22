@@ -10,7 +10,7 @@ import type {
   OutboxStore,
   Settings,
 } from './types';
-import { writeFile, modifyFile } from './livesync';
+import { writeFile, modifyFile, readVaultFiles } from './livesync';
 
 /** The `## Context` block appended after the verbatim original, when Context exists. */
 function contextBlock(ctx: string): string {
@@ -196,10 +196,15 @@ export function slugify(text: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
-/** Obsidian wikilink to the source Dump, by vault-relative path without extension. */
+/** An Obsidian wikilink to a vault-relative path (the extension is dropped, as
+ *  Obsidian links by name). */
+export function wikilink(path: string): string {
+  return `[[${path.replace(/\.md$/, '')}]]`;
+}
+
+/** Obsidian wikilink to the source Dump. */
 export function sourceWikilink(dump: Dump, settings: Settings): string {
-  const basename = dumpFilename(dump.createdAt, dump.id).replace(/\.md$/, '');
-  return `[[${settings.dumpsFolder}/${basename}]]`;
+  return wikilink(`${settings.dumpsFolder}/${dumpFilename(dump.createdAt, dump.id)}`);
 }
 
 /** The v1 frontmatter block (the `---`-fenced schema), with the blank-line separator
@@ -406,21 +411,11 @@ export async function readNoteCandidates(
   db: DocStore,
   settings: Settings,
 ): Promise<NoteCandidate[]> {
-  const all = await db.allDocs<{ path?: string; type?: string; children?: string[] }>({
-    include_docs: true,
+  const files = await readVaultFiles(db, (path) => path.startsWith(`${settings.managedFolder}/`));
+  return files.map((file) => {
+    const fm = parseFrontmatter(file.content);
+    return { path: file.path, title: fm.title, tags: fm.tags, summary: fm.summary };
   });
-  const candidates: NoteCandidate[] = [];
-  for (const row of all.rows) {
-    const doc = row.doc;
-    if (!doc || doc.type !== 'plain' || typeof doc.path !== 'string') continue;
-    if (!doc.path.startsWith(`${settings.managedFolder}/`)) continue;
-    const chunkId = doc.children?.[0];
-    if (!chunkId) continue;
-    const chunk = await db.get<{ data: string }>(chunkId);
-    const fm = parseFrontmatter(chunk.data);
-    candidates.push({ path: doc.path, title: fm.title, tags: fm.tags, summary: fm.summary });
-  }
-  return candidates;
 }
 
 /** Match a new Dump's preview against the existing Notes: LLM-assisted, by
