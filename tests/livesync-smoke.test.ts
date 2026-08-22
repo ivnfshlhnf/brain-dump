@@ -33,18 +33,24 @@
 //     COUCHDB_USER=admin COUCHDB_PASSWORD=password \
 //     npx vitest run tests/livesync-smoke.test.ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createHash } from 'node:crypto';
 import { capture, organizeDump, dumpFilename } from '../src/lib/operations';
 import { docIdForPath } from '../src/lib/livesync';
 import { createRemoteDb } from '../src/lib/db';
 import {
   DEFAULT_SETTINGS,
   type Settings,
-  type DocStore,
   type Dump,
   type Organizer,
   type OrganizeOutput,
 } from '../src/lib/types';
+import {
+  fixedHash,
+  smokeDescribe,
+  assertLiveSyncFile,
+  type RemoteDb,
+  type MetaDoc,
+  type LeafDoc,
+} from './_smoke-helpers';
 
 // --- Opt-in gate ------------------------------------------------------------
 // Skip unless the caller explicitly asks for the real-CouchDB smoke test. The default
@@ -57,34 +63,6 @@ const COUCHDB_DB = process.env.COUCHDB_DB ?? 'brain-dump-smoke';
 
 // Real-CouchDB ops are slower than the in-memory suite; allow generous per-test time.
 const TIMEOUT = 30_000;
-
-// A bare remote doc with its CouchDB rev — enough to inspect the stored shape.
-type RawDoc = Record<string, unknown> & { _id: string; _rev: string };
-
-// The two stored shapes the reader cares about: a file's metadata doc and one of its
-// chunk (leaf) docs. Named rather than re-intersected ad hoc at each assertion.
-type MetaDoc = RawDoc & {
-  type: string;
-  path: string;
-  children: string[];
-  eden: unknown;
-  ctime: number;
-  mtime: number;
-  size: number;
-};
-type LeafDoc = RawDoc & { type: string; data: string };
-
-// Deterministic SHA-1 hex, matching the app's default chunk hash (hashAlgorithm: 'sha1')
-// and the `h:` prefix LiveSync's chunk IDs carry. The reader does not verify this digest
-// (it fetches children by _id, not by recomputing the hash), so the assertion below is on
-// the `h:` convention and the children↔leaf linkage, not on the digest value itself.
-function sha1Hex(content: string): string {
-  return createHash('sha1').update(content).digest('hex');
-}
-
-// The hash callback handed to the app's writer — extracted once so every write uses the
-// identical digest (the contract is asserted against this same function).
-const fixedHash = (c: string): Promise<string> => Promise.resolve(sha1Hex(c));
 
 const fixedNow = Date.UTC(2026, 7, 21, 20, 30, 45); // 2026-08-21 20:30:45 UTC
 const fixedId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
@@ -114,43 +92,9 @@ const sampleOutput: OrganizeOutput = {
 };
 const organizer: Organizer = { organize: async () => sampleOutput };
 
-// The whole suite is skipped unless the caller opts in. `describe.skip` prints a clear
-// "skipped" line so a bare `npm test` shows Seam B is intentionally not run, not missing.
-const describeSmoke = SMOKE ? describe : describe.skip;
-
-// The http PouchDB exposes destroy beyond the app's DocStore interface; keep a handle to
-// the raw instance for DB lifecycle, while the operations use it as a DocStore.
-interface RemoteDb extends DocStore {
-  destroy(): Promise<unknown>;
-}
+const describeSmoke = smokeDescribe(SMOKE);
 
 let db: RemoteDb;
-
-/** Assert a written file's metadata doc + its single leaf satisfy LiveSync's reader
- *  contract, then return them for any file-specific extra assertions. Mirrors the reader's
- *  acceptance checks: `getDBEntryMetaByPath` (type/plain, children, eden, ctime/mtime),
- *  `isChunkDoc` (type === "leaf"), and `ChunkFetcher` (data is a string). */
-async function assertLiveSyncFile(
-  store: DocStore,
-  written: { metadataId: string; chunkId: string; path: string },
-  opts: { ctime: number },
-): Promise<{ meta: MetaDoc; leaf: LeafDoc }> {
-  const meta = await store.get<MetaDoc>(written.metadataId);
-  expect(meta.type).toBe('plain');
-  expect(meta.path).toBe(written.path); // original case preserved
-  expect(meta.children).toEqual([written.chunkId]); // the child id resolves to the leaf
-  expect(meta.eden).toEqual({}); // reader defaults missing eden to {} and accepts {}
-  expect(meta.ctime).toBe(opts.ctime);
-  expect(meta.mtime).toBe(opts.ctime);
-  expect(meta.size).toBeGreaterThan(0);
-
-  const leaf = await store.get<LeafDoc>(written.chunkId);
-  expect(leaf._id).toBe(written.chunkId); // stored under the id the metadata references
-  expect(leaf._id.startsWith('h:')).toBe(true); // LiveSync chunk-id convention (IDPrefixes.Chunk)
-  expect(leaf.type).toBe('leaf'); // isChunkDoc requires type === "leaf"
-  expect(typeof leaf.data).toBe('string'); // ChunkFetcher requires string data
-  return { meta, leaf };
-}
 
 describeSmoke('LiveSync doc-format smoke test (Seam B — ticket 07)', () => {
   beforeAll(async () => {
