@@ -141,7 +141,12 @@ describeSmoke('Real cloud LLM/embedder smoke test (Seam C — ticket 08)', () =>
     expect(out.keyPoints.length).toBeGreaterThan(0);
     expect(out.keyPoints.every((p) => typeof p === 'string')).toBe(true);
     expect(Array.isArray(out.related)).toBe(true);
-    expect(out.related.length).toBeGreaterThan(0);
+    // `related` is the one Organize output with a legitimate empty value, so it is checked
+    // for shape but NOT for non-emptiness. The Organizer sees a single Dump and not the
+    // vault, so a dump with nothing to link to correctly yields []; the prompt says so
+    // explicitly ("empty if none"). Asserting non-empty here would demand the model invent
+    // wikilinks — writing dead links into the vault. The live run caught this; see the
+    // ticket 08 comment.
     expect(out.related.every((r) => typeof r === 'string')).toBe(true);
     expect(typeof out.body).toBe('string');
     expect(out.body.length).toBeGreaterThan(0);

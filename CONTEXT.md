@@ -21,7 +21,7 @@ The organized, editable artifact derived from one or more Dumps. The thing you b
 _Avoid_: document, file, entry
 
 **Organize**:
-The additive enrichment of a Dump into or onto a Note — a title, tags, summary, key points, related links, and category — without altering the source Dump.
+The additive enrichment of a Dump into or onto a Note — a title, tags, summary, key points, related links, and category — without altering the source Dump. Related links are the only one of these with a legitimate empty value: a Dump may relate to nothing.
 _Avoid_: process, format, clean up, rewrite
 
 **Capture**:

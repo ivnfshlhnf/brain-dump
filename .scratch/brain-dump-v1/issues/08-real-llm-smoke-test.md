@@ -23,7 +23,7 @@ A real-cloud integration smoke test (Seam C) that drives the **existing operatio
 7. As the maintainer, I want all cloud and CouchDB credentials read from environment variables, so that API keys and passwords never get committed to the repo or pasted into shared context.
 8. As the maintainer, I want the test to use a throwaway CouchDB (create then destroy), so that a run leaves no persistent state and can be repeated cleanly.
 9. As the maintainer, I want the test to assert structure, types, and non-emptiness — not exact strings — so that it is stable across the non-deterministic output of a real model.
-10. As the maintainer, I want the test to assert the Organizer returns a non-empty title, tags, category, summary, key points, related, and body, so that a model returning an empty or malformed field fails the test.
+10. As the maintainer, I want the test to assert the Organizer returns a non-empty title, tags, category, summary, key points, and body, so that a model returning an empty or malformed field fails the test. (`related` is asserted for shape only — it is the one Organize output with a legitimate empty value; see the Comments.)
 11. As the maintainer, I want the test to assert the Embedder returns equal-length numeric vectors for every document and the question, so that a dimension mismatch (which would break cosine similarity) is caught.
 12. As the maintainer, I want the test to assert the Answerer returns a non-empty answer string and a `sources` array of valid indexes, so that a model that invents indexes or returns nothing is caught.
 13. As the maintainer, I want the test to assert the Retrieve result carries citations whose paths correspond to Notes actually written to the vault, so that a dead-link citation is caught.
@@ -83,3 +83,24 @@ A real-cloud integration smoke test (Seam C) that drives the **existing operatio
 - Credentials stay in the environment: `LLM_PROVIDER` / `LLM_MODEL` / `LLM_API_KEY` / `EMBEDDER_MODEL` + the Seam B `COUCHDB_*` vars. Defaults point at a local Ollama + the Seam B throwaway CouchDB so the documented one-command run works out of the box; secrets never enter the repo. Reuses `docker-compose.smoke.yml` and creates/destroys its own database each run.
 - **Live run is environment-dependent and is the user's step.** A live run needs a running Ollama-compatible endpoint with a chat model AND an embedding model. The local Ollama here has chat (`glm-5.2:cloud` returns valid strict JSON for the Organizer/Answerer prompts) but no embedder (`glm-5.2:cloud` embed → unauthorized; `llama3.2` needs `--embeddings`; no `nomic-embed-text` pulled), and the API key / a running Ollama are not present in this session's shell. So the full live loop could not be executed here. The test is verified to (a) typecheck clean, (b) be skipped by default, (c) not disturb the green default suite. Running it green against a real provider + an embedder model + a throwaway CouchDB is the deliberate verification run the spec describes (run command in the test header and in Further Notes above).
 - Code review (two-axis) surfaced four spec gaps, all fixed before commit: (1) `keyPoints` and `related` are now asserted non-empty, not just typed (story 10); (2) the Embedder test now embeds the question alongside the documents and asserts one equal dimension across all four (story 11); (3) the Organizer test now asserts the written Note lands in the real CouchDB in the LiveSync doc-format via `assertLiveSyncFile` (metadata + chunk docs), not just via a content read-back (story 14); (4) the run command in the test header now includes `LIVESYNC_SMOKE=1` as the spec documents. The Standards axis flagged cross-file duplication with `livesync-smoke.test.ts` (`sha1Hex` / `fixedHash` / `RemoteDb` / the `describe.skip` gate / the doc-format assertion) — resolved by extracting `tests/_smoke-helpers.ts`, now shared by both smoke tests (one source of truth for the LiveSync format contract). `livesync-smoke.test.ts` was refactored to import from it; its skip path + typecheck remain green.
+
+- The first live Seam C run (OpenRouter, `deepseek/deepseek-v4-flash` chat +
+  `openai/text-embedding-3-small` embeddings, throwaway CouchDB) passed 3 of 4 and caught a
+  contradiction between this ticket and the app: story 10 asked for a **non-empty**
+  `related`, but the Organize prompt in `src/lib/llm.ts` specifies
+  `related: Obsidian wikilinks or URLs, empty if none`. Organizing the sample dump ("I keep
+  forgetting to water the basil on the windowsill") in isolation, the model correctly
+  returned `[]` and the test failed. The prompt is right and story 10 was wrong: the
+  Organizer is shown a single Dump and not the vault, so "what does this relate to" has a
+  legitimate empty answer, unlike title/tags/category/summary/keyPoints/body which are
+  always derivable. Asserting non-empty would have demanded fabricated wikilinks — dead
+  links written into the vault, the class of bug ticket 06 hunted down. Fixed by dropping
+  the `related.length` assertion (shape and element types still asserted) and amending
+  story 10. `CONTEXT.md`'s **Organize** entry now records that related links are the one
+  optional output.
+- Everything else in the run was green on the first live attempt: the real Organizer parsed
+  onto `OrganizeOutput`, the real Embedder returned equal-length numeric vectors for every
+  document and the question, the real Answerer returned an answer with in-range source
+  indexes, and the full loop wrote a Note to a real CouchDB in LiveSync doc-format, read it
+  back, ranked it, and cited it. The OpenAI-compatible seam (ADR-0003) is verified against a
+  live provider.
