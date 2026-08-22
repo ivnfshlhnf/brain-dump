@@ -16,6 +16,7 @@
   import { defaultSha1Hex } from './lib/livesync';
   import { createAutosaver } from './lib/autosave';
   import { createLog, createDevFileSink, type Log, type LogEvent } from './lib/logger';
+  import { checkConnections, type HealthReport, type CheckResult } from './lib/health';
   import { DEFAULT_SETTINGS, type Settings, type Citation } from './lib/types';
 
   // Diagnostics. In dev the sink POSTs each event to the Vite middleware, which appends
@@ -345,6 +346,38 @@
     });
   }
 
+  let health: HealthReport | null = null;
+  let testing = false;
+
+  async function testConnections() {
+    testing = true;
+    health = null;
+    status = '';
+    try {
+      health = await checkConnections({
+        db: createRemoteDb(settings),
+        organizer: createOrganizer(settings, log),
+        embedder: createEmbedder(settings, log),
+        settings,
+        log,
+      });
+    } catch (e) {
+      status = `Could not run the connection test: ${(e as Error).message}`;
+    } finally {
+      testing = false;
+    }
+  }
+
+  /** The report as labelled rows. A tuple literal in the template widens to
+   *  `string | CheckResult`, so the shape is named here instead. */
+  function healthRows(r: HealthReport): Array<{ name: string; result: CheckResult }> {
+    return [
+      { name: 'CouchDB', result: r.couchdb },
+      { name: 'Chat', result: r.chat },
+      { name: 'Embeddings', result: r.embeddings },
+    ];
+  }
+
   function copyDiagnostics() {
     void navigator.clipboard?.writeText(logStore.format());
     status = 'Diagnostics copied';
@@ -437,11 +470,30 @@
     <label>Password <input type="password" bind:value={settings.couchdbPassword} /></label>
     <label>Managed folder <input bind:value={settings.managedFolder} /></label>
     <label>Case-sensitive <input type="checkbox" bind:checked={settings.caseSensitive} /></label>
-    <label>LLM provider <input bind:value={settings.llmProvider} placeholder="https://openrouter.ai/api/v1" /></label>
-    <label>LLM model <input bind:value={settings.llmModel} placeholder="openai/gpt-4o-mini" /></label>
+    <label>LLM provider <input bind:value={settings.llmProvider} /></label>
+    <label>LLM model <input bind:value={settings.llmModel} /></label>
     <label>LLM API key <input type="password" bind:value={settings.llmApiKey} /></label>
-    <label>Embedder model <input bind:value={settings.embedderModel} placeholder="openai/text-embedding-3-small" /></label>
+    <label>Embedder model <input bind:value={settings.embedderModel} /></label>
     <button on:click={saveConfig}>Save settings</button>
+
+    <h2>Connection</h2>
+    <p class="hint">
+      Checks CouchDB, the chat model, and the embedder independently, so a failure points at
+      one field. The chat and embedder checks each make one small real request and
+      <strong>spend LLM credit</strong> — a fraction of a cent per press.
+    </p>
+    <button on:click={testConnections} disabled={testing}>
+      {testing ? 'Testing…' : 'Test connection'}
+    </button>
+    {#if health}
+      <ul class="checks">
+        {#each healthRows(health) as row}
+          <li class:err={!row.result.ok}>
+            {row.result.ok ? '✓' : '✗'} <strong>{row.name}</strong> — {row.result.message}
+          </li>
+        {/each}
+      </ul>
+    {/if}
 
     <h2>Diagnostics</h2>
     <p class="hint">

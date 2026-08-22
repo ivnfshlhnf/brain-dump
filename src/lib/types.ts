@@ -137,7 +137,7 @@ export interface DocStore {
   put(doc: Record<string, unknown>): Promise<{ id: string; rev: string }>;
   get<T = Record<string, unknown>>(id: string): Promise<T>;
   allDocs<T = Record<string, unknown>>(
-    opts?: { include_docs?: boolean },
+    opts?: { include_docs?: boolean; limit?: number },
   ): Promise<{ rows: Array<{ doc: T | undefined }> }>;
 }
 
@@ -167,8 +167,13 @@ export const DEFAULT_SETTINGS: Settings = {
   dumpsFolder: '_dumps',
   caseSensitive: false,
   hashAlgorithm: 'sha1',
-  llmProvider: '',
-  llmModel: '',
+  // Real defaults, not suggestions. A greyed placeholder that looks like a default but
+  // is not one cost a dogfooding session: the fields read as pre-filled, were actually
+  // empty, and every LLM call resolved against the app's own origin. The values below are
+  // the pair verified live by the Seam C smoke test; the API key is the only cloud field
+  // that cannot have a default.
+  llmProvider: 'https://openrouter.ai/api/v1',
+  llmModel: 'deepseek/deepseek-v4-flash',
   llmApiKey: '',
-  embedderModel: '',
+  embedderModel: 'openai/text-embedding-3-small',
 };

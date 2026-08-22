@@ -74,12 +74,17 @@ Open the app, go to **Config**, and fill in:
 | Username / Password | CouchDB credentials |
 | Managed folder | Where Notes go. Default `Brain Dump` |
 | Case-sensitive | Must match LiveSync's "Handle files as Case-Sensitive" setting (its default is **off**) |
-| LLM provider | The **full** OpenAI-compatible base URL, including the version path — `https://openrouter.ai/api/v1`, not the bare host |
-| LLM model | Must support `response_format: { type: 'json_object' }` |
-| LLM API key | Your provider key |
-| Embedder model | e.g. `openai/text-embedding-3-small` |
+| LLM provider | The **full** OpenAI-compatible base URL, including scheme and version path. Defaults to `https://openrouter.ai/api/v1`. A value without a scheme resolves against the app's own origin and every LLM call 404s |
+| LLM model | Must support `response_format: { type: 'json_object' }`. Defaults to `deepseek/deepseek-v4-flash` |
+| LLM API key | Your provider key — the only cloud field with no default |
+| Embedder model | Defaults to `openai/text-embedding-3-small` |
 
-Settings persist in IndexedDB, so you enter them once per device.
+The cloud fields ship with working defaults, so in practice you fill in CouchDB and your API
+key. Settings persist in IndexedDB, so you enter them once per device.
+
+Press **Test connection** to check CouchDB, the chat model, and the embedder independently
+before capturing anything. The two cloud checks each make one small real request and spend a
+fraction of a cent.
 
 > **Credentials are stored in IndexedDB in plaintext.** That is an accepted trade-off for a
 > single-user personal app on a device you control; the app is not XSS-hardened. Don't host
@@ -108,6 +113,11 @@ reader accepts the documents — pinning the format contract that ADR-0001 depen
 **Seam C** (`tests/llm-smoke.test.ts`) runs the real cloud Organizer, Embedder, and Answerer
 against a live provider and a real CouchDB, end to end. Assertions are on structure and
 non-emptiness, never exact strings, because the model is non-deterministic.
+
+> **Never put your real vault's database in `.env`.** Both smoke suites call `destroy()` on
+> whatever `COUCHDB_DB` names — before *and* after the run. That is what makes them
+> repeatable, and it would silently delete your entire vault. `.env` is for throwaway test
+> databases only; your real vault belongs in the app's Config screen, nowhere else.
 
 Both smoke suites are **skipped unless their env gate is set**, so a fresh checkout is green
 with no Docker and no API key. To run them:
@@ -165,14 +175,19 @@ test — behavior lives there, not in the component.
   - [0001](./docs/adr/0001-live-sync-couchdb-direct.md) — write to LiveSync's CouchDB directly, in its internal document format
   - [0002](./docs/adr/0002-retrieval-whole-vault-writes-managed-only.md) — retrieve over the whole vault, write only to managed folders
   - [0003](./docs/adr/0003-provider-portability-openai-compatible.md) — the cloud seam speaks the OpenAI-compatible API
+  - [0004](./docs/adr/0004-embedding-cache-sibling-database.md) — vault embeddings are cached in a sibling CouchDB database
 - [`.scratch/brain-dump-v1/spec.md`](./.scratch/brain-dump-v1/spec.md) — the full v1 spec and the tickets it was built from
 - [`AGENTS.md`](./AGENTS.md) — conventions for agents working in this repo
 
 ## Known limitations
 
 - **Text only.** Voice capture and spoken answers are iteration 2.
-- **No persistent vector index.** Every Retrieve re-embeds the whole vault, so query cost and
-  latency grow with vault size. A `_changes`-fed index is the planned optimization.
+- **No persistent vector index yet.** Every Retrieve re-embeds the whole vault, so query cost
+  and latency grow with vault size. A content-addressed cache in a sibling CouchDB database is
+  specified in [ADR-0004](./docs/adr/0004-embedding-cache-sibling-database.md) and ticket 10.
+- **A Note's `## Related` section is always empty.** The Organizer is only ever shown the
+  Dump's own text, never the vault, so it cannot name a Note it has never seen. Ticket 11
+  fixes this by ranking against the vault instead of asking the model to guess.
 - **Retrieval sends your personal notes to the cloud provider**, not just your brain-dumps —
   a direct consequence of ADR-0002 plus a cloud LLM. Accepted for v1.
 - **The app depends on LiveSync's internal document format**, for which no official

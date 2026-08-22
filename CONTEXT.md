@@ -21,7 +21,7 @@ The organized, editable artifact derived from one or more Dumps. The thing you b
 _Avoid_: document, file, entry
 
 **Organize**:
-The additive enrichment of a Dump into or onto a Note — a title, tags, summary, key points, related links, and category — without altering the source Dump. Related links are the only one of these with a legitimate empty value: a Dump may relate to nothing.
+The additive enrichment of a Dump into or onto a Note — a title, tags, summary, key points, related links, and category — without altering the source Dump. Every part of this is derived from the Dump alone except the related links, which describe the Note's connections to *other* Notes and so cannot be known from the Dump by itself.
 _Avoid_: process, format, clean up, rewrite
 
 **Capture**:
@@ -31,6 +31,10 @@ _Avoid_: record, save, log
 **Append**:
 Adding a Dump's content to an existing Note, rather than founding a new Note. A Dump either founds a new Note or Appends to an existing one.
 _Avoid_: merge, update, edit
+
+**Related**:
+A connection between two Notes that is real but not strong enough to Append — the two stay separate documents. Any genuine connection counts; Append is the stronger case, where the connection warrants merging the content into one Note. Related and Append are the same judgment at two thresholds.
+_Avoid_: similar, linked, see also
 
 **Retrieve**:
 Answering a natural-language question by reading the relevant Notes and synthesizing an answer that cites them.
