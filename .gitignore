@@ -6,3 +6,5 @@ dist-ssr
 .DS_Store
 dev.db
 *.log
+# Local secrets for the opt-in smoke tests (never committed)
+.env
