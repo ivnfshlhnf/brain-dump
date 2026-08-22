@@ -13,6 +13,7 @@
 // returns strict JSON we can map onto our output types; embeddings POST {base}/embeddings
 // with the separately configured embedder model. Provider/models/key are confirmed at
 // config time. (See ADR-0003 for why v1 is OpenAI-compatible rather than Ollama-native.)
+import { noopLog, type Log } from './logger';
 import type {
   Modality,
   Organizer,
@@ -27,22 +28,22 @@ import type {
   VaultDoc,
 } from './types';
 
-export function createOrganizer(settings: Settings): Organizer {
+export function createOrganizer(settings: Settings, log: Log = noopLog): Organizer {
   return {
     async organize(content, modality): Promise<OrganizeOutput> {
-      const reply = await chat(settings, buildOrganizePrompt(content, modality));
+      const reply = await chat(settings, buildOrganizePrompt(content, modality), log);
       return parseOrganizeOutput(reply);
     },
   };
 }
 
-export function createMatcher(settings: Settings): Matcher {
+export function createMatcher(settings: Settings, log: Log = noopLog): Matcher {
   return {
     async match(topic, candidates): Promise<MatchSuggestion> {
       // No candidates → no match to suggest. (The operation layer also guards this,
       // but keeping the LLM call out of the empty case avoids a wasted round-trip.)
       if (candidates.length === 0) return { kind: 'new' };
-      const reply = await chat(settings, buildMatchPrompt(topic, candidates));
+      const reply = await chat(settings, buildMatchPrompt(topic, candidates), log);
       return parseMatchSuggestion(reply, candidates);
     },
   };
@@ -51,16 +52,32 @@ export function createMatcher(settings: Settings): Matcher {
 /** The cloud embedder, using the configured embedder model. The OpenAI-compatible
  *  /embeddings endpoint takes a batch of inputs and returns one vector each. v1 embeds
  *  the whole vault per query, so this is called with many texts at once. */
-export function createEmbedder(settings: Settings): Embedder {
+export function createEmbedder(settings: Settings, log: Log = noopLog): Embedder {
   return {
     async embed(texts): Promise<number[][]> {
       if (texts.length === 0) return [];
-      const res = await fetch(`${baseUrl(settings)}/embeddings`, {
+      const url = `${baseUrl(settings)}/embeddings`;
+      log({
+        op: 'http',
+        message: 'embedding request',
+        detail: { url, model: settings.embedderModel, inputs: texts.length },
+      });
+      const res = await fetch(url, {
         method: 'POST',
         headers: authHeaders(settings),
         body: JSON.stringify({ model: settings.embedderModel, input: texts }),
       });
-      if (!res.ok) throw new Error(`Embedding request failed: ${res.status} ${res.statusText}`);
+      if (!res.ok) {
+        log({
+          level: 'error',
+          op: 'http',
+          message: 'embedding request failed',
+          detail: { url, model: settings.embedderModel, status: res.status, statusText: res.statusText },
+        });
+        throw new Error(
+          `Embedding request failed: ${res.status} ${res.statusText} (POST ${url})`,
+        );
+      }
       const data = (await res.json()) as EmbeddingsResponse;
       // The provider returns embeddings keyed by `index` in arbitrary order; reorder to
       // match the input texts — a reorder here would silently mis-rank the vault against
@@ -73,10 +90,10 @@ export function createEmbedder(settings: Settings): Embedder {
 
 /** The answer-synthesis half of RAG: the question plus the most relevant vault Notes
  *  go to the LLM, which answers and names the Notes it drew on. */
-export function createAnswerer(settings: Settings): Answerer {
+export function createAnswerer(settings: Settings, log: Log = noopLog): Answerer {
   return {
     async answer(question, sources): Promise<AnswerOutput> {
-      const reply = await chat(settings, buildAnswerPrompt(question, sources));
+      const reply = await chat(settings, buildAnswerPrompt(question, sources), log);
       return parseAnswerOutput(reply);
     },
   };
@@ -181,8 +198,13 @@ type ChatResponse = { choices?: { message?: { content?: string } }[] };
  *  in arbitrary order. Named so the reorder contract is explicit. */
 type EmbeddingsResponse = { data?: { embedding?: number[]; index?: number }[] };
 
-async function chat(settings: Settings, prompt: string): Promise<string> {
-  const res = await fetch(`${baseUrl(settings)}/chat/completions`, {
+async function chat(settings: Settings, prompt: string, log: Log = noopLog): Promise<string> {
+  const url = `${baseUrl(settings)}/chat/completions`;
+  // The resolved URL, not the configured one: an `llmProvider` that is blank or missing
+  // its scheme resolves against the app's own origin, and seeing that in the log is the
+  // difference between "404 Not Found" and "you posted to your own dev server".
+  log({ op: 'http', message: 'chat request', detail: { url, model: settings.llmModel } });
+  const res = await fetch(url, {
     method: 'POST',
     headers: authHeaders(settings),
     body: JSON.stringify({
@@ -192,7 +214,15 @@ async function chat(settings: Settings, prompt: string): Promise<string> {
       messages: [{ role: 'user', content: prompt }],
     }),
   });
-  if (!res.ok) throw new Error(`LLM request failed: ${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    log({
+      level: 'error',
+      op: 'http',
+      message: 'chat request failed',
+      detail: { url, model: settings.llmModel, status: res.status, statusText: res.statusText },
+    });
+    throw new Error(`LLM request failed: ${res.status} ${res.statusText} (POST ${url})`);
+  }
   const data = (await res.json()) as ChatResponse;
   return data.choices?.[0]?.message?.content ?? '';
 }

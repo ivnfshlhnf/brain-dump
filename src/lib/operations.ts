@@ -11,6 +11,7 @@ import type {
   Settings,
 } from './types';
 import { writeFile, modifyFile, readVaultFiles } from './livesync';
+import { noopLog, type Log } from './logger';
 
 /** The `## Context` block appended after the verbatim original, when Context exists. */
 function contextBlock(ctx: string): string {
@@ -31,6 +32,9 @@ export interface StoreDeps {
   db: DocStore;
   settings: Settings;
   hash: (content: string) => Promise<string>;
+  /** Optional diagnostics. Defaults to `noopLog`, so no existing caller or test has to
+   *  supply one; the app passes a real Log so failures reach `logs/brain-dump.jsonl`. */
+  log?: Log;
 }
 
 /** The verbatim text of a Capture, rejecting an empty brain-dump. */
@@ -53,6 +57,7 @@ export interface CaptureDeps {
   now: () => number;
   newId: () => string;
   hash: (content: string) => Promise<string>;
+  log?: Log;
 }
 
 export interface CaptureResult extends WriteResult {
@@ -592,8 +597,12 @@ export async function captureOrQueue(
     modality: 'text',
   };
 
+  const log = deps.log ?? noopLog;
+  log({ op: 'capture', message: 'capture started', detail: { dumpId: dump.id, chars: content.length } });
+
   if (!deps.isOnline()) {
     await deps.outbox.add(dump);
+    log({ op: 'capture', message: 'queued (offline)', detail: { dumpId: dump.id } });
     return { kind: 'queued', dump, reason: 'offline', message: OFFLINE_CAPTURE_MESSAGE };
   }
 
@@ -601,9 +610,19 @@ export async function captureOrQueue(
   // drain address the same Dump file.
   const pinned: BeginCaptureDeps = { ...deps, now: () => dump.createdAt, newId: () => dump.id };
   try {
-    return { kind: 'session', session: await beginCapture(content, pinned) };
+    const session = { kind: 'session' as const, session: await beginCapture(content, pinned) };
+    log({ op: 'capture', message: 'capture session ready', detail: { dumpId: dump.id } });
+    return session;
   } catch (error) {
     await deps.outbox.add(dump);
+    // The Dump is safe in the outbox; what the user needs to know is *why* the online
+    // path failed, which is almost always the cloud seam or the CouchDB connection.
+    log({
+      level: 'error',
+      op: 'capture',
+      message: 'capture failed online — Dump queued for retry',
+      detail: { dumpId: dump.id, error: (error as Error).message },
+    });
     return {
       kind: 'queued',
       dump,
@@ -641,18 +660,44 @@ export interface DrainDeps extends StoreDeps {
  *  capture time, so a retry rewrites the same file. */
 export async function drainOutbox(deps: DrainDeps): Promise<DrainResult> {
   const result: DrainResult = { organized: [], failed: [] };
-  if (!deps.isOnline()) return result;
+  const log = deps.log ?? noopLog;
+  if (!deps.isOnline()) {
+    log({ op: 'drain', message: 'skipped — offline' });
+    return result;
+  }
 
-  for (const dump of await deps.outbox.list()) {
+  const queued = await deps.outbox.list();
+  log({ op: 'drain', message: 'drain started', detail: { queued: queued.length } });
+
+  for (const dump of queued) {
     try {
       const dumpWrite = await writeDump(dump, deps);
+      log({ op: 'drain', message: 'Dump written', detail: { dumpId: dump.id, path: dumpWrite.path } });
       const note = await organizeNote(dump, deps.organizer, deps.settings);
       const noteWrite = await writeNote(note, deps.db, deps.settings, deps.hash);
       await deps.outbox.remove(dump.id);
+      log({
+        op: 'drain',
+        message: 'Note written, Dump dequeued',
+        detail: { dumpId: dump.id, path: noteWrite.path, title: note.title },
+      });
       result.organized.push({ dump, note, dumpWrite, noteWrite });
     } catch (error) {
+      // Stays queued deliberately — the next drain retries it. Logged every attempt so a
+      // repeating failure is visible as a repeating line rather than a silent spin.
+      log({
+        level: 'error',
+        op: 'drain',
+        message: 'Dump stayed queued',
+        detail: { dumpId: dump.id, error: (error as Error).message },
+      });
       result.failed.push({ dump, error: error as Error });
     }
   }
+  log({
+    op: 'drain',
+    message: 'drain finished',
+    detail: { organized: result.organized.length, failed: result.failed.length },
+  });
   return result;
 }

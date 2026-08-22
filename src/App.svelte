@@ -15,7 +15,22 @@
   import { createOrganizer, createMatcher, createEmbedder, createAnswerer } from './lib/llm';
   import { defaultSha1Hex } from './lib/livesync';
   import { createAutosaver } from './lib/autosave';
+  import { createLog, createDevFileSink, type Log, type LogEvent } from './lib/logger';
   import { DEFAULT_SETTINGS, type Settings, type Citation } from './lib/types';
+
+  // Diagnostics. In dev the sink POSTs each event to the Vite middleware, which appends
+  // it to logs/brain-dump.jsonl in the project folder; in a production build there is no
+  // such endpoint and the POSTs simply fail and are swallowed, leaving the in-memory
+  // buffer that the Config screen shows.
+  const logStore = createLog({ sink: createDevFileSink() });
+  // Mirrored into reactive state on every event: `logStore` is a const, so reading it
+  // directly from the template would never re-render (this component is in legacy mode,
+  // where reactivity comes from assignment).
+  let logEvents: LogEvent[] = [];
+  const log: Log = (event) => {
+    logStore.log(event);
+    logEvents = logStore.events();
+  };
 
   let settings: Settings = { ...DEFAULT_SETTINGS };
   let text = '';
@@ -62,7 +77,7 @@
   // The store + hash deps shared by every operation call. Built per call so a
   // settings change between capture and save is picked up.
   function storeDeps() {
-    return { db: createRemoteDb(settings), settings, hash: defaultSha1Hex };
+    return { db: createRemoteDb(settings), settings, hash: defaultSha1Hex, log };
   }
 
   onMount(async () => {
@@ -96,8 +111,8 @@
     try {
       const outcome = await captureOrQueue(text, {
         ...storeDeps(),
-        organizer: createOrganizer(settings),
-        matcher: createMatcher(settings),
+        organizer: createOrganizer(settings, log),
+        matcher: createMatcher(settings, log),
         outbox,
         isOnline: () => navigator.onLine,
         now: () => Date.now(),
@@ -156,7 +171,7 @@
     try {
       const result = await finalizeCapture(session, {
         ...storeDeps(),
-        organizer: createOrganizer(settings),
+        organizer: createOrganizer(settings, log),
         now: () => Date.now(),
       });
       session = result.session;
@@ -201,7 +216,7 @@
       await refreshNoteMetadata(savedNotePath, {
         db: createRemoteDb(settings),
         settings,
-        organizer: createOrganizer(settings),
+        organizer: createOrganizer(settings, log),
         hash: defaultSha1Hex,
         now: () => Date.now(),
       });
@@ -246,7 +261,7 @@
     try {
       const result = await drainOutbox({
         ...storeDeps(),
-        organizer: createOrganizer(settings),
+        organizer: createOrganizer(settings, log),
         outbox,
         isOnline: () => navigator.onLine,
       });
@@ -276,8 +291,8 @@
     try {
       const result = await retrieve(question, {
         ...storeDeps(),
-        embedder: createEmbedder(settings),
-        answerer: createAnswerer(settings),
+        embedder: createEmbedder(settings, log),
+        answerer: createAnswerer(settings, log),
       });
       answer = result.answer;
       citations = result.citations;
@@ -288,9 +303,51 @@
     }
   }
 
+  /** The LLM provider must be an absolute http(s) URL. A blank or scheme-less value
+   *  resolves against the app's own origin, so every cloud call quietly 404s against the
+   *  dev server instead of reaching the provider — a failure that only shows up later, as
+   *  a queued Dump. Catching it at save time points at the field while it is on screen. */
+  function providerUrlError(url: string): string | null {
+    if (!url.trim()) return 'LLM provider is required, e.g. https://openrouter.ai/api/v1';
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return `"${url}" is not a full URL. Include the scheme, e.g. https://openrouter.ai/api/v1`;
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return `LLM provider must be http(s), not "${parsed.protocol}"`;
+    }
+    return null;
+  }
+
   async function saveConfig() {
+    const problem = providerUrlError(settings.llmProvider);
+    if (problem) {
+      status = problem;
+      log({ level: 'error', op: 'config', message: 'settings rejected', detail: { problem } });
+      return;
+    }
     await saveSettings(settings);
     status = 'Settings saved';
+    log({
+      op: 'config',
+      message: 'settings saved',
+      detail: {
+        llmProvider: settings.llmProvider,
+        llmModel: settings.llmModel,
+        embedderModel: settings.embedderModel,
+        couchdbUrl: settings.couchdbUrl,
+        couchdbDb: settings.couchdbDb,
+        managedFolder: settings.managedFolder,
+        hasApiKey: Boolean(settings.llmApiKey),
+      },
+    });
+  }
+
+  function copyDiagnostics() {
+    void navigator.clipboard?.writeText(logStore.format());
+    status = 'Diagnostics copied';
   }
 </script>
 
@@ -385,6 +442,24 @@
     <label>LLM API key <input type="password" bind:value={settings.llmApiKey} /></label>
     <label>Embedder model <input bind:value={settings.embedderModel} placeholder="openai/text-embedding-3-small" /></label>
     <button on:click={saveConfig}>Save settings</button>
+
+    <h2>Diagnostics</h2>
+    <p class="hint">
+      The last {logEvents.length} events, newest first. In dev these are also appended to
+      <code>logs/brain-dump.jsonl</code> in the project folder.
+    </p>
+    <button on:click={copyDiagnostics}>Copy diagnostics</button>
+    <button on:click={() => { logStore.clear(); logEvents = []; status = 'Diagnostics cleared'; }}>Clear</button>
+    <ul class="diagnostics">
+      {#each logEvents.slice().reverse() as e}
+        <li class:err={e.level === 'error'}>
+          <code>{new Date(e.at).toLocaleTimeString()}</code>
+          <strong>{e.op}</strong>
+          {e.message}
+          {#if e.detail}<code class="detail">{JSON.stringify(e.detail)}</code>{/if}
+        </li>
+      {/each}
+    </ul>
   {/if}
 
   {#if status}<p>{status}</p>{/if}

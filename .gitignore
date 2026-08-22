@@ -8,3 +8,6 @@ dev.db
 *.log
 # Local secrets for the opt-in smoke tests (never committed)
 .env
+
+# The dev diagnostic log — describes a real vault
+logs/

@@ -74,7 +74,7 @@ Open the app, go to **Config**, and fill in:
 | Username / Password | CouchDB credentials |
 | Managed folder | Where Notes go. Default `Brain Dump` |
 | Case-sensitive | Must match LiveSync's "Handle files as Case-Sensitive" setting (its default is **off**) |
-| LLM provider | The **full** OpenAI-compatible base URL, including scheme and version path — `https://openrouter.ai/api/v1`, not the bare host. A value without a scheme resolves against the app's own origin and every LLM call 404s |
+| LLM provider | The **full** OpenAI-compatible base URL, including the version path — `https://openrouter.ai/api/v1`, not the bare host |
 | LLM model | Must support `response_format: { type: 'json_object' }` |
 | LLM API key | Your provider key |
 | Embedder model | e.g. `openai/text-embedding-3-small` |
@@ -109,11 +109,6 @@ reader accepts the documents — pinning the format contract that ADR-0001 depen
 against a live provider and a real CouchDB, end to end. Assertions are on structure and
 non-emptiness, never exact strings, because the model is non-deterministic.
 
-> **Never put your real vault's database in `.env`.** Both smoke suites call `destroy()` on
-> whatever `COUCHDB_DB` names — before *and* after the run. That is what makes them
-> repeatable, and it would silently delete your entire vault. `.env` is for throwaway test
-> databases only; your real vault belongs in the app's Config screen, nowhere else.
-
 Both smoke suites are **skipped unless their env gate is set**, so a fresh checkout is green
 with no Docker and no API key. To run them:
 
@@ -127,6 +122,27 @@ docker compose -f docker-compose.smoke.yml down
 
 `.env` is gitignored; keys never enter the repo. Each smoke test creates and destroys its
 own database, so runs leave nothing behind and repeat cleanly.
+
+## Diagnostics
+
+When something goes wrong against a real vault, the app records a structured event log:
+what it tried, against which **resolved** URL, and what came back.
+
+- **In the app**: Config → *Diagnostics* lists recent events, with a **Copy** button.
+- **On disk (dev only)**: every event is also appended to `logs/brain-dump.jsonl`, one JSON
+  object per line — greppable by you, parseable by an agent:
+
+  ```bash
+  tail -f logs/brain-dump.jsonl                     # follow live
+  jq -c 'select(.level=="error")' logs/brain-dump.jsonl   # just the failures
+  ```
+
+The file is written by a Vite dev middleware (`devLogFile()` in `vite.config.ts`), since a
+browser cannot write to the project folder. A production build has no such endpoint — the
+in-memory buffer is all that remains. `logs/` is gitignored.
+
+Events carry paths, lengths, and outcomes — never Dump or Note content, and never
+credentials — so the log is safe to paste into a conversation.
 
 ## Project layout
 
