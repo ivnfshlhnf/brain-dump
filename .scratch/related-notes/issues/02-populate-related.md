@@ -1,12 +1,12 @@
 **Status:** ready-for-agent
 
-# 11 — Populate a Note's Related links
+# 02 — Populate a Note's Related links
 
 **What to build:** Fill a Note's `## Related` section with links to genuinely related
 existing documents, ranked by embedding similarity and judged by the LLM, computed at final
 save over the whole vault. Outbound links only — no reverse links written into other Notes.
 
-**Blocked by:** 10 — embedding cache (Related ranks over the whole vault on the capture
+**Blocked by:** 01 — embedding cache (Related ranks over the whole vault on the capture
 path; without the cache this costs a full-vault embed per capture).
 
 ## Problem Statement
@@ -16,7 +16,7 @@ path; without the cache this costs a full-vault embed per capture).
 `createOrganizer` is given exactly one thing: the text of the Dump. It has never seen the
 vault, another Note's title, or a path. Its only options are to return `[]` or to invent a
 wikilink to a Note that may not exist — and inventing one would write a dead link into the
-vault, the bug class ticket 06 hunted down.
+vault, the bug class brain-dump-v1's ticket 06 hunted down.
 
 Dogfooding confirmed it: two Notes captured on clearly related topics both came back with an
 empty `## Related`. No better model and no longer prompt can fix this, because the

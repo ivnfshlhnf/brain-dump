@@ -11,8 +11,8 @@ v1 deliberately had no vector index: every Retrieve re-embeds the whole vault, a
 listed a persistent index under Out of Scope as "a later optimization when query latency
 demands it."
 
-Populating a Note's Related links (ticket 11) makes that demand arrive. Related ranks a new
-Note against the whole vault, on the capture path. Without a cache the app would embed the
+Populating a Note's Related links (the related-notes feature, ticket 02) makes that demand
+arrive. Related ranks a new Note against the whole vault, on the capture path. Without a cache the app would embed the
 entire vault twice per interaction — once per question, once per capture — at roughly $0.02
 per full embed of a 2,000-note vault ($0.02/M input tokens for
 `openai/text-embedding-3-small`), growing linearly. The recurring cost is survivable; the

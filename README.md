@@ -184,10 +184,12 @@ test — behavior lives there, not in the component.
 - **Text only.** Voice capture and spoken answers are iteration 2.
 - **No persistent vector index yet.** Every Retrieve re-embeds the whole vault, so query cost
   and latency grow with vault size. A content-addressed cache in a sibling CouchDB database is
-  specified in [ADR-0004](./docs/adr/0004-embedding-cache-sibling-database.md) and ticket 10.
+  specified in [ADR-0004](./docs/adr/0004-embedding-cache-sibling-database.md) and the
+  related-notes feature's ticket 01.
 - **A Note's `## Related` section is always empty.** The Organizer is only ever shown the
-  Dump's own text, never the vault, so it cannot name a Note it has never seen. Ticket 11
-  fixes this by ranking against the vault instead of asking the model to guess.
+  Dump's own text, never the vault, so it cannot name a Note it has never seen. The
+  related-notes feature's ticket 02 fixes this by ranking against the vault instead of
+  asking the model to guess.
 - **Retrieval sends your personal notes to the cloud provider**, not just your brain-dumps —
   a direct consequence of ADR-0002 plus a cloud LLM. Accepted for v1.
 - **The app depends on LiveSync's internal document format**, for which no official

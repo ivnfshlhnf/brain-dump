@@ -1,15 +1,15 @@
 **Status:** ready-for-agent
 
-# 10 — Persistent embedding cache in a sibling CouchDB database
+# 01 — Persistent embedding cache in a sibling CouchDB database
 
 **What to build:** A content-addressed cache of vault-document embeddings, stored in an
 app-owned CouchDB database alongside the vault database, so a document is embedded once
-ever rather than once per interaction. Unblocks ticket 11 (Related) and removes Retrieve's
+ever rather than once per interaction. Unblocks ticket 02 (Related) and removes Retrieve's
 known scaling cliff.
 
 **Blocked by:** nothing.
 
-**Blocks:** 11 — populate Related.
+**Blocks:** 02 — populate Related.
 
 ## Problem Statement
 
@@ -17,7 +17,7 @@ v1 deliberately shipped without a vector index: every Retrieve reads the whole v
 re-embeds it from scratch (`src/lib/retrieve.ts`, spec §Out of Scope — "a persistent
 `_changes`-fed index is a later optimization when query latency demands it").
 
-Ticket 11 makes that demand arrive. Populating a Note's Related links means ranking the new
+Ticket 02 makes that demand arrive. Populating a Note's Related links means ranking the new
 Note against the vault, over the **whole** vault, on every capture — so the app would embed
 the entire vault twice per interaction (once per question, once per capture) instead of
 once. At `openai/text-embedding-3-small` pricing of $0.02 per million input tokens, a
@@ -75,9 +75,10 @@ uncached path, and ~8 KB per 1536-dimension vector versus ~20 KB as JSON floats.
   invalidates cleanly instead of mixing incompatible vector spaces.
 - **Encoding: base64 float32.** Lossless; `Float32Array` ↔ base64 both ways.
 - **Seam: wrap the `Embedder`, do not change it.** A `createCachingEmbedder(inner, cache)`
-  satisfies the existing `Embedder` interface, so `retrieve.ts` and ticket 11 are unchanged
-  and the existing tests keep passing with a plain fake. Cache behaviour is tested at this
-  wrapper.
+  satisfies the existing `Embedder` interface, so `retrieve.ts` and ticket 02 are unchanged
+  and the existing tests keep passing with a plain fake. `Embedder` is already a dependency
+  seam of the operation layer, so this introduces **no new seam**: the caching embedder is
+  injected at Seam A like any other fake.
 - **Degradation: a cache failure is never fatal.** A read or write error against the cache
   database is logged and falls through to embedding normally — the diagnostics log records
   it so a silently-disabled cache is visible rather than mysterious.
@@ -88,8 +89,10 @@ uncached path, and ~8 KB per 1536-dimension vector versus ~20 KB as JSON floats.
 
 ## Testing Decisions
 
-- Seam A style: drive `createCachingEmbedder` as a black box against an in-memory PouchDB
-  and a counting fake embedder.
+- Seam A, not a new seam: drive `retrieve` (and the finalize path) as black boxes with a
+  caching embedder wrapping a **counting fake** inner embedder, against an in-memory PouchDB.
+  Cache behaviour is asserted through the operation layer's observable results plus the inner
+  fake's call count — never by reaching into the cache module.
 - A second call for the same content must not reach the inner embedder; changed content
   must; the returned vectors must equal the uncached vectors exactly.
 - A cache database that throws must still produce correct embeddings.
