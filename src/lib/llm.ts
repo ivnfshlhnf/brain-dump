@@ -1,13 +1,18 @@
 // The cloud-model plumbing behind the operation layer's seams: the Organizer and
 // Matcher (Organize, new-vs-append) and the Embedder and Answerer (Retrieve).
-// Best-effort plumbing — not unit-tested, like createRemoteDb. The operation layer
+// Best-effort plumbing — verified by the Seam C smoke test (tests/llm-smoke.test.ts) and,
+// for the request shape alone, by tests/llm-provider.test.ts. The operation layer
 // depends only on the interfaces; tests pass deterministic fakes, the app passes the
 // real cloud implementations built here.
 //
-// `llmProvider` holds the provider's base URL (e.g. an Ollama-compatible host).
-// Chat calls use Ollama's /api/chat with `format: 'json'` so the model returns strict
-// JSON we can map onto our output types; embeddings use /api/embed with the separately
-// configured embedder model. Provider/models/key are confirmed at config time.
+// The seam speaks the OpenAI-compatible API — the universal cloud interface: it works
+// against OpenRouter, OpenAI, Groq, and a local Ollama (via its /v1 compat endpoint)
+// alike. `llmProvider` holds the full OpenAI-compatible base URL (e.g.
+// https://openrouter.ai/api/v1 or http://localhost:11434/v1). Chat calls POST
+// {base}/chat/completions with `response_format: { type: 'json_object' }` so the model
+// returns strict JSON we can map onto our output types; embeddings POST {base}/embeddings
+// with the separately configured embedder model. Provider/models/key are confirmed at
+// config time. (See ADR-0003 for why v1 is OpenAI-compatible rather than Ollama-native.)
 import type {
   Modality,
   Organizer,
@@ -43,22 +48,25 @@ export function createMatcher(settings: Settings): Matcher {
   };
 }
 
-/** The cloud embedder, using the configured embedder model (Ollama's /api/embed takes
- *  a batch of inputs and returns one vector each). v1 embeds the whole vault per
- *  query, so this is called with many texts at once. */
+/** The cloud embedder, using the configured embedder model. The OpenAI-compatible
+ *  /embeddings endpoint takes a batch of inputs and returns one vector each. v1 embeds
+ *  the whole vault per query, so this is called with many texts at once. */
 export function createEmbedder(settings: Settings): Embedder {
   return {
     async embed(texts): Promise<number[][]> {
       if (texts.length === 0) return [];
-      const base = settings.llmProvider.replace(/\/+$/, '');
-      const res = await fetch(`${base}/api/embed`, {
+      const res = await fetch(`${baseUrl(settings)}/embeddings`, {
         method: 'POST',
         headers: authHeaders(settings),
         body: JSON.stringify({ model: settings.embedderModel, input: texts }),
       });
       if (!res.ok) throw new Error(`Embedding request failed: ${res.status} ${res.statusText}`);
-      const data = (await res.json()) as { embeddings?: number[][] };
-      return data.embeddings ?? [];
+      const data = (await res.json()) as EmbeddingsResponse;
+      // The provider returns embeddings keyed by `index` in arbitrary order; reorder to
+      // match the input texts — a reorder here would silently mis-rank the vault against
+      // the question.
+      const ordered = [...(data.data ?? [])].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+      return ordered.map((d) => d.embedding ?? []);
     },
   };
 }
@@ -158,21 +166,35 @@ function authHeaders(settings: Settings): Record<string, string> {
   };
 }
 
+/** The OpenAI-compatible base URL with any trailing slash trimmed (the scheme's `://`
+ *  is preserved — stripping only the trailing slash avoids the `http://` → `http:/`
+ *  collapse that broke createRemoteDb before ticket 07 fixed it). */
+function baseUrl(settings: Settings): string {
+  return settings.llmProvider.replace(/\/+$/, '');
+}
+
+/** The OpenAI-compatible chat-completions response: the reply text is the first choice's
+ *  message content. Named so the contract is explicit rather than re-inlined at each call. */
+type ChatResponse = { choices?: { message?: { content?: string } }[] };
+
+/** The OpenAI-compatible embeddings response: one embedding per input, keyed by `index`
+ *  in arbitrary order. Named so the reorder contract is explicit. */
+type EmbeddingsResponse = { data?: { embedding?: number[]; index?: number }[] };
+
 async function chat(settings: Settings, prompt: string): Promise<string> {
-  const base = settings.llmProvider.replace(/\/+$/, '');
-  const res = await fetch(`${base}/api/chat`, {
+  const res = await fetch(`${baseUrl(settings)}/chat/completions`, {
     method: 'POST',
     headers: authHeaders(settings),
     body: JSON.stringify({
       model: settings.llmModel,
       stream: false,
-      format: 'json',
+      response_format: { type: 'json_object' },
       messages: [{ role: 'user', content: prompt }],
     }),
   });
   if (!res.ok) throw new Error(`LLM request failed: ${res.status} ${res.statusText}`);
-  const data = (await res.json()) as { message?: { content?: string }; content?: string };
-  return data.message?.content ?? data.content ?? '';
+  const data = (await res.json()) as ChatResponse;
+  return data.choices?.[0]?.message?.content ?? '';
 }
 
 /** Parse the model's JSON reply onto OrganizeOutput, tolerating fences and loose typing. */

@@ -1,0 +1,156 @@
+// Unit test for the OpenAI-compatible cloud seam in src/lib/llm.ts.
+//
+// llm.ts is "best-effort plumbing, not unit-tested" by convention — the Seam C smoke test
+// (tests/llm-smoke.test.ts) is its verification. But the smoke test needs a live provider
+// + API key, which can't run in CI or a fresh checkout. This test stubs `fetch` to pin the
+// one thing that breaks silently and isn't covered otherwise: the exact OpenAI-compatible
+// request shape (endpoint path, JSON-mode flag, auth) and response parsing
+// (choices[0].message.content for chat; data[].embedding in index order for embeddings).
+//
+// The OpenAI-compatible API is the universal cloud seam: it works against OpenRouter,
+// OpenAI, Groq, and local Ollama (via its /v1 compat endpoint) alike. `llmProvider` holds
+// the full OpenAI-compatible base URL (e.g. https://openrouter.ai/api/v1).
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import type { Mock } from 'vitest';
+import { createOrganizer, createEmbedder, createAnswerer } from '../src/lib/llm';
+import { DEFAULT_SETTINGS, type Settings } from '../src/lib/types';
+
+const base = 'https://example.test/v1';
+const apiKey = 'secret-key';
+
+function settings(overrides: Partial<Settings> = {}): Settings {
+  return {
+    ...DEFAULT_SETTINGS,
+    llmProvider: base,
+    llmModel: 'chat-model',
+    llmApiKey: apiKey,
+    embedderModel: 'embed-model',
+    ...overrides,
+  };
+}
+
+/** A minimal fetch Response: ok + status + a JSON body. */
+function jsonResponse(body: unknown, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: 'OK',
+    json: async () => body,
+  } as Response;
+}
+
+/** Per-test response: the mock returns this body+status while capturing the request. */
+let responseBody: unknown;
+let responseStatus: number;
+
+/** Capture the last fetch call's URL + parsed body. */
+let lastUrl = '';
+let lastOpts: RequestInit = {};
+let fetchMock: Mock;
+
+beforeEach(() => {
+  lastUrl = '';
+  lastOpts = {};
+  responseBody = {};
+  responseStatus = 200;
+  // The implementation both captures the request and returns the per-test response, so
+  // `mockResolvedValue` (which would bypass capture) is never used. Cast around vitest's
+  // overloaded `fetch` spy type — we only need mockRestore + call assertions.
+  fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    lastUrl = typeof input === 'string' ? input : (input as URL).toString();
+    lastOpts = init ?? {};
+    return jsonResponse(responseBody, responseStatus);
+  }) as unknown as Mock;
+});
+
+afterEach(() => {
+  fetchMock.mockRestore();
+});
+
+describe('OpenAI-compatible chat seam (createOrganizer / createAnswerer)', () => {
+  it('POSTs to {base}/chat/completions with response_format json_object and Bearer auth', async () => {
+    const organizeJson = JSON.stringify({
+      title: 'T',
+      tags: ['a'],
+      category: 'C',
+      summary: 'S',
+      keyPoints: ['k'],
+      related: [],
+      body: 'B',
+    });
+    responseBody = { choices: [{ message: { content: organizeJson } }] };
+
+    await createOrganizer(settings()).organize('a dump', 'text');
+
+    expect(lastUrl).toBe(`${base}/chat/completions`);
+    expect(lastOpts.method).toBe('POST');
+    const headers = lastOpts.headers as Record<string, string>;
+    expect(headers['Content-Type']).toBe('application/json');
+    expect(headers['Authorization']).toBe(`Bearer ${apiKey}`);
+
+    const body = JSON.parse(lastOpts.body as string);
+    expect(body.model).toBe('chat-model');
+    expect(body.stream).toBe(false);
+    expect(body.response_format).toEqual({ type: 'json_object' });
+    // The message content is the built Organize prompt, which embeds the dump text.
+    expect(body.messages).toHaveLength(1);
+    expect(body.messages[0].role).toBe('user');
+    expect(body.messages[0].content).toContain('a dump');
+  });
+
+  it('parses the reply from choices[0].message.content', async () => {
+    const organizeJson = JSON.stringify({
+      title: 'Water the basil',
+      tags: ['home'],
+      category: 'Home',
+      summary: 'A reminder.',
+      keyPoints: ['water it'],
+      related: ['[[basil]]'],
+      body: 'I keep forgetting.',
+    });
+    responseBody = { choices: [{ message: { content: organizeJson } }] };
+
+    const out = await createOrganizer(settings()).organize('dump', 'text');
+    expect(out.title).toBe('Water the basil');
+    expect(out.tags).toEqual(['home']);
+    expect(out.body).toBe('I keep forgetting.');
+  });
+
+  it('throws on a non-OK response', async () => {
+    responseStatus = 401;
+    responseBody = { error: 'bad' };
+    await expect(createOrganizer(settings()).organize('dump', 'text')).rejects.toThrow();
+  });
+});
+
+describe('OpenAI-compatible embedder seam (createEmbedder)', () => {
+  it('POSTs to {base}/embeddings with {model, input} and parses data[].embedding', async () => {
+    const v0 = [0.1, 0.2, 0.3];
+    const v1 = [0.4, 0.5, 0.6];
+    responseBody = {
+      data: [
+        { embedding: v1, index: 1 },
+        { embedding: v0, index: 0 },
+      ],
+    };
+
+    const vectors = await createEmbedder(settings()).embed(['doc one', 'doc two']);
+
+    expect(lastUrl).toBe(`${base}/embeddings`);
+    expect(lastOpts.method).toBe('POST');
+    const headers = lastOpts.headers as Record<string, string>;
+    expect(headers['Authorization']).toBe(`Bearer ${apiKey}`);
+    const body = JSON.parse(lastOpts.body as string);
+    expect(body.model).toBe('embed-model');
+    expect(body.input).toEqual(['doc one', 'doc two']);
+    // Vectors are returned in index order, not response order — a reorder would otherwise
+    // mis-rank the vault against the question.
+    expect(vectors).toEqual([v0, v1]);
+  });
+
+  it('returns [] for an empty input batch (no call made)', async () => {
+    const vectors = await createEmbedder(settings()).embed([]);
+    expect(vectors).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

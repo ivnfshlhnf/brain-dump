@@ -380,10 +380,10 @@
     <label>Password <input type="password" bind:value={settings.couchdbPassword} /></label>
     <label>Managed folder <input bind:value={settings.managedFolder} /></label>
     <label>Case-sensitive <input type="checkbox" bind:checked={settings.caseSensitive} /></label>
-    <label>LLM provider <input bind:value={settings.llmProvider} placeholder="https://api.ollama.cloud" /></label>
-    <label>LLM model <input bind:value={settings.llmModel} placeholder="llama3.1" /></label>
+    <label>LLM provider <input bind:value={settings.llmProvider} placeholder="https://openrouter.ai/api/v1" /></label>
+    <label>LLM model <input bind:value={settings.llmModel} placeholder="openai/gpt-4o-mini" /></label>
     <label>LLM API key <input type="password" bind:value={settings.llmApiKey} /></label>
-    <label>Embedder model <input bind:value={settings.embedderModel} placeholder="nomic-embed-text" /></label>
+    <label>Embedder model <input bind:value={settings.embedderModel} placeholder="openai/text-embedding-3-small" /></label>
     <button on:click={saveConfig}>Save settings</button>
   {/if}
 

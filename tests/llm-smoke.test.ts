@@ -3,9 +3,10 @@
 // Seam A tests the operation layer with deterministic fakes; Seam B pins the LiveSync
 // doc-format against a real CouchDB. Seam C is the last untested external risk: the real
 // cloud LLM/embedder seam — createOrganizer / createEmbedder / createAnswerer talking to
-// a live Ollama-compatible endpoint. It drives the SAME operation-layer seam as Seam A and
+// a live OpenAI-compatible endpoint. It drives the SAME operation-layer seam as Seam A and
 // B (organizeDump, retrieve) as black boxes, but wires the REAL cloud implementations +
-// a real CouchDB instead of fakes + memory. No new seam; no src/ changes.
+// a real CouchDB instead of fakes + memory. No new seam; the only src/ change is ticket 09
+// making the seam OpenAI-compatible (see ADR-0003).
 //
 // Because a real model is non-deterministic, assertions are on structure, types, and
 // non-emptiness — never on exact output. The point is the integration no fake can cover:
@@ -14,13 +15,15 @@
 // Opt-in and env-gated (mirrors Seam B): the whole suite is skipped unless LLM_SMOKE=1,
 // so `npm test` stays green with no live LLM or CouchDB. Cloud + CouchDB config come from
 // environment variables at run time, so API keys and passwords never enter the repo.
-// Reuses docker-compose.smoke.yml for the throwaway CouchDB.
+// Reuses docker-compose.smoke.yml for the throwaway CouchDB. The OpenAI-compatible API is
+// universal — the same base works against OpenRouter, OpenAI, Groq, or a local Ollama
+// (via its /v1 compat endpoint).
 //
 //   docker compose -f docker-compose.smoke.yml up -d
 //   LIVESYNC_SMOKE=1 LLM_SMOKE=1 \
 //     COUCHDB_URL=http://localhost:5984 COUCHDB_USER=admin COUCHDB_PASSWORD=password \
-//     LLM_PROVIDER=http://localhost:11434 LLM_MODEL=<chat-model> \
-//     [LLM_API_KEY=<key>] EMBEDDER_MODEL=<embed-model> \
+//     LLM_PROVIDER=https://openrouter.ai/api/v1 LLM_MODEL=<chat-model> LLM_API_KEY=<key> \
+//     EMBEDDER_MODEL=openai/text-embedding-3-small \
 //     npx vitest run tests/llm-smoke.test.ts
 import { it, expect, beforeAll, afterAll } from 'vitest';
 import { organizeDump } from '../src/lib/operations';
@@ -48,13 +51,15 @@ import {
 // needs a live LLM or CouchDB and must stay green without them.
 const SMOKE = process.env.LLM_SMOKE === '1';
 
-// Real-cloud + CouchDB config from the environment. Defaults point at a local Ollama +
-// the Seam B throwaway CouchDB so the documented one-command run works out of the box;
-// override for your own setup. Secrets stay in the caller's shell.
-const LLM_PROVIDER = process.env.LLM_PROVIDER ?? 'http://localhost:11434';
-const LLM_MODEL = process.env.LLM_MODEL ?? 'glm-5.2:cloud';
+// Real-cloud + CouchDB config from the environment. The provider defaults to OpenRouter
+// (override LLM_PROVIDER for OpenAI, Groq, or http://localhost:11434/v1 for a local
+// Ollama — the OpenAI-compatible API is universal). The chat + embedder models have no
+// default: they must be supplied via env (they're account-specific), as the run command in
+// the header shows. Secrets stay in the caller's shell.
+const LLM_PROVIDER = process.env.LLM_PROVIDER ?? 'https://openrouter.ai/api/v1';
+const LLM_MODEL = process.env.LLM_MODEL ?? '';
 const LLM_API_KEY = process.env.LLM_API_KEY ?? '';
-const EMBEDDER_MODEL = process.env.EMBEDDER_MODEL ?? 'nomic-embed-text';
+const EMBEDDER_MODEL = process.env.EMBEDDER_MODEL ?? '';
 const COUCHDB_URL = process.env.COUCHDB_URL ?? 'http://localhost:5984';
 const COUCHDB_USER = process.env.COUCHDB_USER ?? 'admin';
 const COUCHDB_PASSWORD = process.env.COUCHDB_PASSWORD ?? 'password';
