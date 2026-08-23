@@ -160,10 +160,11 @@ to ship without a vector index, and retroactively removes Retrieve's known scali
   with the embedder model. Including the model means changing `embedderModel` invalidates
   cleanly instead of mixing incompatible vector spaces.
 
-- **Vector encoding: base64 float32.** Lossless, so ranking is bit-identical to the uncached
-  path; roughly 8 KB per 1536-dimension vector against ~20 KB as JSON floats. Quantisation was
-  considered and rejected — it trades exact ranking for bytes that are not scarce once the
-  cache is out of the vault.
+- **Vector encoding: base64 float32.** Roughly 8 KB per 1536-dimension vector against ~20 KB
+  as JSON floats. This is ranking-preserving rather than bit-lossless: a provider returns
+  float64 values and float32 keeps about seven significant digits, which is far below what moves
+  a cosine ranking. Quantisation was considered and rejected — it rounds by a margin that could
+  move a ranking, for bytes that are not scarce once the cache is out of the vault.
 
 - **The cache wraps the `Embedder` interface rather than changing it.** A caching embedder
   satisfies the existing interface, so retrieval and the related-links pass are unchanged and

@@ -1,4 +1,4 @@
-**Status:** ready-for-agent
+**Status:** done
 
 # 01 — Persistent embedding cache in a sibling CouchDB database
 
@@ -73,7 +73,8 @@ uncached path, and ~8 KB per 1536-dimension vector versus ~20 KB as JSON floats.
 - **Key: the content hash already computed for the chunk id.** One document per
   `(hash, embedder model)` pair — the model is part of the key, so switching embedder models
   invalidates cleanly instead of mixing incompatible vector spaces.
-- **Encoding: base64 float32.** Lossless; `Float32Array` ↔ base64 both ways.
+- **Encoding: base64 float32.** `Float32Array` ↔ base64 both ways. Ranking-preserving rather
+  than bit-lossless — see ADR-0004; the earlier "lossless" claim was wrong.
 - **Seam: wrap the `Embedder`, do not change it.** A `createCachingEmbedder(inner, cache)`
   satisfies the existing `Embedder` interface, so `retrieve.ts` and ticket 02 are unchanged
   and the existing tests keep passing with a plain fake. `Embedder` is already a dependency
@@ -94,8 +95,8 @@ uncached path, and ~8 KB per 1536-dimension vector versus ~20 KB as JSON floats.
   caching embedder wrapping a **counting fake** inner embedder, against an in-memory PouchDB.
   Cache behaviour is asserted through the operation layer's observable results plus the inner
   fake's call count — never by reaching into the cache module.
-- A second call for the same content must not reach the inner embedder; changed content
-  must; the returned vectors must equal the uncached vectors exactly.
+- A second call for the same content must not reach the inner embedder; changed content must;
+  and a warm cache must return the same answer and citations as a cold one.
 - A cache database that throws must still produce correct embeddings.
 - Switching `embedderModel` must not return vectors computed under the previous model.
 

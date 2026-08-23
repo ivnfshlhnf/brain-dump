@@ -40,9 +40,10 @@ it for this purpose.
   the same CouchDB. Plain app-owned documents — no LiveSync format, so no coupling to
   ADR-0001's risk. The vault stays notes-only and Obsidian syncs nothing extra.
 
-- **Quantise vectors to int8** (5× smaller again). Rejected: it trades exact ranking for
-  bytes that are not scarce once the cache is out of the vault, and debugging a ranking
-  change against a lossy cache is miserable.
+- **Quantise vectors to int8** (5× smaller again). Rejected: it rounds by a margin large
+  enough to move a ranking, for bytes that are not scarce once the cache is out of the vault,
+  and debugging a ranking change against a lossy cache is miserable. (Float32 also rounds, but
+  far below that threshold.)
 
 ## Consequences
 
@@ -54,8 +55,13 @@ it for this purpose.
   deployment whose account lacks the right, not as an expected path here.
 - The cache key includes the embedder model, so changing `embedderModel` invalidates cleanly
   rather than mixing incompatible vector spaces.
-- Base64 float32 is lossless, so ranking with the cache is bit-identical to ranking without
-  it. Caching is a speed change and never an answer change — and that is a testable property.
+- Base64 float32 is **ranking-preserving, not bit-lossless**. A provider returns JSON float64
+  values and float32 keeps about seven significant digits of each, so a cached vector is a
+  rounding of the original. The rounding is orders of magnitude below what moves a cosine
+  ranking, and float32 is the standard representation for embeddings — but the earlier claim of
+  "lossless" was wrong and is corrected here. Float64 would be exact at 1.5x the size; precision
+  is not the scarce resource. The testable property is the one that matters: the same question
+  against the same vault returns the same citations warm or cold.
 - A cache failure degrades speed, never correctness: read/write errors fall through to
   embedding normally and are recorded in the diagnostics log, so a silently-disabled cache is
   visible rather than mysterious.
