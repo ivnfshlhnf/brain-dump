@@ -150,7 +150,7 @@ export interface DocStore {
   put(doc: Record<string, unknown>): Promise<{ id: string; rev: string }>;
   get<T = Record<string, unknown>>(id: string): Promise<T>;
   allDocs<T = Record<string, unknown>>(
-    opts?: { include_docs?: boolean; limit?: number },
+    opts?: { include_docs?: boolean; limit?: number; keys?: string[] },
   ): Promise<{ rows: Array<{ doc: T | undefined }> }>;
 }
 
