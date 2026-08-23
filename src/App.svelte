@@ -19,7 +19,7 @@
   import { checkConnections, type HealthReport, type CheckResult } from './lib/health';
   import { createCachingEmbedder } from './lib/embedding-cache';
   import { validateProviderUrl } from './lib/config';
-  import { DEFAULT_SETTINGS, type Settings, type Citation } from './lib/types';
+  import { DEFAULT_SETTINGS, type Settings, type Citation, type Note } from './lib/types';
 
   // Diagnostics. In dev the sink POSTs each event to the Vite middleware, which appends
   // it to logs/brain-dump.jsonl in the project folder; in a production build there is no
@@ -47,6 +47,12 @@
   let context = '';
   // The vault path of the last saved Note — used by the explicit Refresh metadata action.
   let savedNotePath: string | null = null;
+  // The Note as it was actually written. The card shows this once it exists, so what you
+  // look at after the save is the document in the Vault — Related links included — and not
+  // the preview that preceded it.
+  let savedNote: Note | null = null;
+  // Bumped on every Context edit to restart the countdown animation, which is keyed on it.
+  let contextRevision = 0;
   // Append requires explicit user confirmation (spec: "the user confirms … with one
   // action"). The 5s autosave may finalize a 'new' decision on its own, but an 'append'
   // decision is held until the user taps Append — so the autosave no-ops an
@@ -139,12 +145,15 @@
       context = '';
       text = '';
       savedNotePath = null;
+      savedNote = null;
+      contextRevision = 0;
       appendConfirmed = false;
       // Arm the 5s inactivity timer at capture, so a Dump with no added Context
       // still finalizes on its own. For an 'append' match the autosave no-ops until
       // the user confirms (see saveAndFinalize) — the Dump's Context is still saved.
       autosaver.schedule();
-      status = `Captured. Preview: "${session.preview.title}" — ${matchLabel(session)}`;
+      // No status line: the Note is on screen, and the card states its own decision.
+      status = '';
     } catch (e) {
       status = `Error: ${(e as Error).message}`;
     } finally {
@@ -159,6 +168,7 @@
     try {
       session = await addContext(session, context, storeDeps());
       autosaver.schedule();
+      contextRevision += 1;
     } catch (e) {
       status = `Error: ${(e as Error).message}`;
     }
@@ -182,6 +192,7 @@
       session = result.session;
       if (result.ok) {
         savedNotePath = result.written.path;
+        savedNote = result.note;
         status =
           session.match.kind === 'append'
             ? `Appended to: ${session.match.suggestion?.title ?? result.note.title}`
@@ -391,80 +402,132 @@
 </script>
 
 <main>
-  <nav>
-    <button class:on={view === 'capture'} on:click={() => (view = 'capture')}>Capture</button>
-    <button class:on={view === 'ask'} on:click={() => (view = 'ask')}>Ask</button>
-    <button class:on={view === 'config'} on:click={() => (view = 'config')}>Config</button>
-  </nav>
+  <header class="masthead">
+    <span class="wordmark">brain-dump</span>
+    <nav>
+      <button class:on={view === 'capture'} on:click={() => (view = 'capture')}>capture</button>
+      <button class:on={view === 'ask'} on:click={() => (view = 'ask')}>ask</button>
+      <button class:on={view === 'config'} on:click={() => (view = 'config')}>config</button>
+    </nav>
+  </header>
 
   {#if view === 'capture'}
     {#if queuedCount}
-      <p class="queued">{queuedCount} Dump(s) saved — they will be Organized when online.</p>
+      <p class="status">{queuedCount} Dump(s) saved — they will be Organized when online.</p>
     {/if}
-    {#if queueError}<p class="queued">{queueError}</p>{/if}
+    {#if queueError}<p class="status err">{queueError}</p>{/if}
+
     {#if !session}
+      <!-- The Dump is the product, not a form field: set in the content face, at content size. -->
       <textarea
+        class="dump"
         bind:value={text}
-        placeholder="Dump a thought..."
+        placeholder="What are you thinking?"
         disabled={busy}></textarea>
-      <button on:click={captureDump} disabled={busy || !text.trim()}>Capture</button>
+      <div class="actions">
+        <button class="primary" on:click={captureDump} disabled={busy || !text.trim()}>Capture</button>
+      </div>
     {:else}
-      <!-- Note preview (the initial Organize) shown alongside the match decision -->
-      <section class="preview">
-        <h2>{session.preview.title}</h2>
-        <p class="match">
-          {#if session.match.kind === 'append'}
-            Append to “{session.match.suggestion?.title}”
+      {@const shown = savedNote ?? session.preview}
+      <!-- The whole Note, not a summary of it. Before the save this is the preview; after it
+           this is the document in the Vault. You are approving a Note, so you are shown one. -->
+      <article class="note" class:committed={session.saved}>
+        {#key contextRevision}
+          <div class="burn"></div>
+        {/key}
+
+        <p class="eyebrow">
+          {#if session.saved && savedNotePath}
+            {savedNotePath}
           {:else}
-            New Note
+            {matchLabel(session)}
           {/if}
         </p>
-        <p class="summary">{session.preview.summary}</p>
-        {#if session.preview.keyPoints.length}
-          <ul>{#each session.preview.keyPoints as p}<li>{p}</li>{/each}</ul>
+
+        <h2>{shown.title}</h2>
+
+        <dl class="meta">
+          {#if shown.tags.length}
+            <dt>tags</dt>
+            <dd>{shown.tags.join('  ')}</dd>
+          {/if}
+          {#if shown.category}
+            <dt>category</dt>
+            <dd>{shown.category}</dd>
+          {/if}
+        </dl>
+
+        {#if shown.body}
+          <div class="note-body">{shown.body}</div>
         {/if}
-        {#if session.preview.tags.length}
-          <p class="tags">{#each session.preview.tags as t}<span>{t}</span>{/each}</p>
+
+        {#if shown.summary}
+          <p class="rule-label">summary</p>
+          <p>{shown.summary}</p>
         {/if}
-      </section>
+
+        {#if shown.keyPoints.length}
+          <p class="rule-label">key points</p>
+          <ul>{#each shown.keyPoints as point}<li>{point}</li>{/each}</ul>
+        {/if}
+
+        <p class="rule-label">related</p>
+        {#if shown.related.length}
+          <ul class="links">{#each shown.related as link}<li>{link}</li>{/each}</ul>
+        {:else if session.saved}
+          <p class="pending">No Note in the Vault was close enough to link.</p>
+        {:else}
+          <p class="pending">Links are found when the Note is saved.</p>
+        {/if}
+      </article>
 
       {#if session.match.kind === 'append' && !session.saved}
         <!-- Confirm new-vs-append with one action: keep the append, or override to a new Note -->
-        <div class="confirm">
+        <div class="actions">
           <button class="primary" on:click={confirmAppend}>Append</button>
           <button on:click={chooseNewNote}>Save as new Note</button>
         </div>
       {/if}
 
-      <label class="context">
-        Add Context (preserves your original; saved after 5s idle or on close)
+      <label class="context-field">
+        add context
         <textarea bind:value={context} on:input={onContextInput} disabled={session.saved}></textarea>
       </label>
+      <p class="hint">
+        {#if session.saved}
+          Dump frozen. Your verbatim original is kept inside it.
+        {:else}
+          Saves 5 seconds after you stop typing. Your verbatim original is kept.
+        {/if}
+      </p>
 
-      {#if session.saved}
-        <p class="saved">Saved — Dump frozen.</p>
-      {/if}
-      <button on:click={() => autosaver.flush()} disabled={session.saved}>Save now</button>
-      {#if session.saved && savedNotePath}
-        <!-- Explicit metadata refresh — never automatic -->
-        <button on:click={refreshMetadata} disabled={busy}>Refresh metadata</button>
-      {/if}
-      <button on:click={() => { session = null; autosaver.cancel(); }}>New capture</button>
+      <div class="actions">
+        <button on:click={() => autosaver.flush()} disabled={session.saved}>Save now</button>
+        {#if session.saved && savedNotePath}
+          <!-- Explicit metadata refresh — never automatic -->
+          <button on:click={refreshMetadata} disabled={busy}>Refresh metadata</button>
+        {/if}
+        <button on:click={() => { session = null; savedNote = null; autosaver.cancel(); }}>New capture</button>
+      </div>
     {/if}
   {:else if view === 'ask'}
     <label class="ask">
-      Ask your vault
-      <textarea bind:value={question} placeholder="What did I think about...?" disabled={asking}
+      ask your vault
+      <textarea bind:value={question} placeholder="What did I think about..." disabled={asking}
       ></textarea>
     </label>
-    <button on:click={askQuestion} disabled={asking || !question.trim()}>Ask</button>
+    <div class="actions">
+      <button class="primary" on:click={askQuestion} disabled={asking || !question.trim()}>
+        {asking ? 'Reading your vault…' : 'Ask'}
+      </button>
+    </div>
     {#if answer}
       <section class="answer">
         <p>{answer}</p>
         {#if citations.length}
-          <h3>Sources</h3>
-          <ul>
-            {#each citations as c}<li>{c.title} <code>{c.link}</code></li>{/each}
+          <p class="rule-label">sources</p>
+          <ul class="sources">
+            {#each citations as c}<li>{c.title} — {c.link}</li>{/each}
           </ul>
         {/if}
       </section>
@@ -481,9 +544,11 @@
     <label>LLM model <input bind:value={settings.llmModel} /></label>
     <label>LLM API key <input type="password" bind:value={settings.llmApiKey} /></label>
     <label>Embedder model <input bind:value={settings.embedderModel} /></label>
-    <button on:click={saveConfig}>Save settings</button>
+    <div class="actions">
+      <button class="primary" on:click={saveConfig}>Save settings</button>
+    </div>
 
-    <h2>Connection</h2>
+    <p class="rule-label">connection</p>
     <p class="hint">
       Checks CouchDB, the chat model, and the embedder independently, so a failure points at
       one field. The chat and embedder checks each make one small real request and
@@ -491,9 +556,11 @@
       immediately removes a throwaway database, to find out whether your CouchDB account may
       create one at all.
     </p>
-    <button on:click={testConnections} disabled={testing}>
-      {testing ? 'Testing…' : 'Test connection'}
-    </button>
+    <div class="actions">
+      <button on:click={testConnections} disabled={testing}>
+        {testing ? 'Testing…' : 'Test connection'}
+      </button>
+    </div>
     {#if health}
       <ul class="checks">
         {#each healthRows(health) as row}
@@ -504,13 +571,15 @@
       </ul>
     {/if}
 
-    <h2>Diagnostics</h2>
+    <p class="rule-label">diagnostics</p>
     <p class="hint">
       The last {logEvents.length} events, newest first. In dev these are also appended to
       <code>logs/brain-dump.jsonl</code> in the project folder.
     </p>
-    <button on:click={copyDiagnostics}>Copy diagnostics</button>
-    <button on:click={() => { logStore.clear(); logEvents = []; status = 'Diagnostics cleared'; }}>Clear</button>
+    <div class="actions">
+      <button on:click={copyDiagnostics}>Copy diagnostics</button>
+      <button on:click={() => { logStore.clear(); logEvents = []; status = 'Diagnostics cleared'; }}>Clear</button>
+    </div>
     <ul class="diagnostics">
       {#each logEvents.slice().reverse() as e}
         <li class:err={e.level === 'error'}>
@@ -523,5 +592,5 @@
     </ul>
   {/if}
 
-  {#if status}<p>{status}</p>{/if}
+  {#if status}<p class="status">{status}</p>{/if}
 </main>

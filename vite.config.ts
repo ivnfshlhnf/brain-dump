@@ -58,13 +58,21 @@ export default defineConfig({
     devLogFile(),
     VitePWA({
       registerType: 'autoUpdate',
+      workbox: {
+        // Workbox's default globs do not include fonts. Brain-dump self-hosts its two
+        // faces precisely so the app keeps its typography offline — where the offline
+        // outbox matters most — so the woff2 files must be precached like any other asset.
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+      },
       manifest: {
         name: 'Brain-dump',
         short_name: 'Brain-dump',
         display: 'standalone',
         start_url: '/',
-        background_color: '#ffffff',
-        theme_color: '#ffffff',
+        // The light ground; the dark equivalent is declared per-scheme in index.html,
+        // which a manifest cannot express.
+        background_color: '#f0f6fa',
+        theme_color: '#f0f6fa',
       },
     }),
   ],

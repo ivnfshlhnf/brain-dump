@@ -1,80 +1,526 @@
-:root {
-  font-family: system-ui, sans-serif;
-  color: #1a1a1a;
-  background: #fafafa;
+/* Brain-dump — the design system.
+ *
+ * The app is a press: it takes something molten (a Dump — verbatim, unstructured) and sets
+ * it into something permanent (a Note in the Vault). State is therefore the material, and
+ * exactly two accents carry it:
+ *
+ *   ember — uncommitted. The Dump, the preview, the five-second countdown.
+ *   set   — in the Vault. The saved path, Related links, Ask citations.
+ *
+ * Neither colour appears anywhere it does not mean that. If you reach for ember as
+ * decoration, the system is broken.
+ *
+ * Two faces, no third. The machine speaks in mono (labels, tags, paths, wikilinks,
+ * frontmatter keys); your thought is set in serif (the Dump you type, titles, bodies,
+ * summaries). The contrast is the idea: the scaffolding is the app's job, the thought is
+ * yours.
+ *
+ * Fonts are self-hosted, not fetched from a CDN — this is an offline-capable PWA with an
+ * offline outbox, and a webfont request is exactly what fails when the app matters most.
+ * Newsreader (variable wght, latin) and IBM Plex Mono (400/500, latin) are both SIL OFL
+ * 1.1; the licences ship beside them in public/fonts/.
+ */
+
+@font-face {
+  font-family: 'Newsreader';
+  src: url('/fonts/newsreader-latin-wght-normal.woff2') format('woff2-variations');
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
 }
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('/fonts/ibm-plex-mono-latin-400-normal.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('/fonts/ibm-plex-mono-latin-500-normal.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* Raw values, kept separate from the resolved tokens so a pair can be recombined and so
+   * the no-light-dark() fallback below has something to switch. */
+  --ground-light: oklch(97% 0.008 240);
+  --ground-dark: oklch(21% 0.028 235);
+  --raised-light: oklch(100% 0 0);
+  --raised-dark: oklch(25% 0.03 235);
+  --text-light: oklch(28% 0.02 240);
+  --text-dark: oklch(92% 0.012 230);
+  --dim-light: oklch(52% 0.02 240);
+  --dim-dark: oklch(70% 0.018 230);
+  --rule-light: oklch(88% 0.012 240);
+  --rule-dark: oklch(32% 0.02 235);
+  --ember-light: oklch(58% 0.16 55);
+  --ember-dark: oklch(75% 0.15 65);
+  --set-light: oklch(52% 0.09 195);
+  --set-dark: oklch(72% 0.09 195);
+  --alarm-light: oklch(52% 0.19 25);
+  --alarm-dark: oklch(74% 0.16 25);
+
+  --ground: var(--ground-light);
+  --raised: var(--raised-light);
+  --text: var(--text-light);
+  --dim: var(--dim-light);
+  --rule: var(--rule-light);
+  --ember: var(--ember-light);
+  --set: var(--set-light);
+  --alarm: var(--alarm-light);
+
+  @media (prefers-color-scheme: dark) {
+    --ground: var(--ground-dark);
+    --raised: var(--raised-dark);
+    --text: var(--text-dark);
+    --dim: var(--dim-dark);
+    --rule: var(--rule-dark);
+    --ember: var(--ember-dark);
+    --set: var(--set-dark);
+    --alarm: var(--alarm-dark);
+  }
+
+  @supports (color: light-dark(white, black)) {
+    --ground: light-dark(var(--ground-light), var(--ground-dark));
+    --raised: light-dark(var(--raised-light), var(--raised-dark));
+    --text: light-dark(var(--text-light), var(--text-dark));
+    --dim: light-dark(var(--dim-light), var(--dim-dark));
+    --rule: light-dark(var(--rule-light), var(--rule-dark));
+    --ember: light-dark(var(--ember-light), var(--ember-dark));
+    --set: light-dark(var(--set-light), var(--set-dark));
+    --alarm: light-dark(var(--alarm-light), var(--alarm-dark));
+  }
+
+  /* Native UI — scrollbars, form controls, the canvas — follows the user's system setting. */
+  color-scheme: light dark;
+  accent-color: var(--ember);
+
+  --serif: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --text-xs: 0.6875rem;
+  --text-sm: 0.8125rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-dump: clamp(1.15rem, 1rem + 0.9vw, 1.4rem);
+  --text-title: clamp(1.4rem, 1.1rem + 1.4vw, 1.9rem);
+
+  --s1: 0.25rem;
+  --s2: 0.5rem;
+  --s3: 0.75rem;
+  --s4: 1rem;
+  --s5: 1.5rem;
+  --s6: 2rem;
+  --s7: 3rem;
+
+  --measure: 34rem;
+  --radius: 3px;
+  --autosave: 5s; /* AUTOSAVE_DELAY_MS — the countdown must agree with autosave.ts */
+
+  font-family: var(--serif);
+  font-size: 100%;
+  line-height: 1.55;
+  color: var(--text);
+  background: var(--ground);
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
 }
+
 main {
-  max-width: 32rem;
+  max-width: var(--measure);
   margin: 0 auto;
-  padding: 1.5rem;
+  padding: var(--s5) var(--s4) var(--s7);
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--s4);
 }
-textarea {
-  width: 100%;
-  min-height: 8rem;
-  font: inherit;
-  padding: 0.5rem;
-  box-sizing: border-box;
+
+/* The machine's voice: every label, tag, path, wikilink and status line. */
+.mono,
+label,
+nav,
+button,
+input,
+select,
+.hint,
+.diagnostics,
+.checks,
+.eyebrow,
+.meta,
+.rule-label {
+  font-family: var(--mono);
+  font-feature-settings: 'ss02' 1; /* Plex's disambiguated zero and l */
 }
+
+h1,
+h2,
+h3 {
+  font-weight: 500;
+  line-height: 1.15;
+  text-wrap: balance;
+  margin: 0;
+}
+
+p {
+  text-wrap: pretty;
+  margin: 0;
+}
+
+/* ── Masthead and tabs ───────────────────────────────────────────────── */
+
+.masthead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s4);
+  padding-bottom: var(--s3);
+  border-bottom: 1px solid var(--rule);
+}
+
+.wordmark {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  color: var(--dim);
+}
+
+nav {
+  display: flex;
+  gap: var(--s3);
+}
+
+nav button {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: var(--s1) 0;
+  font-size: var(--text-sm);
+  letter-spacing: 0.04em;
+  color: var(--dim);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+nav button:hover {
+  color: var(--text);
+}
+
+nav button.on {
+  color: var(--text);
+  border-bottom-color: var(--ember);
+}
+
+/* ── Controls ────────────────────────────────────────────────────────── */
+
+button {
+  font-size: var(--text-sm);
+  letter-spacing: 0.02em;
+  padding: var(--s2) var(--s4);
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--dim);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.primary {
+  color: var(--ground);
+  background: var(--ember);
+  border-color: var(--ember);
+  font-weight: 500;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ember);
+  outline-offset: 2px;
+}
+
 label {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.9rem;
+  gap: var(--s1);
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
 }
+
 input,
-select {
-  font: inherit;
-  padding: 0.3rem;
+select,
+textarea {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: var(--s2);
+  box-sizing: border-box;
+  width: 100%;
 }
-nav {
-  display: flex;
-  gap: 0.5rem;
+
+textarea {
+  resize: vertical;
+  min-height: 6rem;
 }
-nav button {
-  cursor: pointer;
+
+/* The Dump you type is the one input set in the content face, at content size: it is the
+ * product, not a form field. */
+textarea.dump {
+  font-family: var(--serif);
+  font-size: var(--text-dump);
+  line-height: 1.5;
+  min-height: 9rem;
+  padding: var(--s3);
 }
-nav button.on {
-  font-weight: 600;
-  text-decoration: underline;
-}
+
 .hint {
-  font-size: 0.85rem;
-  opacity: 0.75;
+  font-size: var(--text-xs);
+  letter-spacing: 0.02em;
+  color: var(--dim);
 }
-.diagnostics {
-  list-style: none;
-  padding: 0;
-  margin: 0.5rem 0 0;
-  max-height: 20rem;
-  overflow-y: auto;
-  font-size: 0.8rem;
+
+.actions {
+  display: flex;
+  gap: var(--s2);
+  flex-wrap: wrap;
 }
-.diagnostics li {
-  padding: 0.15rem 0;
-  border-bottom: 1px solid rgba(128, 128, 128, 0.2);
-  word-break: break-word;
+
+/* ── Status ──────────────────────────────────────────────────────────── */
+
+.status {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.03em;
+  color: var(--dim);
 }
-.diagnostics li.err {
-  color: #b00020;
+
+.status.err {
+  color: var(--alarm);
 }
-.diagnostics .detail {
-  opacity: 0.7;
-}
+
+/* ── Diagnostics and health checks ───────────────────────────────────── */
+
+.diagnostics,
 .checks {
   list-style: none;
   padding: 0;
-  margin: 0.5rem 0 0;
-  font-size: 0.9rem;
+  margin: var(--s2) 0 0;
+  font-size: var(--text-xs);
 }
-.checks li {
-  padding: 0.2rem 0;
+
+.diagnostics {
+  max-height: 20rem;
+  overflow-y: auto;
 }
+
+.diagnostics li {
+  padding: var(--s1) 0;
+  border-bottom: 1px solid var(--rule);
+  word-break: break-word;
+}
+
+.diagnostics li.err,
 .checks li.err {
-  color: #b00020;
+  color: var(--alarm);
+}
+
+.diagnostics .detail {
+  color: var(--dim);
+}
+
+.checks li {
+  padding: var(--s1) 0;
+}
+
+/* ── The Note ────────────────────────────────────────────────────────────
+ *
+ * The signature. A Note card carries its own state on its top edge: while the Note is
+ * uncommitted the edge is an ember hairline burning down over the autosave window, so the
+ * card *is* the clock. When the Note reaches the Vault the edge stops, fills, and turns to
+ * `set`. That transition is the only moment of drama in the app, and it happens exactly
+ * where the meaning is — molten to permanent.
+ */
+
+.note {
+  position: relative;
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: var(--s5) var(--s4) var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  overflow: hidden;
+}
+
+.note .burn {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: var(--ember);
+  transform-origin: left center;
+  animation: burn-down var(--autosave) linear forwards;
+}
+
+@keyframes burn-down {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.note.committed .burn {
+  background: var(--set);
+  animation: none;
+  transform: scaleX(1);
+}
+
+/* The countdown is motion. Without it, say the same thing in words instead. */
+@media (prefers-reduced-motion: reduce) {
+  .note .burn {
+    animation: none;
+    transform: scaleX(1);
+  }
+}
+
+.eyebrow {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ember);
+}
+
+.note.committed .eyebrow {
+  color: var(--set);
+  text-transform: none;
+  letter-spacing: 0.02em;
+  word-break: break-all;
+}
+
+.note h2 {
+  font-family: var(--serif);
+  font-size: var(--text-title);
+  font-weight: 400;
+}
+
+.meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--s1) var(--s3);
+  font-size: var(--text-xs);
+  letter-spacing: 0.02em;
+}
+
+.meta dt {
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.meta dd {
+  margin: 0;
+  color: var(--text);
+}
+
+.note-body {
+  font-family: var(--serif);
+  font-size: var(--text-base);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* A section marker that is a rule with a name on it, not a heading: these are the file's
+ * own sections, and they carry less weight than the Note's title. */
+.rule-label {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  font-size: var(--text-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.rule-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--rule);
+}
+
+.note ul {
+  margin: 0;
+  padding-left: var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
+
+.note .links {
+  list-style: none;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--set);
+  word-break: break-all;
+}
+
+.note .pending {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--dim);
+}
+
+.context-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
+
+/* ── Ask ─────────────────────────────────────────────────────────────── */
+
+.answer {
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--set);
+  border-radius: var(--radius);
+  padding: var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  font-size: var(--text-base);
+}
+
+.answer .sources {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--set);
+  word-break: break-all;
 }
