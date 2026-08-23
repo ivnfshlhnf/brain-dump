@@ -169,7 +169,9 @@ describe('the embedding cache, through Retrieve', () => {
       put: async () => {
         throw new Error('cache unreachable');
       },
-      allDocs: async () => ({ rows: [] }),
+      allDocs: async () => {
+        throw new Error('cache unreachable');
+      },
     } as unknown as DocStore;
 
     const withCache = await retrieve('what about plants?', {
@@ -202,7 +204,7 @@ describe('the embedding cache, through Retrieve', () => {
       put: async () => {
         throw new Error('disk full');
       },
-      allDocs: async () => ({ rows: [] }),
+      allDocs: async () => ({ rows: [] }), // reads fine, everything a miss
     } as unknown as DocStore;
 
     await retrieve('what about plants?', {
@@ -251,5 +253,52 @@ describe('vector encoding', () => {
     // base64 is 4/3 of the raw bytes; 1536 float32 is 6144 bytes -> ~8192 characters.
     expect(encoded.length).toBeGreaterThan(8000);
     expect(encoded.length).toBeLessThan(8300);
+  });
+});
+
+describe('cache reads are batched', () => {
+  /** Counts how the cache talks to its store, so "one request for the batch" is a tested
+   *  property rather than an intention. */
+  function countingStore(inner: DocStore) {
+    const counts = { get: 0, allDocs: 0 };
+    const store = {
+      get: async (id: string) => {
+        counts.get++;
+        return inner.get(id);
+      },
+      put: async (doc: Record<string, unknown>) => inner.put(doc),
+      allDocs: async (opts?: Record<string, unknown>) => {
+        counts.allDocs++;
+        return inner.allDocs(opts as never);
+      },
+    } as unknown as DocStore;
+    return { store, counts };
+  }
+
+  it('asks once for the whole batch instead of once per document', async () => {
+    const { store, counts } = countingStore(cache);
+    const embedder = cachingEmbedder({ store });
+
+    await retrieve('what about plants?', { db: vault, settings, embedder, answerer });
+
+    // Retrieve embeds every vault document plus the question. Per-document reads would mean a
+    // round trip each — thousands on a real vault, and a 404 in the console for every miss.
+    expect(counts.get).toBe(0);
+    expect(counts.allDocs).toBeLessThanOrEqual(2); // one per embed() call: docs, then question
+  });
+
+  it('reads once again when warm, and embeds nothing', async () => {
+    const { store, counts } = countingStore(cache);
+    const embedder = cachingEmbedder({ store });
+    const ask = () => retrieve('what about plants?', { db: vault, settings, embedder, answerer });
+
+    await ask();
+    embedBatches = [];
+    const before = counts.allDocs;
+    await ask();
+
+    expect(embeddedTexts()).toEqual([]);
+    expect(counts.get).toBe(0);
+    expect(counts.allDocs - before).toBeLessThanOrEqual(2);
   });
 });

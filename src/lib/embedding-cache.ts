@@ -102,8 +102,15 @@ export function createCachingEmbedder(deps: CachingEmbedderDeps): Embedder {
   };
 }
 
-/** The vectors already cached, by id. A cache read that fails is treated as a total miss:
- *  the answer stays correct and only costs more. */
+/** The vectors already cached, by id.
+ *
+ *  One request for the whole batch, not one per document. Fetching individually would mean a
+ *  round trip per vault document on every question and every save — thousands of them on a
+ *  real vault — and would fill the console with a 404 for each miss. `allDocs` with explicit
+ *  keys asks once and returns a row per key, present or not.
+ *
+ *  A read that fails is treated as a total miss: the answer stays correct and only costs more.
+ */
 async function readCached(
   store: DocStore,
   ids: string[],
@@ -111,21 +118,26 @@ async function readCached(
 ): Promise<Map<string, number[]>> {
   const found = new Map<string, number[]>();
   const unique = [...new Set(ids)];
+  if (unique.length === 0) return found;
 
-  await Promise.all(
-    unique.map(async (id) => {
-      try {
-        const doc = await store.get<CachedEmbedding>(id);
-        if (doc?.vector) found.set(id, decodeVector(doc.vector));
-      } catch {
-        // A miss and an unreachable cache are the same thing here: embed it.
-      }
-    }),
-  );
-
-  if (found.size === 0 && unique.length > 0) {
-    log({ op: 'embed', message: 'cache empty for this batch', detail: { wanted: unique.length } });
+  try {
+    const result = await store.allDocs<CachedEmbedding>({ keys: unique, include_docs: true });
+    for (const row of result.rows) {
+      // A key with no document is a miss, which `allDocs` reports as a row without a doc
+      // rather than as an error.
+      const doc = row.doc;
+      if (doc?.vector && doc._id) found.set(doc._id, decodeVector(doc.vector));
+    }
+  } catch (e) {
+    log({
+      level: 'error',
+      op: 'embed',
+      message: 'could not read the embedding cache — embedding everything',
+      detail: { wanted: unique.length, error: (e as Error).message },
+    });
+    return found;
   }
+
   return found;
 }
 
