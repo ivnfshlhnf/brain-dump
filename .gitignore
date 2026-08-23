@@ -11,3 +11,6 @@ dev.db
 
 # The dev diagnostic log — describes a real vault
 logs/
+
+# Screenshots of the running app — they show a real vault's Notes
+.scratch/shots/
