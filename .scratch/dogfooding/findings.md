@@ -33,3 +33,16 @@ happens.
   standalone Note (`appendDumpToNote`), so it is not the same kind of document as the preview.
 
 **Times seen:** 1
+
+**Established since (2026-08-23, from `logs/brain-dump.jsonl`):** the second Organize is real
+and runs on every capture. Each capture in the log shows a `chat request` after
+`capture session ready` — a separate call from the two that preceded it. The preview's fields
+and the saved Note's fields therefore come from different responses to the same Dump. What is
+still unobserved is how *visibly* they differ.
+
+**How to observe the rest, next time:** capture a real thought (not a synthetic one — a
+throwaway dump produces no title worth comparing), add no Context, and screenshot the preview
+immediately. The autosave timer is armed the moment the preview appears
+(`src/App.svelte:143`), so there are about five seconds before the Note is written. Do not type
+into Context to buy time: that rewrites the Dump and changes what the final Organize sees,
+which destroys the comparison. Then compare the screenshot against the file in the vault.
