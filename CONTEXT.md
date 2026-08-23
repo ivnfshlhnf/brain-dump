@@ -43,3 +43,15 @@ _Avoid_: search, query, lookup
 **Modality**:
 Whether an input is voice or text. Applies to both Capture and Retrieve.
 _Avoid_: format, type, mode
+
+**Vault**:
+The user's entire note collection — every document they have, including all the personal notes
+the app had no hand in creating. The app reads all of it and writes into none of it except the
+Managed folders.
+_Avoid_: knowledge base, notes, library, store
+
+**Managed folder**:
+A folder inside the Vault that the app is allowed to write into: one holds Notes, another holds
+Dumps. Everything else in the Vault is readable but never written, so a document the user made
+by hand can be read, cited, and linked to, but never altered by the app.
+_Avoid_: app folder, output folder, brain-dump folder, destination

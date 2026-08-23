@@ -1,17 +1,17 @@
 **Status:** ready-for-agent
 
-# 01 — Cover the operation layer's instrumentation, and move validation out of the view
+# 02 — Cover the operation layer's instrumentation
 
 **What to build:** Tests, at Seam A, for the diagnostic events the operation layer already
-emits — and a move of the provider-URL validation rule out of the view component so it is
-reachable by a test at all. No new behaviour; no new seam.
+emits. No new behaviour, no production code changes, no new seam.
 
 **Blocked by:** nothing.
 
-## Problem Statement
+**History:** this was originally the second half of ticket 01, which also covered moving the
+provider-URL validation rule out of the view. That half was done first and 01 now covers it
+alone; this ticket carries the deferred test coverage so each has an honest status.
 
-Two pieces of the diagnostics work shipped without test coverage, and both are the kind that
-fail silently.
+## Problem Statement
 
 The operation layer emits events on capture, on queue-after-failure, and on every drain
 attempt. Those events are the record relied on when something breaks against a real vault —
@@ -20,16 +20,10 @@ them are emitted. If one were dropped in a refactor, every test would stay green
 would only be discovered during the next incident, which is exactly the moment the record
 matters.
 
-The provider-URL validation rule lives inside the view component. It is real behaviour — it
-decides whether configuration is accepted — but it sits where no test can reach it, and it
-contradicts this repo's own principle that the view is a thin shell over the operation layer.
-It is currently trusted because it was written carefully, not because it is pinned.
-
 ## Solution
 
 Assert the emitted events by driving the existing operations with a recording log, at Seam A,
-alongside the tests that already drive those same operations. Move the validation rule beside
-the other configuration operations and pin its cases directly.
+alongside the tests that already drive those same operations.
 
 Nothing about the app's behaviour changes. This closes the gap between what the diagnostics
 work claims and what is actually guaranteed.
@@ -45,26 +39,17 @@ work claims and what is actually guaranteed.
    stays visible as a repeating record rather than a silent spin.
 4. As the maintainer, I want the drain's success events asserted, so that a Dump becoming a
    Note is traceable after the fact.
-5. As the maintainer, I want the validation rule to live where a test can reach it, so that it
-   is guaranteed rather than merely written carefully.
-6. As the maintainer, I want each rejection case pinned separately, so that a change to one
-   does not quietly weaken another.
-7. As the maintainer, I want the view to only render the validation result, so that the codebase
-   keeps its thin-view property.
-8. As the maintainer, I want no new test seam introduced, so that this feature stays at the
+5. As the maintainer, I want no new test seam introduced, so that this feature stays at the
    seam the rest of the codebase uses.
 
 ## Implementation Decisions
 
 - **Assert at Seam A, with a recording log.** The logging seam is already an injected optional
   dependency, so a test passes a recording implementation into the operations it already drives
-  and asserts on what was observed. No production code changes for this half.
+  and asserts on what was observed. No production code changes at all.
 - **Assert on operation name, level, and the identifying detail** — not on message wording.
   Message text is presentation and will be reworded; the operation name, whether it was an
   error, and the identifier tying an event to a Dump are the contract.
-- **Move validation beside the other configuration operations**, returning a description of the
-  problem or nothing. The view calls it and renders the result; the rule itself stops being
-  view code.
 - **No change to what is emitted or when.** This ticket pins current behaviour; adding events is
   a separate concern.
 
@@ -75,9 +60,8 @@ work claims and what is actually guaranteed.
   capture events belong with the operations tests that already drive capture.
 - Simulate failure the way those suites already do — by making an injected dependency fail —
   never by reaching into a module.
-- Validation cases to pin: blank, unparseable, non-http protocol, and a valid value.
 - Prior art: the outbox suite for driving drain against a failing dependency; the operations
-  suite for capture; the health suite for asserting a structured result.
+  suite for capture.
 
 ## Out of Scope
 
