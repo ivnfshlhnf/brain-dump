@@ -18,6 +18,7 @@
   import { createLog, createDevFileSink, type Log, type LogEvent } from './lib/logger';
   import { checkConnections, type HealthReport, type CheckResult } from './lib/health';
   import { createCachingEmbedder } from './lib/embedding-cache';
+  import { validateProviderUrl } from './lib/config';
   import { DEFAULT_SETTINGS, type Settings, type Citation } from './lib/types';
 
   // Diagnostics. In dev the sink POSTs each event to the Vite middleware, which appends
@@ -307,24 +308,6 @@
     }
   }
 
-  /** The LLM provider must be an absolute http(s) URL. A blank or scheme-less value
-   *  resolves against the app's own origin, so every cloud call quietly 404s against the
-   *  dev server instead of reaching the provider — a failure that only shows up later, as
-   *  a queued Dump. Catching it at save time points at the field while it is on screen. */
-  function providerUrlError(url: string): string | null {
-    if (!url.trim()) return 'LLM provider is required, e.g. https://openrouter.ai/api/v1';
-    let parsed: URL;
-    try {
-      parsed = new URL(url);
-    } catch {
-      return `"${url}" is not a full URL. Include the scheme, e.g. https://openrouter.ai/api/v1`;
-    }
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return `LLM provider must be http(s), not "${parsed.protocol}"`;
-    }
-    return null;
-  }
-
   /** The cloud embedder behind the content-addressed cache (ADR-0004). With no embeddings
    *  database configured the cache is skipped and the cloud embedder is used directly. */
   function cachedEmbedder() {
@@ -338,10 +321,16 @@
   }
 
   async function saveConfig() {
-    const problem = providerUrlError(settings.llmProvider);
+    const problem = validateProviderUrl(settings.llmProvider);
     if (problem) {
-      status = problem;
-      log({ level: 'error', op: 'config', message: 'settings rejected', detail: { problem } });
+      status = problem.message;
+      // Both: the code is what a tool matches on, the message is what a human reads.
+      log({
+        level: 'error',
+        op: 'config',
+        message: 'settings rejected',
+        detail: { problem: problem.code, message: problem.message },
+      });
       return;
     }
     await saveSettings(settings);

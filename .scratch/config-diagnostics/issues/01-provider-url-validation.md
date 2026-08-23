@@ -1,4 +1,4 @@
-**Status:** ready-for-agent
+**Status:** done
 
 # 01 — Move the provider-URL validation rule out of the view
 
