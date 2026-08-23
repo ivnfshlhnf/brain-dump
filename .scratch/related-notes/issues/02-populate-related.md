@@ -1,4 +1,4 @@
-**Status:** ready-for-agent
+**Status:** done
 
 # 02 — Populate a Note's Related links
 
