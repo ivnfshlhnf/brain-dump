@@ -2,6 +2,8 @@
 import type {
   DocStore,
   Dump,
+  Embedder,
+  Relater,
   Modality,
   Note,
   NoteCandidate,
@@ -12,6 +14,7 @@ import type {
 } from './types';
 import { writeFile, modifyFile, readVaultFiles } from './livesync';
 import { noopLog, type Log } from './logger';
+import { findRelated, type RelatedDeps } from './related';
 
 /** The `## Context` block appended after the verbatim original, when Context exists. */
 function contextBlock(ctx: string): string {
@@ -287,6 +290,12 @@ export interface FinalizeDeps {
   organizer: Organizer;
   hash: (content: string) => Promise<string>;
   now: () => number;
+  log?: Log;
+  /** Supplied together to populate the Note's Related links. Omit both and the Note is written
+   *  with no Related links — which is what every caller did before related-notes ticket 02, so
+   *  existing tests are unaffected. */
+  embedder?: Embedder;
+  relater?: Relater;
 }
 
 /** Begin a capture review session: save the verbatim Dump immediately, run the
@@ -337,7 +346,11 @@ export async function finalizeCapture(
 ): Promise<FinalizeResult> {
   if (session.saved) throw new Error('Already saved.');
 
-  const note = await organizeNote(session.dump, deps.organizer, deps.settings);
+  const organized = await organizeNote(session.dump, deps.organizer, deps.settings);
+  // Related is resolved here, at save, and never at capture: it ranks the whole vault, and the
+  // capture path exists to feel instant. By now the Dump is complete (original plus any
+  // Context), so the links reflect the finished thought rather than the first draft.
+  const note = await withRelated(organized, session, deps);
   try {
     const written =
       session.match.kind === 'append' && session.match.suggestion
@@ -346,6 +359,46 @@ export async function finalizeCapture(
     return { ok: true, note, written, session: { ...session, saved: true } };
   } catch (error) {
     return { ok: false, note, error: error as Error, session: { ...session, saved: false } };
+  }
+}
+
+/** The Note with its Related links filled in, or unchanged when the caller supplied no
+ *  embedder and judge.
+ *
+ *  A failure to resolve Related must never cost the user the Note: the whole step is best
+ *  effort, and on any error the Note is written exactly as Organize produced it. */
+async function withRelated(
+  note: Note,
+  session: CaptureSession,
+  deps: FinalizeDeps,
+): Promise<Note> {
+  if (!deps.embedder || !deps.relater) return note;
+
+  // On the Append path the Note being written already exists in the vault; excluding it keeps
+  // it from ranking as its own closest match.
+  const target =
+    session.match.kind === 'append' && session.match.suggestion
+      ? session.match.suggestion.path
+      : `${deps.settings.managedFolder}/${noteFilename(note)}`;
+
+  const relatedDeps: RelatedDeps = {
+    db: deps.db,
+    settings: deps.settings,
+    embedder: deps.embedder,
+    relater: deps.relater,
+    log: deps.log,
+  };
+
+  try {
+    return { ...note, related: await findRelated(note, target, relatedDeps) };
+  } catch (error) {
+    (deps.log ?? noopLog)({
+      level: 'error',
+      op: 'related',
+      message: 'could not resolve Related links — saving the Note without them',
+      detail: { error: (error as Error).message },
+    });
+    return note;
   }
 }
 

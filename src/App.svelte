@@ -12,7 +12,7 @@
   } from './lib/operations';
   import { createIndexedDbOutbox } from './lib/outbox';
   import { retrieve } from './lib/retrieve';
-  import { createOrganizer, createMatcher, createEmbedder, createAnswerer } from './lib/llm';
+  import { createOrganizer, createMatcher, createEmbedder, createAnswerer, createRelater } from './lib/llm';
   import { defaultSha1Hex } from './lib/livesync';
   import { createAutosaver } from './lib/autosave';
   import { createLog, createDevFileSink, type Log, type LogEvent } from './lib/logger';
@@ -174,6 +174,8 @@
       const result = await finalizeCapture(session, {
         ...storeDeps(),
         organizer: createOrganizer(settings, log),
+        embedder: cachedEmbedder(),
+        relater: createRelater(settings, log),
         now: () => Date.now(),
       });
       session = result.session;

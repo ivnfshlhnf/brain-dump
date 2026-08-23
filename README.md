@@ -32,6 +32,11 @@ can add **Context**, which edits the Dump while preserving your verbatim origina
 → five seconds after you stop typing (or when you close the tab) the Note is re-organized
 from the full Dump, written, and the Dump is frozen.
 
+When a Note is saved, its `## Related` section is filled with links to documents elsewhere in
+your vault that it is genuinely connected to — ranked by embedding similarity, then judged by
+the model. Links are outbound only; Obsidian's own "Linked mentions" panel shows the reverse
+direction without the app editing any Note you did not just create.
+
 **Retrieve** takes a question, reads your entire vault, ranks the top 5 documents by embedding
 similarity, and asks the model to synthesize an answer citing them. Embeddings are cached by
 content in the app's own CouchDB database, so each document is embedded once rather than once
@@ -188,10 +193,6 @@ test — behavior lives there, not in the component.
 ## Known limitations
 
 - **Text only.** Voice capture and spoken answers are iteration 2.
-- **A Note's `## Related` section is always empty.** The Organizer is only ever shown the
-  Dump's own text, never the vault, so it cannot name a Note it has never seen. The
-  related-notes feature's ticket 02 fixes this by ranking against the vault instead of
-  asking the model to guess.
 - **Retrieval sends your personal notes to the cloud provider**, not just your brain-dumps —
   a direct consequence of ADR-0002 plus a cloud LLM. Accepted for v1.
 - **The app depends on LiveSync's internal document format**, for which no official

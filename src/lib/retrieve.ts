@@ -7,7 +7,7 @@
 // scope) — a `_changes`-fed index is a later optimization for when Retrieve latency
 // demands it. Retrieval reads the entire vault, personal notes included, and writes
 // nothing (ADR-0002).
-import { readVaultFiles } from './livesync';
+import { readVaultDocs, rankBySimilarity } from './vault-search';
 import type {
   Answerer,
   Citation,
@@ -17,7 +17,7 @@ import type {
   Settings,
   VaultDoc,
 } from './types';
-import { parseFrontmatter, wikilink } from './operations';
+import { wikilink } from './operations';
 
 /** How many of the most similar vault docs are handed to the LLM as context. */
 export const RETRIEVE_TOP_K = 5;
@@ -48,61 +48,14 @@ export async function retrieve(question: string, deps: RetrieveDeps): Promise<Re
   return { answer: output.answer, citations: cite(output.sources, sources) };
 }
 
-/** Every file in the vault — the app's organized Notes and the user's personal notes
- *  alike (ADR-0002) — with a title to cite it by.
- *
- *  The raw Dumps are left out: their content is already represented by the Notes
- *  organized from them, so including them would double-count every brain-dump and
- *  cite an archive file the user does not browse. A Dump whose Note has not been
- *  written yet is therefore not retrievable until it is. */
-async function readVaultDocs(db: DocStore, settings: Settings): Promise<VaultDoc[]> {
-  const files = await readVaultFiles(db, (path) => !path.startsWith(`${settings.dumpsFolder}/`));
-  return files.map((file) => ({
-    path: file.path,
-    title: titleOf(file.path, file.content),
-    content: file.content,
-  }));
-}
-
-/** A Note's frontmatter title, or the filename — a personal note has no frontmatter. */
-function titleOf(path: string, content: string): string {
-  const title = parseFrontmatter(content).title;
-  return title || (path.split('/').pop() ?? path).replace(/\.md$/, '');
-}
-
-/** The `RETRIEVE_TOP_K` vault docs closest to the question, most similar first. The
- *  whole vault is embedded on every call — see the re-embed-on-query note above. */
+/** The `RETRIEVE_TOP_K` vault docs closest to the question, most similar first. */
 async function mostSimilar(
   question: string,
   docs: VaultDoc[],
   embedder: Embedder,
 ): Promise<VaultDoc[]> {
-  const docVectors = await embedder.embed(docs.map((d) => `${d.title}\n\n${d.content}`));
-  const [questionVector] = await embedder.embed([question]);
-  // Without an embedding for the question there is nothing to rank against, and
-  // silently answering from an arbitrary five Notes would be worse than saying so.
-  if (!questionVector) throw new Error('The embedder returned no embedding for the question.');
-
-  return docs
-    .map((doc, i) => ({ doc, score: cosineSimilarity(questionVector, docVectors[i] ?? []) }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, RETRIEVE_TOP_K)
-    .map((scored) => scored.doc);
-}
-
-/** Cosine similarity of two equal-length vectors; 0 when either has no magnitude
- *  (an empty embedding says nothing about relevance either way). */
-function cosineSimilarity(a: number[], b: number[]): number {
-  let dot = 0;
-  let magA = 0;
-  let magB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * (b[i] ?? 0);
-    magA += a[i] * a[i];
-    magB += (b[i] ?? 0) * (b[i] ?? 0);
-  }
-  if (!magA || !magB) return 0;
-  return dot / (Math.sqrt(magA) * Math.sqrt(magB));
+  const ranked = await rankBySimilarity(question, docs, embedder);
+  return ranked.slice(0, RETRIEVE_TOP_K).map((scored) => scored.doc);
 }
 
 /** The docs the model said it drew on, as citations the user can open.

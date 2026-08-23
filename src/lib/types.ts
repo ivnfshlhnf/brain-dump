@@ -98,6 +98,19 @@ export interface AnswerOutput {
   sources: number[];
 }
 
+/** The Related-judgment seam. Given a new Note and a shortlist of the vault documents
+ *  closest to it, decide which are *genuinely* Related rather than merely similar-sounding.
+ *
+ *  It returns indexes into `candidates`, never paths. The model selects from a list the app
+ *  built from the vault, so a link to a document that does not exist is impossible by
+ *  construction — the same discipline `Answerer` uses for citations. */
+export interface Relater {
+  related(
+    subject: { title: string; summary: string; content: string },
+    candidates: VaultDoc[],
+  ): Promise<number[]>;
+}
+
 /** The answer-synthesis seam (RAG's generation half). Given the question and the
  *  most relevant vault docs, produce an answer that cites them. */
 export interface Answerer {

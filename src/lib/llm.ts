@@ -25,6 +25,7 @@ import type {
   Embedder,
   Answerer,
   AnswerOutput,
+  Relater,
   VaultDoc,
 } from './types';
 
@@ -97,6 +98,48 @@ export function createAnswerer(settings: Settings, log: Log = noopLog): Answerer
       return parseAnswerOutput(reply);
     },
   };
+}
+
+/** The Related judge: given a new Note and the vault documents closest to it, say which are
+ *  genuinely Related. It answers with indexes only — the app owns the paths (see `Relater`). */
+export function createRelater(settings: Settings, log: Log = noopLog): Relater {
+  return {
+    async related(subject, candidates): Promise<number[]> {
+      if (candidates.length === 0) return [];
+      const reply = await chat(settings, buildRelatedPrompt(subject, candidates), log);
+      return parseRelatedOutput(reply);
+    },
+  };
+}
+
+function buildRelatedPrompt(
+  subject: { title: string; summary: string; content: string },
+  candidates: VaultDoc[],
+): string {
+  const listing = candidates
+    .map((c, i) => `${i}: ${c.path}\n   title: ${c.title}\n   content:\n${c.content}`)
+    .join('\n\n');
+  return [
+    'You decide which existing notes a new note is genuinely related to. Reply ONLY with a',
+    'JSON object — no prose, no markdown fences — with exactly this field:',
+    '- related: the numbers of the notes genuinely related to the new note (array of numbers)',
+    'A note is related if a reader of one would want to read the other. Being about a similar',
+    'subject is not enough on its own. Return an empty array if none qualify — that is a good',
+    'answer, not a failure.',
+    `New note title: ${subject.title}`,
+    `New note summary: ${subject.summary}`,
+    'New note content:',
+    subject.content,
+    'Existing notes:',
+    listing,
+  ].join('\n');
+}
+
+/** Parse the judge's reply. Indexes are passed through as given — `related.ts` owns validating
+ *  them against the candidate list, so an invented index is dropped there rather than here. */
+function parseRelatedOutput(raw: string): number[] {
+  const json = JSON.parse(stripFences(raw)) as { related?: unknown };
+  return Array.isArray(json.related) ? json.related.map(num) : [];
 }
 
 function buildAnswerPrompt(question: string, sources: VaultDoc[]): string {
