@@ -40,6 +40,22 @@ and runs on every capture. Each capture in the log shows a `chat request` after
 and the saved Note's fields therefore come from different responses to the same Dump. What is
 still unobserved is how *visibly* they differ.
 
+**Established since (2026-08-23, from the vault and the markup):** the preview and the saved
+Note are not the same kind of artifact, and this part is fully reproducible rather than
+probabilistic.
+
+- The preview block (`src/App.svelte:414-428`) renders exactly four fields: `title`, `summary`,
+  `keyPoints`, `tags`.
+- A saved Note contains frontmatter (title, tags, created, modality, source, category, summary),
+  an H1, `body`, `## Summary`, `## Key points` and `## Related`.
+- `Note.body` — described in `src/lib/types.ts:27` as the cleaned, organized content, and the
+  largest part of the document — is not rendered in the preview at all. Neither is `category`,
+  `source`, or `related`.
+- Within a saved Note the frontmatter title and the body's H1 need not match. In
+  `Brain Dump/2026-08-23-vorssaint-utils-github-repo.md` the frontmatter reads
+  `title: vorssaint-utils GitHub repo` and the H1 reads `# vorssaint-utils`. The preview shows
+  the frontmatter title; Obsidian shows the H1.
+
 **How to observe the rest, next time:** capture a real thought (not a synthetic one — a
 throwaway dump produces no title worth comparing), add no Context, and screenshot the preview
 immediately. The autosave timer is armed the moment the preview appears
