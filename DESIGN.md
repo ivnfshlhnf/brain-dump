@@ -225,12 +225,20 @@ page it sits. Pressable things lift on hover and depress on press. State changes
 not discovered — every interactive element responds visibly, and the transition between wet
 and dry is the one moment worth animating properly.
 
-**Observed state: none of this exists yet.** The current stylesheet contains zero
-`box-shadow` declarations and zero `transition` declarations. Depth is carried entirely by a
-1px rule and a lightness step between Page and Card that, in light mode, is nearly
-invisible — pure white on a barely-tinted ground. The only motion in the application is the
-five-second countdown. This is the gap between the system as documented and the system as
-built, and closing it is the current work.
+**Observed state: the Note card has its material; the rest of the surfaces do not yet.**
+The Note card now carries a two-layer ambient shadow (`--shadow-card`, an offset close
+shadow plus a soft far one, resolved per scheme — darker and more present in dark mode where
+the ground itself is dark) and a card radius a step larger than the controls' (`--radius-card`
+4px vs `--radius` 3px). Every interactive element has a 140ms `--ease` transition and a real
+press depression (`:active` translates 1px). The one authored motion — the wet→dry commit —
+cross-fades: the edge fills back to full and the ink turns from Wet to Dry over ~260ms. All
+of it falls back to static under `prefers-reduced-motion`, with the colour cross-fade kept
+because it carries the state and is not vestibular.
+
+What is still ahead: the tactility floor is in the stylesheet but the other surfaces (the
+empty Capture textarea, the Ask box, the Config wall) have not had their own bolder passes —
+they still read as generic shells. The `.answer` card still wears its old 2px Dry Ink
+`border-left`, an AI-slop tell the detector flags, pending its own pass.
 
 ### Named Rules
 
@@ -246,9 +254,10 @@ words or a static mark rather than dropping it.
 
 The current form language is a single corner radius of `3px` (`--radius`) applied uniformly
 to cards, buttons and fields, with 1px borders in Rule doing the separating. One radius for
-everything is a deliberate simplicity, not an oversight — but it is also the entire shape
-vocabulary the system currently has, and a material world with stacked stock will likely need
-a second, larger step for cards distinct from controls.
+everything was a deliberate simplicity; the second, larger step arrived with the card's
+material, so the form language is now two radii — `3px` (`--radius`) for controls and `4px`
+(`--radius-card`) for stacked stock — and a card reads as a piece of stock rather than an
+over-sized button.
 
 Borders are hairlines. Nothing is clipped to a non-rectangular silhouette anywhere in the
 app.
@@ -261,11 +270,13 @@ app.
   tracking. Used for the committing action on a surface — Capture, Ask, Save settings.
 - **Default:** Card fill, Rule border, Graphite label. Everything else.
 - **Hover / Focus:** border shifts to Pencil on hover; focus-visible draws a 2px Wet Ink
-  outline offset 2px. No transition is declared, so both changes currently snap.
-- **Disabled:** `opacity: 0.45`. **This is a known defect at the system level** — on an empty
-  Capture screen the primary button is the first thing seen, and at 45% opacity it reads as
-  broken rather than as inactive, in both schemes. Disabled needs its own colour treatment,
-  not a blanket fade.
+  outline offset 2px. Both resolve over the 140ms `--ease` beat — they no longer snap.
+- **Disabled:** its own colour treatment, not a flat opacity fade. A disabled default control
+  drops to the Page fill with a Pencil label and a Rule border — absent, not broken. A
+  disabled primary keeps its light label but washes the Wet Ink fill out toward Pencil
+  (`color-mix` of ember and pencil), so the action reads as deactivated without becoming a
+  ghost. This replaced the old `opacity: 0.45` blanket fade, which read as half-rendered in
+  both schemes.
 
 ### Inputs / Fields
 - **Style:** Card fill, 1px Rule border, 3px radius, mono at 0.8125rem for ordinary fields.
@@ -288,15 +299,19 @@ The one component the whole design exists for. A Note is shown **complete** befo
 committed — title, tags, category, the full body, summary, key points and Related — not a
 summary card standing in for it.
 
-- **Structure:** Card surface, 3px radius, `1.5rem 1rem 1rem` padding, contents stacked on the
-  `0.75rem` step.
+- **Structure:** Card surface, 4px radius (`--radius-card`), a two-layer ambient shadow
+  (`--shadow-card`), `1.5rem 1rem 1rem` padding, contents stacked on the `0.75rem` step.
 - **Eyebrow:** uppercase mono in Wet Ink stating the pending decision (new Note, or append to
   a named Note). Once saved it becomes the Vault path in Dry Ink, lowercase.
 - **Section markers:** small uppercase mono labels — summary, key points, related — each
   trailed by a hairline running to the edge of the card. They are ruling, not headings.
 - **The countdown edge:** a 2px Wet Ink hairline across the top of the card, scaling from full
-  to zero over the five-second autosave window, restarted whenever Context is edited. On save
-  it stops, fills, and turns Dry Ink. The card is the clock.
+  to zero over the five-second autosave window, restarted whenever Context is edited. The card
+  is the clock — but only when the clock is honest. An unconfirmed append never autosaves, so on
+  that path the edge is **held**: static, full, Wet, not burning (the `burn--held` state), and
+  the hint states the reason in words. On save the edge stops, fills back to full, and cross-fades
+  to Dry Ink over ~260ms — the one authored moment, wet to permanent. Under reduced motion the
+  edge holds full in either state and only the colour carries the change.
 - **Related, when empty:** states why in words rather than showing an empty section.
 
 ## Do's and Don'ts

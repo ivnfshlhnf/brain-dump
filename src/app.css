@@ -63,6 +63,17 @@
   --alarm-light: oklch(52% 0.19 25);
   --alarm-dark: oklch(74% 0.16 25);
 
+  /* The card's weight on the page: a tight close shadow + a soft far one, both with an
+   * offset (a zero-offset halo is decoration, not depth). Dark mode sits the card on a
+   * darker, wider, more present shadow — the ground is already dark, so the cast has to
+   * reach further and dig deeper to read as lift rather than vanish into the page. */
+  --shadow-card-light:
+    0 1px 2px oklch(28% 0.02 240 / 0.1),
+    0 8px 22px oklch(28% 0.02 240 / 0.08);
+  --shadow-card-dark:
+    0 2px 5px oklch(0% 0 0 / 0.7),
+    0 16px 40px oklch(0% 0 0 / 0.55);
+
   --ground: var(--ground-light);
   --raised: var(--raised-light);
   --text: var(--text-light);
@@ -71,6 +82,7 @@
   --ember: var(--ember-light);
   --set: var(--set-light);
   --alarm: var(--alarm-light);
+  --shadow-card: var(--shadow-card-light);
 
   @media (prefers-color-scheme: dark) {
     --ground: var(--ground-dark);
@@ -81,6 +93,7 @@
     --ember: var(--ember-dark);
     --set: var(--set-dark);
     --alarm: var(--alarm-dark);
+    --shadow-card: var(--shadow-card-dark);
   }
 
   @supports (color: light-dark(white, black)) {
@@ -92,6 +105,7 @@
     --ember: light-dark(var(--ember-light), var(--ember-dark));
     --set: light-dark(var(--set-light), var(--set-dark));
     --alarm: light-dark(var(--alarm-light), var(--alarm-dark));
+    --shadow-card: light-dark(var(--shadow-card-light), var(--shadow-card-dark));
   }
 
   /* Native UI — scrollbars, form controls, the canvas — follows the user's system setting. */
@@ -118,6 +132,9 @@
 
   --measure: 34rem;
   --radius: 3px;
+  --radius-card: 4px; /* a second, larger step for stacked stock — cards are not controls */
+  --speed: 140ms; /* the 120–160ms tactility band; state changes resolve in one beat */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1); /* exponential ease-out — motion from rest */
   --autosave: 5s; /* AUTOSAVE_DELAY_MS — the countdown must agree with autosave.ts */
 
   font-family: var(--serif);
@@ -207,6 +224,7 @@ nav button {
   color: var(--dim);
   cursor: pointer;
   border-bottom: 2px solid transparent;
+  transition: color var(--speed) var(--ease), border-color var(--speed) var(--ease);
 }
 
 nav button:hover {
@@ -229,14 +247,29 @@ button {
   border: 1px solid var(--rule);
   border-radius: var(--radius);
   cursor: pointer;
+  /* Nothing moves silently: every state a control can be in resolves over one beat,
+   * never a snap. The press is a real depression, not a flicker. */
+  transition:
+    transform var(--speed) var(--ease),
+    border-color var(--speed) var(--ease),
+    background-color var(--speed) var(--ease),
+    box-shadow var(--speed) var(--ease);
 }
 
 button:hover:not(:disabled) {
   border-color: var(--dim);
 }
 
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+/* A disabled control is absent, not broken: it takes its own colour treatment — desaturated
+ * and dropped to the page — rather than a flat opacity fade that reads as half-rendered. */
 button:disabled {
-  opacity: 0.45;
+  color: var(--dim);
+  background: var(--ground);
+  border-color: var(--rule);
   cursor: not-allowed;
 }
 
@@ -245,6 +278,14 @@ button.primary {
   background: var(--ember);
   border-color: var(--ember);
   font-weight: 500;
+}
+
+/* The committing action, deactivated: the ink is washed out toward pencil, not dimmed to a
+ * ghost. The label stays light so it still reads, only the fill loses its conviction. */
+button.primary:disabled {
+  background: color-mix(in oklch, var(--ember), var(--dim) 45%);
+  border-color: color-mix(in oklch, var(--ember), var(--dim) 45%);
+  color: var(--ground);
 }
 
 :focus-visible {
@@ -274,6 +315,7 @@ textarea {
   padding: var(--s2);
   box-sizing: border-box;
   width: 100%;
+  transition: border-color var(--speed) var(--ease), box-shadow var(--speed) var(--ease);
 }
 
 textarea {
@@ -352,18 +394,22 @@ textarea.dump {
 
 /* ── The Note ────────────────────────────────────────────────────────────
  *
- * The signature. A Note card carries its own state on its top edge: while the Note is
- * uncommitted the edge is an ember hairline burning down over the autosave window, so the
- * card *is* the clock. When the Note reaches the Vault the edge stops, fills, and turns to
- * `set`. That transition is the only moment of drama in the app, and it happens exactly
- * where the meaning is — molten to permanent.
+ * The signature. A Note card carries its own state on its top edge, and the edge only moves
+ * when the move is honest. While a new Note is uncommitted the edge is an ember hairline
+ * burning down over the autosave window, so the card *is* the clock — a save really will
+ * fire at the end. An unconfirmed append never autosaves, so on that path the edge is held:
+ * static, full, wet, not burning (the hint states the reason in words). When the Note reaches
+ * the Vault the edge stops, fills back to full, and cross-fades to `set`. That wet→dry
+ * cross-fade is the only moment of drama in the app, and it happens exactly where the
+ * meaning is — molten to permanent.
  */
 
 .note {
   position: relative;
   background: var(--raised);
   border: 1px solid var(--rule);
-  border-radius: var(--radius);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
   padding: var(--s5) var(--s4) var(--s4);
   display: flex;
   flex-direction: column;
@@ -378,6 +424,14 @@ textarea.dump {
   background: var(--ember);
   transform-origin: left center;
   animation: burn-down var(--autosave) linear forwards;
+  transition: background-color var(--speed) var(--ease);
+}
+
+/* An unconfirmed append never autosaves — the clock must not run. The edge stays wet and
+ * full, holding the decision, instead of burning down to nothing and saving nothing. */
+.note .burn--held {
+  animation: none;
+  transform: scaleX(1);
 }
 
 @keyframes burn-down {
@@ -389,17 +443,26 @@ textarea.dump {
   }
 }
 
+/* The Note reaches the Vault: the edge stops, fills back to full, and turns to dry ink.
+ * That cross-fade is the one moment worth animating — molten to permanent — and it happens
+ * exactly where the meaning is. */
 .note.committed .burn {
   background: var(--set);
   animation: none;
   transform: scaleX(1);
+  transition: background-color 260ms var(--ease), transform 260ms var(--ease);
 }
 
-/* The countdown is motion. Without it, say the same thing in words instead. */
+/* The countdown is motion. Without it, say the same thing in words instead: the edge holds
+ * full in either state, and only the colour carries wet→dry. */
 @media (prefers-reduced-motion: reduce) {
   .note .burn {
     animation: none;
     transform: scaleX(1);
+  }
+  .note.committed .burn {
+    transform: scaleX(1);
+    transition: background-color var(--speed) var(--ease);
   }
 }
 

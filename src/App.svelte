@@ -214,11 +214,14 @@
   }
 
   // Override the match decision to 'new' — the user declines the append suggestion
-  // and chooses to found a fresh Note instead. Reschedules the autosave.
+  // and chooses to found a fresh Note instead. Reschedules the autosave and restarts the
+  // countdown edge, which was held while the append waited: now that a save will actually
+  // happen on its own, the clock runs honestly from full.
   function chooseNewNote() {
     if (!session || session.saved) return;
     session = { ...session, match: { kind: 'new' } };
     appendConfirmed = false;
+    contextRevision += 1;
     autosaver.schedule();
     status = 'Will save as a new Note.';
   }
@@ -433,7 +436,7 @@
            this is the document in the Vault. You are approving a Note, so you are shown one. -->
       <article class="note" class:committed={session.saved}>
         {#key contextRevision}
-          <div class="burn"></div>
+          <div class="burn" class:burn--held={session.match.kind === 'append' && !appendConfirmed}></div>
         {/key}
 
         <p class="eyebrow">
@@ -496,13 +499,20 @@
       <p class="hint">
         {#if session.saved}
           Dump frozen. Your verbatim original is kept inside it.
+        {:else if session.match.kind === 'append' && !appendConfirmed}
+          Append waits for your confirmation — it won’t save on its own. Your verbatim original is kept.
         {:else}
           Saves 5 seconds after you stop typing. Your verbatim original is kept.
         {/if}
       </p>
 
       <div class="actions">
-        <button on:click={() => autosaver.flush()} disabled={session.saved}>Save now</button>
+        {#if session.match.kind !== 'append' || appendConfirmed}
+          <!-- "Save now" forces the autosave. It is only honest where a save will actually
+               happen — an unconfirmed append no-ops, so on that path the decision buttons
+               above (Append / Save as new Note) are the save, and this one is absent. -->
+          <button on:click={() => autosaver.flush()} disabled={session.saved}>Save now</button>
+        {/if}
         {#if session.saved && savedNotePath}
           <!-- Explicit metadata refresh — never automatic -->
           <button on:click={refreshMetadata} disabled={busy}>Refresh metadata</button>
