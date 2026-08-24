@@ -489,6 +489,13 @@ textarea.dump {
   word-break: break-all;
 }
 
+/* The pending eyebrow is an uppercase machine marking — but the appended Note's title is a
+ * person's words, and uppercasing it destroys their casing ("OFFLINE CAPTURE…" ). The
+ * decision prefix uppercases; the title keeps its own case. */
+.eyebrow .keep-case {
+  text-transform: none;
+}
+
 .note h2 {
   font-family: var(--serif);
   font-size: var(--text-title);

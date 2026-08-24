@@ -91,7 +91,7 @@
   // Organize preview (held while Context is added), and the new-vs-append match.
   let session: CaptureSession | null = null;
   let context = '';
-  // The vault path of the last saved Note — used by the explicit Refresh metadata action.
+  // The vault path of the last saved Note — used by the explicit Re-organize Note action.
   let savedNotePath: string | null = null;
   // The Note as it was actually written. The card shows this once it exists, so what you
   // look at after the save is the document in the Vault — Related links included — and not
@@ -302,8 +302,9 @@
     status = 'Will save as a new Note.';
   }
 
-  // Explicit, user-triggered metadata refresh — re-derives title/tags/summary from
-  // the saved Note's body. Never automatic; the append itself never refreshes.
+  // Explicit, user-triggered re-organize — re-runs Organize on the saved Note's body to
+  // re-derive its title/tags/summary/category. Never automatic; the append itself never
+  // refreshes. (The button reads "Re-organize Note"; "metadata" is the internal name only.)
   async function refreshMetadata() {
     if (!savedNotePath) return;
     busy = true;
@@ -315,9 +316,9 @@
         hash: defaultSha1Hex,
         now: () => Date.now(),
       });
-      status = `Refreshed metadata: ${savedNotePath}`;
+      status = `Re-organized: ${savedNotePath}`;
     } catch (e) {
-      status = `Refresh failed: ${(e as Error).message}`;
+      status = `Re-organize failed: ${(e as Error).message}`;
     } finally {
       busy = false;
     }
@@ -362,19 +363,17 @@
       });
       await refreshQueueState();
       if (result.organized.length) {
-        status = `Organized ${result.organized.length} queued Dump(s) into Notes.`;
+        const n = result.organized.length;
+        status = n === 1
+          ? `Organized 1 queued Dump into a Note.`
+          : `Organized ${n} queued Dumps into Notes.`;
       } else if (result.failed.length) {
-        status = `${result.failed.length} queued Dump(s) still waiting: ${result.failed[0].error.message}`;
+        const n = result.failed.length;
+        status = `${n} queued ${n === 1 ? 'Dump' : 'Dumps'} still waiting: ${result.failed[0].error.message}`;
       }
     } finally {
       draining = false;
     }
-  }
-
-  function matchLabel(s: CaptureSession): string {
-    return s.match.kind === 'new'
-      ? 'new Note'
-      : `append to “${s.match.suggestion?.title ?? 'existing'}”`;
   }
 
   // Retrieve reads the whole vault (personal notes included) and writes nothing —
@@ -486,15 +485,17 @@
     <nav>
       <button class:on={view === 'capture'} on:click={() => (view = 'capture')}>capture</button>
       <button class:on={view === 'ask'} on:click={() => (view = 'ask')}>ask</button>
-      <button class:on={view === 'config'} on:click={() => (view = 'config')}>config</button>
+      <button class:on={view === 'config'} on:click={() => (view = 'config')}>settings</button>
     </nav>
   </header>
 
   {#if view === 'capture'}
-    {#if queuedCount}
-      <p class="status">{queuedCount} Dump(s) saved — they will be Organized when online.</p>
+    {#if queuedCount === 1}
+      <p class="status" aria-live="polite">1 Dump saved — it will be Organized when online.</p>
+    {:else if queuedCount}
+      <p class="status" aria-live="polite">{queuedCount} Dumps saved — they will be Organized when online.</p>
     {/if}
-    {#if queueError}<p class="status err">{queueError}</p>{/if}
+    {#if queueError}<p class="status err" aria-live="polite">{queueError}</p>{/if}
 
     {#if !session}
       <!-- The Dump is the product, not a form field: set in the content face, at content size. -->
@@ -507,7 +508,9 @@
         placeholder="What are you thinking?"
         disabled={busy}></textarea>
       <div class="actions">
-        <button class="primary" on:click={captureDump} disabled={busy || !text.trim()}>Capture</button>
+        <button class="primary" on:click={captureDump} disabled={busy || !text.trim()}>
+          {busy ? 'Capturing…' : 'Capture'}
+        </button>
       </div>
     {:else}
       {@const shown = savedNote ?? session.preview}
@@ -521,8 +524,10 @@
         <p class="eyebrow">
           {#if session.saved && savedNotePath}
             {savedNotePath}
+          {:else if session.match.kind === 'new'}
+            New Note
           {:else}
-            {matchLabel(session)}
+            Append to <span class="keep-case">&ldquo;{session.match.suggestion?.title ?? 'an existing Note'}&rdquo;</span>
           {/if}
         </p>
 
@@ -604,8 +609,8 @@
           <button on:click={() => autosaver.flush()} disabled={session.saved}>Save now</button>
         {/if}
         {#if session.saved && savedNotePath}
-          <!-- Explicit metadata refresh — never automatic -->
-          <button on:click={refreshMetadata} disabled={busy}>Refresh metadata</button>
+          <!-- Explicit re-organize — never automatic -->
+          <button on:click={refreshMetadata} disabled={busy}>Re-organize Note</button>
         {/if}
         <button on:click={() => { session = null; savedNote = null; autosaver.cancel(); }}>New capture</button>
       </div>
@@ -616,7 +621,7 @@
       <textarea
         bind:value={question}
         on:keydown={(e) => commitOnModEnter(e, askQuestion, asking || !question.trim())}
-        placeholder="What did I think about..."
+        placeholder="What did I think about…"
         disabled={asking}></textarea>
     </label>
     <div class="actions">
@@ -642,7 +647,7 @@
     <label>Password <input type="password" bind:value={settings.couchdbPassword} /></label>
     <label>Managed folder <input bind:value={settings.managedFolder} /></label>
     <label>Embeddings database <input bind:value={settings.embeddingsDb} /></label>
-    <label>Case-sensitive <input type="checkbox" bind:checked={settings.caseSensitive} /></label>
+    <label>Case-sensitive file names <input type="checkbox" bind:checked={settings.caseSensitive} /></label>
     <label>LLM provider <input bind:value={settings.llmProvider} /></label>
     <label>LLM model <input bind:value={settings.llmModel} /></label>
     <label>LLM API key <input type="password" bind:value={settings.llmApiKey} /></label>
@@ -695,5 +700,5 @@
     </ul>
   {/if}
 
-  {#if status}<p class="status">{status}</p>{/if}
+  {#if status}<p class="status" aria-live="polite">{status}</p>{/if}
 </main>

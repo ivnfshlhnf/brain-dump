@@ -213,6 +213,11 @@ The page is structured top-down: a masthead carrying the wordmark and three tabs
 single rule, then the surface's content, then status. Nothing floats, nothing docks, and
 nothing is fixed to the viewport.
 
+**Status is the only feedback channel, so it announces itself.** The status line (and the
+queue banner) carries `aria-live="polite"`, so a save confirmation, a failure, a config
+rejection or an offline-queue notice is spoken to assistive tech the same moment it appears
+on screen — the app's one feedback channel is never silent to anyone.
+
 **Observed gap, to be resolved.** At desktop width the content currently occupies roughly the
 top sixth of the viewport with empty ground below and nothing anchoring the page. The single
 column is correct; its vertical composition is not finished.
@@ -268,6 +273,9 @@ app.
 - **Shape:** barely-softened corners (3px), 1px border, `0.5rem 1rem` padding.
 - **Primary:** Wet Ink fill with Page-coloured label, mono at 0.8125rem with `0.02em`
   tracking. Used for the committing action on a surface — Capture, Ask, Save settings.
+- **In-flight:** a committing primary names the operation in progress, not a frozen label.
+  Capture reads `Capturing…` while the round-trip runs; Ask reads `Reading your vault…`. The
+  disabled colour treatment (below) keeps the in-flight state distinct from "nothing typed yet".
 - **Default:** Card fill, Rule border, Graphite label. Everything else.
 - **Touch-target floor:** the committing row (`.actions`) is held to a 44px minimum height so
   the thumb lands the primary one-handed; a primary and its siblings share one height instead
@@ -298,8 +306,10 @@ app.
   resize grabber, which reads as an ordinary form control rather than as a page to write on.
 
 ### Navigation
-- Three tabs — capture, ask, config — in lowercase mono at 0.8125rem with `0.04em` tracking,
+- Three tabs — capture, ask, settings — in lowercase mono at 0.8125rem with `0.04em` tracking,
   right-aligned against the wordmark, separated from the content by a single Rule hairline.
+  The third tab is `settings`, not `config`, so the noun matches its own surface — the `Save
+  settings` button and the `Settings saved` status line all say the same word.
 - **Active:** Graphite text with a 2px Wet Ink underline. **Inactive:** Pencil text,
   transparent underline. Hover lifts inactive text to Graphite.
 - The tab row does not change at phone width; three short words fit.
@@ -311,8 +321,12 @@ summary card standing in for it.
 
 - **Structure:** Card surface, 4px radius (`--radius-card`), a two-layer ambient shadow
   (`--shadow-card`), `1.5rem 1rem 1rem` padding, contents stacked on the `0.75rem` step.
-- **Eyebrow:** uppercase mono in Wet Ink stating the pending decision (new Note, or append to
-  a named Note). Once saved it becomes the Vault path in Dry Ink, lowercase.
+- **Eyebrow:** uppercase mono in Wet Ink stating the pending decision. For a new Note it reads
+  `NEW NOTE`. For an append it reads `APPEND TO` followed by the matched Note's title in its
+  **own case** — the decision is the machine's marking (uppercased), but the title is a
+  person's words and keeps its casing, so `append to "Offline capture and the outbox"` no
+  longer becomes `APPEND TO "OFFLINE CAPTURE AND THE OUTBOX"`. Once saved it becomes the
+  Vault path in Dry Ink, lowercase.
 - **Section markers:** small uppercase mono labels — summary, key points, related — each
   trailed by a hairline running to the edge of the card. They are ruling, not headings.
 - **The countdown edge:** a 2px Wet Ink hairline across the top of the card, scaling from full
@@ -323,6 +337,11 @@ summary card standing in for it.
   to Dry Ink over ~260ms — the one authored moment, wet to permanent. Under reduced motion the
   edge holds full in either state and only the colour carries the change.
 - **Related, when empty:** states why in words rather than showing an empty section.
+- **Actions:** `Append` / `Save as new Note` resolve an unconfirmed append (the save, on that
+  path); `Save now` forces the autosave where one will actually fire; `New capture` returns to
+  the empty Dump. After save, `Re-organize Note` re-runs Organize on the saved Note's body to
+  refresh its title, tags, summary and category — the term is `Organize`, not "metadata",
+  because that is the vocabulary for what it does.
 
 ## Do's and Don'ts
 

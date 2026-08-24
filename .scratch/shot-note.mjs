@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-const out = '/Users/ivanhanif/personal/shared-dev/brain-dump/.scratch/shots/pass-02';
+const out = '/Users/ivanhanif/personal/shared-dev/brain-dump/.scratch/shots/pass-04';
 
 const HEAD = `<header class="masthead"><span class="wordmark">brain-dump</span><nav>
 <button class="on">capture</button><button>ask</button><button>config</button></nav></header>`;
@@ -20,11 +20,13 @@ const inner = (state) => {
   const committed = state === 'saved';
   const held = state === 'append';
   const burnClass = held ? 'burn burn--held' : 'burn';
+  // The pending eyebrow is an uppercase machine marking, but the appended Note's title is a
+  // person's words: the decision prefix uppercases, the title keeps its own case (keep-case).
   const eyebrow = committed
     ? 'brain-dump/Notes/Outbox retry on a timer.md'
     : state === 'append'
-      ? 'append to “Offline capture and the outbox”'
-      : 'new Note';
+      ? 'Append to <span class="keep-case">&ldquo;Offline capture and the outbox&rdquo;</span>'
+      : 'New Note';
   const hint = committed
     ? 'Dump frozen. Your verbatim original is kept inside it.'
     : held
