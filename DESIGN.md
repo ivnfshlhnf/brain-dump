@@ -325,8 +325,10 @@ summary card standing in for it.
   `NEW NOTE`. For an append it reads `APPEND TO` followed by the matched Note's title in its
   **own case** — the decision is the machine's marking (uppercased), but the title is a
   person's words and keeps its casing, so `append to "Offline capture and the outbox"` no
-  longer becomes `APPEND TO "OFFLINE CAPTURE AND THE OUTBOX"`. Once saved it becomes the
-  Vault path in Dry Ink, lowercase.
+  longer becomes `APPEND TO "OFFLINE CAPTURE AND THE OUTBOX"`. Once saved the eyebrow
+  becomes the commit, promoted onto the card: a `FILED TO OBSIDIAN` filing stamp (uppercase
+  mono, Dry Ink) with the vault path as a live `obsidian://` link below it — the door back
+  into the Vault, in the place the decision used to be.
 - **Section markers:** small uppercase mono labels — summary, key points, related — each
   trailed by a hairline running to the edge of the card. They are ruling, not headings.
 - **The countdown edge:** a 2px Wet Ink hairline across the top of the card, scaling from full
@@ -336,12 +338,39 @@ summary card standing in for it.
   the hint states the reason in words. On save the edge stops, fills back to full, and cross-fades
   to Dry Ink over ~260ms — the one authored moment, wet to permanent. Under reduced motion the
   edge holds full in either state and only the colour carries the change.
+- **Related, when present:** each link is a door back into the Vault — an `obsidian://open`
+  link that opens the real Note in Obsidian on this device. The link text is the wikilink's
+  target without the `[[ ]]` brackets (the machine states the location, not the syntax);
+  external URLs pass through as-is. Dry Ink, no underline at rest, underline on hover — a
+  filed link does not shout, and says "follow me" only when reached for. Visited stays Dry:
+  a followed link is not a different state here.
 - **Related, when empty:** states why in words rather than showing an empty section.
 - **Actions:** `Append` / `Save as new Note` resolve an unconfirmed append (the save, on that
   path); `Save now` forces the autosave where one will actually fire; `New capture` returns to
   the empty Dump. After save, `Re-organize Note` re-runs Organize on the saved Note's body to
   refresh its title, tags, summary and category — the term is `Organize`, not "metadata",
   because that is the vocabulary for what it does.
+- **Scroll-on-save:** once the commit is promoted onto the card, the card is scrolled to the
+  top of the viewport so the peak-end frame is the filed Note itself — not the bottom-of-page
+  status line that just scrolled past. Smooth, unless the user has asked motion to stop.
+
+### The Obsidian door
+
+A saved Note is not the end of the journey — it is the seam back into the Vault it came from.
+Three places open the real file in Obsidian on this device via `obsidian://open`:
+
+- **The saved path** in the filed line (the commit, promoted onto the card).
+- **Every Related link** (wikilink targets become paths; external URLs pass through).
+- **Every Ask citation** in the answer's sources.
+
+The URL is `obsidian://open?vault=<name>&file=<path>` when a vault name is set, or
+`obsidian://open?file=<path>` when it is empty (Obsidian opens the active vault). Each path
+**segment** is percent-encoded but the slashes stay literal — Obsidian's handler reads the
+slash as a path separator, so an encoded `%2F` would point at one oddly-named file instead of
+a path. The vault name is a **per-device** setting (a vault may be named differently on the
+laptop and the phone; it is not the CouchDB database name), so it lives in Settings as
+`Obsidian vault name`, defaults to empty, and is not synced. The helpers live in
+`src/lib/obsidian.ts` and are unit-tested.
 
 ## Do's and Don'ts
 

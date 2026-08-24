@@ -1,12 +1,17 @@
 import { chromium } from 'playwright';
-const out = '/Users/ivanhanif/personal/shared-dev/brain-dump/.scratch/shots/pass-04';
+const out = '/Users/ivanhanif/personal/shared-dev/brain-dump/.scratch/shots/pass-05';
 
 const HEAD = `<header class="masthead"><span class="wordmark">brain-dump</span><nav>
 <button class="on">capture</button><button>ask</button><button>config</button></nav></header>`;
 
 const NOTE_BODY = `The outbox should retry on a timer as well as on the online event. A capture that fails while navigator.onLine is already true — a flaky connection, a captive portal, an LLM outage — never fires online, and the spec promises offline captures organize themselves without the user's intervention. Sixty seconds feels right; it is cheap and it is invisible.`;
 
-const RELATED = `<ul class="links"><li>[[Offline capture and the outbox]]</li><li>[[LiveSync CouchDB document format]]</li><li>[[Things that fail silently]]</li></ul>`;
+// Related links are doors back into the Vault: each opens the real Note in Obsidian via
+// obsidian://open?vault=…&file=… (vault name is per-device; slashes stay literal, segments
+// encoded). The link text is the wikilink target without the brackets.
+const VAULT = 'Personal';
+const ob = (target) => `obsidian://open?vault=${encodeURIComponent(VAULT)}&file=${target.split('/').map(encodeURIComponent).join('/')}`;
+const RELATED = `<ul class="links"><li><a class="vault-link" href="${ob('Offline capture and the outbox')}">Offline capture and the outbox</a></li><li><a class="vault-link" href="${ob('LiveSync CouchDB document format')}">LiveSync CouchDB document format</a></li><li><a class="vault-link" href="${ob('Things that fail silently')}">Things that fail silently</a></li></ul>`;
 
 // The three truthful states of the Note card after the harden+bolder pass.
 //   append — unconfirmed append: the edge is HELD (wet, full, not counting), because the
@@ -22,8 +27,11 @@ const inner = (state) => {
   const burnClass = held ? 'burn burn--held' : 'burn';
   // The pending eyebrow is an uppercase machine marking, but the appended Note's title is a
   // person's words: the decision prefix uppercases, the title keeps its own case (keep-case).
+  // When committed, the eyebrow becomes the filed line — "Filed to Obsidian" + the vault path
+  // as an obsidian:// link (the door back into the Vault), in Dry Ink.
+  const SAVED_PATH = 'brain-dump/Notes/Outbox retry on a timer.md';
   const eyebrow = committed
-    ? 'brain-dump/Notes/Outbox retry on a timer.md'
+    ? `<span class="filed-mark">Filed to Obsidian</span><br><a class="vault-link" href="${ob(SAVED_PATH)}">${SAVED_PATH}</a>`
     : state === 'append'
       ? 'Append to <span class="keep-case">&ldquo;Offline capture and the outbox&rdquo;</span>'
       : 'New Note';

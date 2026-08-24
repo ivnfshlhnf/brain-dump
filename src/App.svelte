@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { loadSettings, saveSettings } from './lib/settings';
   import { createRemoteDb, createDatabaseAdmin, createEmbeddingsDb } from './lib/db';
   import {
@@ -16,6 +16,7 @@
   import { defaultSha1Hex } from './lib/livesync';
   import { createAutosaver } from './lib/autosave';
   import { createLog, createDevFileSink, type Log, type LogEvent } from './lib/logger';
+  import { obsidianUrl, linkHref, linkText } from './lib/obsidian';
   import { checkConnections, type HealthReport, type CheckResult } from './lib/health';
   import { createCachingEmbedder } from './lib/embedding-cache';
   import { validateProviderUrl } from './lib/config';
@@ -151,6 +152,18 @@
     }
   }
 
+  // On save the commit is promoted onto the card itself (the teal edge plus the "Filed to
+  // Obsidian" line). Bring the card to the top of the viewport so the peak-end frame is the
+  // filed Note, not the bottom-of-page status line that just scrolled past. Smooth, unless the
+  // user has asked motion to stop.
+  function scrollToNote() {
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    document.querySelector('.note')?.scrollIntoView({
+      behavior: reduce ? 'auto' : 'smooth',
+      block: 'start',
+    });
+  }
+
   onMount(async () => {
     settings = await loadSettings();
     // beforeunload can't await promises, so flush is best-effort: the Dump was
@@ -273,6 +286,10 @@
           session.match.kind === 'append'
             ? `Appended to: ${session.match.suggestion?.title ?? result.note.title}`
             : `Saved Note: ${result.note.title}`;
+        // The commit now lives on the card (teal edge + "Filed to Obsidian" line); bring it
+        // into view so the last frame is the filed Note, not the status line that scrolled past.
+        await tick();
+        scrollToNote();
       } else {
         // The Dump persists; the Note will be generated from it later.
         status = `Save failed — Dump kept: ${result.error.message}`;
@@ -523,7 +540,8 @@
 
         <p class="eyebrow">
           {#if session.saved && savedNotePath}
-            {savedNotePath}
+            <span class="filed-mark">Filed to Obsidian</span><br>
+            <a class="vault-link" href={obsidianUrl(settings.vaultName, savedNotePath)}>{savedNotePath}</a>
           {:else if session.match.kind === 'new'}
             New Note
           {:else}
@@ -560,7 +578,7 @@
 
         <p class="rule-label">related</p>
         {#if shown.related.length}
-          <ul class="links">{#each shown.related as link}<li>{link}</li>{/each}</ul>
+          <ul class="links">{#each shown.related as link}<li><a class="vault-link" href={linkHref(settings.vaultName, link)}>{linkText(link)}</a></li>{/each}</ul>
         {:else if session.saved}
           <p class="pending">No Note in the Vault was close enough to link.</p>
         {:else}
@@ -635,7 +653,7 @@
         {#if citations.length}
           <p class="rule-label">sources</p>
           <ul class="sources">
-            {#each citations as c}<li>{c.title} — {c.link}</li>{/each}
+            {#each citations as c}<li><a class="vault-link" href={obsidianUrl(settings.vaultName, c.path)}>{c.title}</a></li>{/each}
           </ul>
         {/if}
       </section>
@@ -646,6 +664,7 @@
     <label>Username <input bind:value={settings.couchdbUser} /></label>
     <label>Password <input type="password" bind:value={settings.couchdbPassword} /></label>
     <label>Managed folder <input bind:value={settings.managedFolder} /></label>
+    <label>Obsidian vault name <input bind:value={settings.vaultName} placeholder="your vault, on this device" /></label>
     <label>Embeddings database <input bind:value={settings.embeddingsDb} /></label>
     <label>Case-sensitive file names <input type="checkbox" bind:checked={settings.caseSensitive} /></label>
     <label>LLM provider <input bind:value={settings.llmProvider} /></label>

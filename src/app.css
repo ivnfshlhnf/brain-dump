@@ -496,6 +496,31 @@ textarea.dump {
   text-transform: none;
 }
 
+/* The commit, promoted onto the card: the "FILED TO OBSIDIAN" line where the eyebrow was,
+ * with the vault path as a real door back into the Vault. The mark is the machine's filing
+ * stamp (uppercase, Dry Ink); the path below it is the link. */
+.eyebrow .filed-mark {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+/* Doors back into the Vault. A saved path, a Related link and an Ask citation all open the
+ * real file in Obsidian via obsidian://. Dry Ink — a filed thought does not shout — no
+ * underline at rest, underline on hover so the link says "follow me" only when reached for.
+ * Visited stays Dry: a followed link is not a different state here. */
+.vault-link {
+  color: var(--set);
+  text-decoration: none;
+  word-break: break-all;
+}
+.vault-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.vault-link:visited {
+  color: var(--set);
+}
+
 .note h2 {
   font-family: var(--serif);
   font-size: var(--text-title);
