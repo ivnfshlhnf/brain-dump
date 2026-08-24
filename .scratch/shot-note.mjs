@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-const out = '/Users/ivanhanif/personal/shared-dev/brain-dump/.scratch/shots/pass-05';
+const out = '/Users/ivanhanif/personal/shared-dev/brain-dump/.scratch/shots/pass-07';
 
 const HEAD = `<header class="masthead"><span class="wordmark">brain-dump</span><nav>
 <button class="on">capture</button><button>ask</button><button>config</button></nav></header>`;

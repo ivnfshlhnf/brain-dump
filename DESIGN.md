@@ -2,7 +2,7 @@
 name: Brain-dump
 description: A field notebook that files itself — catch a thought wet, let it dry into a Note.
 colors:
-  wet-ink: "oklch(58% 0.16 55)"
+  wet-ink: "oklch(54% 0.15 55)"
   wet-ink-dark: "oklch(75% 0.15 65)"
   dry-ink: "oklch(52% 0.09 195)"
   dry-ink-dark: "oklch(72% 0.09 195)"
@@ -14,8 +14,8 @@ colors:
   graphite-dark: "oklch(92% 0.012 230)"
   pencil: "oklch(52% 0.02 240)"
   pencil-dark: "oklch(70% 0.018 230)"
-  rule: "oklch(88% 0.012 240)"
-  rule-dark: "oklch(32% 0.02 235)"
+  rule: "oklch(76% 0.013 240)"
+  rule-dark: "oklch(40% 0.02 235)"
   alarm: "oklch(52% 0.19 25)"
   alarm-dark: "oklch(74% 0.16 25)"
 typography:
@@ -134,9 +134,11 @@ A notebook palette: paper, graphite and pencil for everything structural, and ex
 inks that mean something.
 
 ### Primary
-- **Wet Ink** (`oklch(58% 0.16 55)`, dark `oklch(75% 0.15 65)`): a thought that is not yet
+- **Wet Ink** (`oklch(54% 0.15 55)`, dark `oklch(75% 0.15 65)`): a thought that is not yet
   permanent. The countdown edge, the primary action, the active tab. Present only while
-  something can still be changed. Warm, closer to iron-oxide ink than to a signal orange.
+  something can still be changed. Warm, closer to iron-oxide ink than to a signal orange —
+  deepened from a lighter, more signal-orange value so the Page-coloured label on the primary
+  button clears AA contrast (4.5:1) in the light scheme.
 
 ### Secondary
 - **Dry Ink** (`oklch(52% 0.09 195)`, dark `oklch(72% 0.09 195)`): a thought that has reached
@@ -156,8 +158,11 @@ inks that mean something.
   read.
 - **Pencil** (`oklch(52% 0.02 240)`, dark `oklch(70% 0.018 230)`): everything written to be
   glanced at — labels, hints, inactive tabs, metadata keys.
-- **Rule** (`oklch(88% 0.012 240)`, dark `oklch(32% 0.02 235)`): the ruling of the page.
-  Dividers, borders, section lines.
+- **Rule** (`oklch(76% 0.013 240)`, dark `oklch(40% 0.02 235)`): the ruling of the page.
+  Dividers, borders, section lines. Set just dark enough to read as ruling — a notebook's
+  ruling is dead straight and visible, not ghostly — while staying a hairline rather than a
+  border. (Field identity is carried by each field's associated label, not by the rule, so the
+  hairline does not need to meet the 3:1 non-text floor on its own.)
 
 ### Named Rules
 

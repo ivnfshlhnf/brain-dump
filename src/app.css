@@ -54,9 +54,9 @@
   --text-dark: oklch(92% 0.012 230);
   --dim-light: oklch(52% 0.02 240);
   --dim-dark: oklch(70% 0.018 230);
-  --rule-light: oklch(88% 0.012 240);
-  --rule-dark: oklch(32% 0.02 235);
-  --ember-light: oklch(58% 0.16 55);
+  --rule-light: oklch(76% 0.013 240);
+  --rule-dark: oklch(40% 0.02 235);
+  --ember-light: oklch(54% 0.15 55);
   --ember-dark: oklch(75% 0.15 65);
   --set-light: oklch(52% 0.09 195);
   --set-dark: oklch(72% 0.09 195);
