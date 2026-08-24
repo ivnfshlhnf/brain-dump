@@ -150,8 +150,15 @@ body {
 }
 
 main {
-  max-width: var(--measure);
+  /* The notebook is one column, capped at the reading measure. border-box lets the column
+   * fill the viewport height (min-height below) without its padding pushing the page past
+   * 100dvh; max-width adds the side margins back on top of --measure, so the reading line
+   * stays at 34rem rather than measure-minus-padding. */
+  box-sizing: border-box;
+  max-width: calc(var(--measure) + var(--s4) * 2);
   margin: 0 auto;
+  min-height: 100vh;
+  min-height: 100dvh;
   padding: var(--s5) var(--s4) var(--s7);
   /* On notched / home-indicator phones (viewport-fit=cover) the safe-area insets are
    * non-zero; on every other device they resolve to 0 and the fallback padding above
@@ -166,6 +173,26 @@ main {
   display: flex;
   flex-direction: column;
   gap: var(--s4);
+}
+
+/* Each view is one surface. When the surface's content is shorter than the viewport it
+ * centers in the space below the masthead — the capture Dump is the product, so it lands
+ * where the eye arrives, not at the top with empty ground beneath. When the content is
+ * taller (settings, the whole Note) it flows from the top and scrolls. auto margins, not
+ * justify-content: center, so a tall surface never clips its own top; the margins collapse
+ * to 0 once the content overflows. The status line lives outside every surface, so it sinks
+ * to the bottom of the page body. */
+.surface {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+.surface > :first-child {
+  margin-top: auto;
+}
+.surface > :last-child {
+  margin-bottom: auto;
 }
 
 /* The machine's voice: every label, tag, path, wikilink and status line. */

@@ -218,6 +218,18 @@ The page is structured top-down: a masthead carrying the wordmark and three tabs
 single rule, then the surface's content, then status. Nothing floats, nothing docks, and
 nothing is fixed to the viewport.
 
+**Vertical composition.** The column fills the viewport height (`min-height: 100dvh`,
+`box-sizing: border-box` so the padding sits inside that height rather than pushing the page
+past it; `max-width` is `--measure` plus the side margins so the reading line stays at 34rem).
+Each view is one `surface`. When the surface's content is shorter than the viewport it
+centres in the space below the masthead — the capture Dump is the product, so it lands where
+the eye arrives, not at the top with empty ground beneath. When the content is taller (the
+whole Note, the settings wall) it flows from the top and scrolls. Centring uses auto margins
+on the surface's first and last child, not `justify-content: centre`, so a tall surface never
+clips its own top: the margins collapse to 0 the moment the content overflows. The masthead
+stays at the top; the status line lives outside every surface, so it sinks to the bottom of
+the page body. The single column is unchanged — a second column is never added.
+
 **Status is the only feedback channel, so it announces itself.** The status line (and the
 queue banner) carries `aria-live="polite"`, so a save confirmation, a failure, a config
 rejection or an offline-queue notice is spoken to assistive tech the same moment it appears
@@ -227,10 +239,6 @@ on screen — the app's one feedback channel is never silent to anyone.
 `max(<margin>, env(safe-area-inset-…))` on all four sides, so on a notched / home-indicator
 phone the masthead clears the notch and the last action clears the home indicator, while
 devices without insets fall back to the notebook's own margins.
-
-**Observed gap, to be resolved.** At desktop width the content currently occupies roughly the
-top sixth of the viewport with empty ground below and nothing anchoring the page. The single
-column is correct; its vertical composition is not finished.
 
 ## Elevation & Depth
 

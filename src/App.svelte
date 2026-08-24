@@ -507,6 +507,7 @@
   </header>
 
   {#if view === 'capture'}
+    <section class="surface">
     {#if queuedCount === 1}
       <p class="status" aria-live="polite">1 Dump saved — it will be Organized when online.</p>
     {:else if queuedCount}
@@ -633,7 +634,9 @@
         <button on:click={() => { session = null; savedNote = null; autosaver.cancel(); }}>New capture</button>
       </div>
     {/if}
+    </section>
   {:else if view === 'ask'}
+    <section class="surface">
     <label class="ask">
       ask your vault
       <textarea
@@ -658,7 +661,9 @@
         {/if}
       </section>
     {/if}
+    </section>
   {:else}
+    <section class="surface">
     <label>CouchDB URL <input bind:value={settings.couchdbUrl} placeholder="http://localhost:5984" /></label>
     <label>Database <input bind:value={settings.couchdbDb} placeholder="obsidiannotes" /></label>
     <label>Username <input bind:value={settings.couchdbUser} /></label>
@@ -717,6 +722,7 @@
         </li>
       {/each}
     </ul>
+    </section>
   {/if}
 
   {#if status}<p class="status" aria-live="polite">{status}</p>{/if}

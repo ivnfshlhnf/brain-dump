@@ -16,7 +16,7 @@ import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 const url = 'http://localhost:5173';
-const out = resolve(process.cwd(), '.scratch/shots/pass-08');
+const out = resolve(process.cwd(), '.scratch/shots/pass-09');
 const DRAFT = 'A thought I must not lose mid-sentence. The outbox should retry on a timer, not just on reconnect.';
 
 const VIEWPORTS = [

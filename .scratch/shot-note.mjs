@@ -1,8 +1,8 @@
 import { chromium } from 'playwright';
-const out = '/Users/ivanhanif/personal/shared-dev/brain-dump/.scratch/shots/pass-08';
+const out = '/Users/ivanhanif/personal/shared-dev/brain-dump/.scratch/shots/pass-09';
 
 const HEAD = `<header class="masthead"><span class="wordmark">brain-dump</span><nav>
-<button class="on">capture</button><button>ask</button><button>config</button></nav></header>`;
+<button class="on">capture</button><button>ask</button><button>settings</button></nav></header>`;
 
 const NOTE_BODY = `The outbox should retry on a timer as well as on the online event. A capture that fails while navigator.onLine is already true — a flaky connection, a captive portal, an LLM outage — never fires online, and the spec promises offline captures organize themselves without the user's intervention. Sixty seconds feels right; it is cheap and it is invisible.`;
 
@@ -90,7 +90,7 @@ for (const scheme of ['light','dark']) {
       await page.goto('http://localhost:5173', { waitUntil:'load' });
       await page.evaluate(() => document.fonts.ready);
       await page.evaluate(([head, body]) => {
-        document.querySelector('main').innerHTML = head + body;
+        document.querySelector('main').innerHTML = head + '<section class="surface">' + body + '</section>';
       }, [HEAD, inner(state)]);
       // Let the counting animation advance for the 'new' state so the screenshot shows
       // the burn partway down; the held and saved states are static.
