@@ -153,6 +153,16 @@ main {
   max-width: var(--measure);
   margin: 0 auto;
   padding: var(--s5) var(--s4) var(--s7);
+  /* On notched / home-indicator phones (viewport-fit=cover) the safe-area insets are
+   * non-zero; on every other device they resolve to 0 and the fallback padding above
+   * holds. max() keeps the notebook's own margins and adds the safe area on top, so the
+   * masthead never sits under a notch and the last action never hides behind the home
+   * indicator. */
+  padding:
+    max(var(--s5), env(safe-area-inset-top))
+    max(var(--s4), env(safe-area-inset-right))
+    max(var(--s7), env(safe-area-inset-bottom))
+    max(var(--s4), env(safe-area-inset-left));
   display: flex;
   flex-direction: column;
   gap: var(--s4);
@@ -218,13 +228,19 @@ nav button {
   appearance: none;
   background: none;
   border: 0;
-  padding: var(--s1) 0;
+  padding: var(--s2) var(--s2);
   font-size: var(--text-sm);
   letter-spacing: 0.04em;
   color: var(--dim);
   cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: color var(--speed) var(--ease), border-color var(--speed) var(--ease);
+  /* The active indicator is a text underline, not a box-edge border, so it stays tight
+   * under the label while the padding grows the touch box — a tab is text, and the line
+   * belongs to the text, not to the box. */
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 4px;
+  text-decoration-thickness: 2px;
+  transition: color var(--speed) var(--ease), text-decoration-color var(--speed) var(--ease);
 }
 
 nav button:hover {
@@ -233,7 +249,7 @@ nav button:hover {
 
 nav button.on {
   color: var(--text);
-  border-bottom-color: var(--ember);
+  text-decoration-color: var(--ember);
 }
 
 /* ── Controls ────────────────────────────────────────────────────────── */
@@ -519,6 +535,26 @@ textarea.dump {
 }
 .vault-link:visited {
   color: var(--set);
+}
+
+/* Doors are meant to be walked through: the saved path, a Related link and a citation are
+ * each a 44px touch target, not a 13px line of text. The eyebrow's inline path link keeps
+ * its inline flow; only the stacked lists grow. */
+.note .links .vault-link,
+.answer .sources .vault-link {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+/* Touch has no hover. The underline that says "follow me" is hover-gated for pointers; on
+ * a touch device it can never be revealed, so show it at rest instead — the link announces
+ * itself without being reached for. */
+@media (hover: none) {
+  .vault-link {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
 }
 
 .note h2 {

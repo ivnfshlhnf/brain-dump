@@ -223,6 +223,11 @@ queue banner) carries `aria-live="polite"`, so a save confirmation, a failure, a
 rejection or an offline-queue notice is spoken to assistive tech the same moment it appears
 on screen — the app's one feedback channel is never silent to anyone.
 
+**Safe areas.** The viewport is `viewport-fit=cover` and the column's padding is
+`max(<margin>, env(safe-area-inset-…))` on all four sides, so on a notched / home-indicator
+phone the masthead clears the notch and the last action clears the home indicator, while
+devices without insets fall back to the notebook's own margins.
+
 **Observed gap, to be resolved.** At desktop width the content currently occupies roughly the
 top sixth of the viewport with empty ground below and nothing anchoring the page. The single
 column is correct; its vertical composition is not finished.
@@ -315,8 +320,13 @@ app.
   right-aligned against the wordmark, separated from the content by a single Rule hairline.
   The third tab is `settings`, not `config`, so the noun matches its own surface — the `Save
   settings` button and the `Settings saved` status line all say the same word.
-- **Active:** Graphite text with a 2px Wet Ink underline. **Inactive:** Pencil text,
-  transparent underline. Hover lifts inactive text to Graphite.
+- **Active:** Graphite text with a 2px Wet Ink underline carried as a `text-decoration`
+  underline (it belongs to the label, not the box), so it stays tight under the word while
+  the tab's padding grows the touch target. **Inactive:** Pencil text, a transparent
+  underline. Hover lifts inactive text to Graphite.
+- **Touch:** the tabs are text, not commit buttons, so they stay slim — but their padding
+  clears the 24px minimum target on touch (the narrow `ask` tab especially) without taking
+  on the fill or border of a button.
 - The tab row does not change at phone width; three short words fit.
 
 ### Note card *(signature)*
@@ -348,7 +358,11 @@ summary card standing in for it.
   target without the `[[ ]]` brackets (the machine states the location, not the syntax);
   external URLs pass through as-is. Dry Ink, no underline at rest, underline on hover — a
   filed link does not shout, and says "follow me" only when reached for. Visited stays Dry:
-  a followed link is not a different state here.
+  a followed link is not a different state here. Each link in the stacked lists (Related and
+  the Ask sources) is a **44px touch target**, not a 13px line — the doors are the point of
+  the saved state, so they are the easiest thing to hit. The eyebrow's inline path link
+  keeps its inline flow. On a touch device (`hover: none`) the underline shows at rest,
+  because the hover that reveals it can never fire.
 - **Related, when empty:** states why in words rather than showing an empty section.
 - **Actions:** `Append` / `Save as new Note` resolve an unconfirmed append (the save, on that
   path); `Save now` forces the autosave where one will actually fire; `New capture` returns to

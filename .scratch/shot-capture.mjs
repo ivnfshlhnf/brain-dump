@@ -10,13 +10,13 @@
 //   npm run dev   # in one shell
 //   node .scratch/shot-capture.mjs
 //
-// Output → .scratch/shots/pass-07/ (gitignored — never commit screenshots of a real vault).
+// Output → .scratch/shots/pass-08/ (gitignored — never commit screenshots of a real vault).
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 const url = 'http://localhost:5173';
-const out = resolve(process.cwd(), '.scratch/shots/pass-07');
+const out = resolve(process.cwd(), '.scratch/shots/pass-08');
 const DRAFT = 'A thought I must not lose mid-sentence. The outbox should retry on a timer, not just on reconnect.';
 
 const VIEWPORTS = [
