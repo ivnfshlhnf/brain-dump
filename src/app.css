@@ -247,6 +247,7 @@ button {
   border: 1px solid var(--rule);
   border-radius: var(--radius);
   cursor: pointer;
+  box-sizing: border-box;
   /* Nothing moves silently: every state a control can be in resolves over one beat,
    * never a snap. The press is a real depression, not a flicker. */
   transition:
@@ -343,6 +344,13 @@ textarea.dump {
   display: flex;
   gap: var(--s2);
   flex-wrap: wrap;
+}
+
+/* The committing controls are touch targets first: a 44px floor so the thumb lands them
+   one-handed. Applied to the whole row so a primary and its siblings share one height
+   instead of mismatching. The nav tabs are text, not commit buttons, and stay slim. */
+.actions button {
+  min-height: 44px;
 }
 
 /* ── Status ──────────────────────────────────────────────────────────── */

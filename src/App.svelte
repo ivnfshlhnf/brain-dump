@@ -35,8 +35,54 @@
     logEvents = logStore.events();
   };
 
+  // ── The Dump draft: a thought in flight must outlive a closed tab. ──────────
+  // Persistence is the cheap, invisible half of "the thought survives, whatever else fails"
+  // — the raw Dump has always reached the Vault at Capture, but until that press the typed
+  // text lived only in memory. Now it rides in localStorage, restored on the next load.
+  const DRAFT_KEY = 'brain-dump:dump-draft';
+  let draftTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function readDraft(): string {
+    try {
+      return localStorage.getItem(DRAFT_KEY) ?? '';
+    } catch {
+      // Private mode, storage disabled, or quota — degrade to the old behaviour: the
+      // draft lives only in memory, which is still no worse than before.
+      return '';
+    }
+  }
+
+  // Debounced: a paste of a long Note shouldn't write on every input event. The latest
+  // value is read at fire time, so rapid edits coalesce into one write.
+  function persistDraft() {
+    if (draftTimer) clearTimeout(draftTimer);
+    draftTimer = setTimeout(() => {
+      draftTimer = null;
+      try {
+        localStorage.setItem(DRAFT_KEY, text);
+      } catch {
+        /* Storage unavailable — nothing to persist, nothing to report. */
+      }
+    }, 250);
+  }
+
+  function clearDraft() {
+    if (draftTimer) {
+      clearTimeout(draftTimer);
+      draftTimer = null;
+    }
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+    } catch {
+      /* Storage unavailable — the in-memory text is already cleared. */
+    }
+  }
+
   let settings: Settings = { ...DEFAULT_SETTINGS };
-  let text = '';
+  // The uncommitted Dump is restored from localStorage on load, so an interrupted thought
+  // (a closed tab, a killed app, a bus ride) survives where it used to vanish from volatile
+  // memory before the Capture press. Cleared the moment a Dump is captured.
+  let text = readDraft();
   let status = '';
   let view: 'capture' | 'ask' | 'config' = 'capture';
   let busy = false;
@@ -89,13 +135,41 @@
     return { db: createRemoteDb(settings), settings, hash: defaultSha1Hex, log };
   }
 
+  // Autofocus the Dump whenever it mounts — on load (so the first character needs no tap to
+  // reach the field) and again after a New capture (so the next thought is one keystroke away).
+  // preventScroll keeps desktop from jumping; on mobile the keyboard rising is the point.
+  function focusOnMount(node: HTMLElement) {
+    node.focus({ preventScroll: true });
+  }
+
+  // Cmd/Ctrl+Enter commits the surface you're typing in. The product's thesis is speed at
+  // capture; until now no keyboard accelerator existed anywhere in the app.
+  function commitOnModEnter(e: KeyboardEvent, run: () => void, disabled: boolean) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      if (!disabled) run();
+    }
+  }
+
   onMount(async () => {
     settings = await loadSettings();
     // beforeunload can't await promises, so flush is best-effort: the Dump was
     // already persisted at capture, so if the close-time save doesn't land the
     // Note is generated from the surviving Dump later (the save-failure path).
     onBeforeUnload = () => {
+      // Flush the in-flight Note save (best-effort; the Dump is already persisted at capture).
       if (session && !session.saved) void autosaver.flush();
+      // And flush the uncommitted draft synchronously — a debounce in flight at close-time
+      // would otherwise lose the last 250ms of typing. localStorage writes are synchronous.
+      if (draftTimer) {
+        clearTimeout(draftTimer);
+        draftTimer = null;
+        try {
+          localStorage.setItem(DRAFT_KEY, text);
+        } catch {
+          /* Storage unavailable — the in-memory text is gone with the tab. */
+        }
+      }
     };
     window.addEventListener('beforeunload', onBeforeUnload);
 
@@ -133,6 +207,7 @@
       // than claiming the user is offline.
       if (outcome.kind === 'queued') {
         text = '';
+        clearDraft();
         await refreshQueueState();
         status =
           outcome.reason === 'offline'
@@ -144,6 +219,7 @@
       session = outcome.session;
       context = '';
       text = '';
+      clearDraft();
       savedNotePath = null;
       savedNote = null;
       contextRevision = 0;
@@ -424,7 +500,10 @@
       <!-- The Dump is the product, not a form field: set in the content face, at content size. -->
       <textarea
         class="dump"
+        use:focusOnMount
         bind:value={text}
+        on:input={persistDraft}
+        on:keydown={(e) => commitOnModEnter(e, captureDump, busy || !text.trim())}
         placeholder="What are you thinking?"
         disabled={busy}></textarea>
       <div class="actions">
@@ -494,7 +573,18 @@
 
       <label class="context-field">
         add context
-        <textarea bind:value={context} on:input={onContextInput} disabled={session.saved}></textarea>
+        <textarea
+          bind:value={context}
+          on:input={onContextInput}
+          on:keydown={(e) => commitOnModEnter(
+            e,
+            () => autosaver.flush(),
+            // The context field only renders with a session; the !session guard is for the
+            // type checker, not the runtime — it makes an absent session a no-op rather than
+            // a null deref. Matches the "Save now" visibility rule from the harden pass.
+            !session || session.saved || (session.match.kind === 'append' && !appendConfirmed),
+          )}
+          disabled={session.saved}></textarea>
       </label>
       <p class="hint">
         {#if session.saved}
@@ -523,8 +613,11 @@
   {:else if view === 'ask'}
     <label class="ask">
       ask your vault
-      <textarea bind:value={question} placeholder="What did I think about..." disabled={asking}
-      ></textarea>
+      <textarea
+        bind:value={question}
+        on:keydown={(e) => commitOnModEnter(e, askQuestion, asking || !question.trim())}
+        placeholder="What did I think about..."
+        disabled={asking}></textarea>
     </label>
     <div class="actions">
       <button class="primary" on:click={askQuestion} disabled={asking || !question.trim()}>

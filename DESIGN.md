@@ -269,6 +269,9 @@ app.
 - **Primary:** Wet Ink fill with Page-coloured label, mono at 0.8125rem with `0.02em`
   tracking. Used for the committing action on a surface — Capture, Ask, Save settings.
 - **Default:** Card fill, Rule border, Graphite label. Everything else.
+- **Touch-target floor:** the committing row (`.actions`) is held to a 44px minimum height so
+  the thumb lands the primary one-handed; a primary and its siblings share one height instead
+  of mismatching. The nav tabs are text, not commit buttons, and stay slim.
 - **Hover / Focus:** border shifts to Pencil on hover; focus-visible draws a 2px Wet Ink
   outline offset 2px. Both resolve over the 140ms `--ease` beat — they no longer snap.
 - **Disabled:** its own colour treatment, not a flat opacity fade. A disabled default control
@@ -284,6 +287,13 @@ app.
   9rem minimum height. It is the one field set in the reading face, because the thought is
   the product and not a form value.
 - **Focus:** 2px Wet Ink outline, offset 2px.
+- **Capture is fast and protected:** the Dump is autofocused on mount (the first character
+  needs no tap to reach the field), the in-flight text is persisted to `localStorage` on input
+  (debounced 250ms) and restored on the next load so an interrupted thought — a closed tab, a
+  killed app, a bus ride — survives where it used to vanish from volatile memory before the
+  Capture press, and ⌘/Ctrl+Enter commits from any commit field (Dump, Context, Ask) without
+  reaching for the button. The draft is cleared the moment a Dump is actually captured;
+  `beforeunload` flushes it synchronously so a sudden close does not lose the last 250ms.
 - **Observed defect:** the capture field still renders as a bordered box with a visible native
   resize grabber, which reads as an ordinary form control rather than as a page to write on.
 
