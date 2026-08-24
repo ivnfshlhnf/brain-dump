@@ -335,18 +335,28 @@ export type FinalizeResult =
   | { ok: true; note: Note; session: CaptureSession; written: WriteResult }
   | { ok: false; note: Note; session: CaptureSession; error: Error };
 
-/** Finalize a capture: run the final Organize over the full Dump (original +
- *  Context), then either found a new Note or append a dated section to the matched
- *  existing Note, and freeze the Dump. If the final save fails, the Dump persists
- *  (Context already written) and the Note is generated from it later — the session
- *  stays unsaved so the user can retry. */
+/** Finalize a capture: settle the Note, then either found a new Note or append a dated
+ *  section to the matched existing Note, and freeze the Dump.
+ *
+ *  The final Organize runs over the full Dump (original + Context) **only when Context was
+ *  added**. With no Context the Dump never changed, so the held preview already is the
+ *  Organize of the full Dump and is reused — the Note the user approved is the Note that
+ *  gets saved. Running it unconditionally meant every plain capture paid for a second LLM
+ *  call whose only possible effect was to disagree with the first.
+ *
+ *  If the final save fails, the Dump persists (Context already written) and the Note is
+ *  generated from it later — the session stays unsaved so the user can retry. */
 export async function finalizeCapture(
   session: CaptureSession,
   deps: FinalizeDeps,
 ): Promise<FinalizeResult> {
   if (session.saved) throw new Error('Already saved.');
 
-  const organized = await organizeNote(session.dump, deps.organizer, deps.settings);
+  // Re-organize only when Context edited the Dump; otherwise the preview already is the
+  // Organize of the unchanged Dump. See the docstring for why.
+  const organized = session.dump.context
+    ? await organizeNote(session.dump, deps.organizer, deps.settings)
+    : session.preview;
   // Related is resolved here, at save, and never at capture: it ranks the whole vault, and the
   // capture path exists to feel instant. By now the Dump is complete (original plus any
   // Context), so the links reflect the finished thought rather than the first draft.

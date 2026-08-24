@@ -13,7 +13,7 @@ The raw record of a single brain-dump — a voice transcript or typed text, capt
 _Avoid_: raw note, transcript, entry
 
 **Context**:
-Detail the user adds to a Dump during the capture session, before the Note is saved. The verbatim original is preserved inside the Dump; the final Note is re-organized from the full Dump at save.
+Detail the user adds to a Dump during the capture session, before the Note is saved. The verbatim original is preserved inside the Dump. The final Note is organized from the full Dump (original plus Context); when Context was added it is re-organized at save, and when no Context was added the preview the user approved already is that Organize and is reused as-is.
 _Avoid_: addition, edit, note edit
 
 **Note**:

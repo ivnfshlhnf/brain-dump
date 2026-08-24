@@ -345,14 +345,15 @@ describe('capture review flow (Seam A — ticket 03)', () => {
     expect(result.session.saved).toBe(true); // the Dump is frozen
   });
 
-  it('finalizes a Dump with no Context: the final Organize runs over the original alone', async () => {
+  it('finalizes a Dump with no Context: the preview is the Note — no second Organize', async () => {
     const session = await beginCapture('I keep forgetting to water the plants', beginDeps());
     const result = await finalizeCapture(session, finalizeDeps());
 
     expect(result.ok).toBe(true);
     if (!result.ok) return; // narrow the discriminated union for the type checker
-    expect(organizeCalls).toHaveLength(2);
-    expect(organizeCalls[1].content).toBe('I keep forgetting to water the plants'); // no Context section
+    // No Context → the preview already is the Organize of the unchanged Dump, so it is saved as-is.
+    expect(organizeCalls).toHaveLength(1);
+    expect(result.note).toEqual(session.preview);
     expect(result.written.path).toBe('Brain Dump/2026-08-21-water-the-plants.md');
     expect(result.session.saved).toBe(true);
   });
