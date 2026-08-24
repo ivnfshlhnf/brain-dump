@@ -121,6 +121,24 @@ describe('OpenAI-compatible chat seam (createOrganizer / createAnswerer)', () =>
     responseBody = { error: 'bad' };
     await expect(createOrganizer(settings()).organize('dump', 'text')).rejects.toThrow();
   });
+
+  it('instructs the model to be faithful to the Dump (finding 03 guard)', async () => {
+    // CONTEXT.md's Organize contract: "Every part of this is derived from the Dump alone
+    // except the related links." The prompt must say so to the model — without it, given a
+    // short problem-Dump the model invents troubleshooting, causes and recommendations the
+    // user never wrote (dogfooding finding 03: 6 of 8 Notes). This guard locks the clause in
+    // the prompt so a future edit that drops it fails `npm test` without needing a live key.
+    // A rephrase is fine; dropping the contract is not — assert the load-bearing intent only.
+    responseBody = {
+      choices: [{ message: { content: JSON.stringify({
+        title: 'T', tags: [], category: 'C', summary: 'S', keyPoints: [], related: [], body: 'B',
+      }) } }],
+    };
+    await createOrganizer(settings()).organize('a short dump', 'text');
+    const prompt = (JSON.parse(lastOpts.body as string).messages[0] as { content: string }).content;
+    expect(prompt).toContain('ONLY from the Dump');
+    expect(prompt).toMatch(/do not add|invent/i);
+  });
 });
 
 describe('OpenAI-compatible embedder seam (createEmbedder)', () => {

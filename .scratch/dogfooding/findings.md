@@ -209,3 +209,28 @@ unconditional Organize recorded in finding 01. Deliberately not diagnosed here.
 **How to observe the rest, next time:** capture a deliberately short, plain Dump — one sentence,
 no question in it — and compare the saved Note against it line by line, marking every sentence
 that was not derivable from the Dump alone.
+
+**Established since (2026-08-24, from a diagnosing-bugs loop):** the cause is the Organize
+instructions — specifically, the absence of a faithfulness constraint. `buildOrganizePrompt`
+(`src/lib/llm.ts`) asked for `body: the cleaned, organized content in markdown` but never told
+the model the Organize contract CONTEXT.md already states ("Every part of this is derived from
+the Dump alone except the related links"). Given a short problem-Dump, the model "helpfully"
+solved it.
+
+A tight loop drove the real seam (`createOrganizer` → `buildOrganizePrompt` → `chat`) with the
+exact macbook Dump above and a lexical-faithfulness detector (a sentence is invented when most
+of its content words do not appear in the Dump). Before the fix it went red **5/5** — every run
+invented "Reset SMC and NVRAM", "Check System Information for battery status", "running Apple
+Diagnostics", exactly the finding's examples; expansion ×3.7–×7.2. The double-organize (finding
+01) was ruled out: the loop calls `organize` once and still invented, so the first call alone is
+the cause.
+
+**Resolved since (2026-08-24):** `buildOrganizePrompt` now carries an explicit faithfulness
+clause — derive only from the Dump, do not add troubleshooting/causes/recommendations/steps not
+present, do not invent sections, a short Dump yields a short Note. The loop went **0/5** green
+(expansion ×1.0–×2.0; run 1's body restated the Dump's three clauses as bullets with nothing
+added). Locked down two ways: a deterministic guard (`tests/llm-provider.test.ts`) asserts the
+prompt carries the clause, and an env-gated real-model symptom test
+(`tests/organize-faithfulness-smoke.test.ts`) asserts no invention against the live model. The
+model and the missing length constraint were secondary; the faithfulness clause subsumes them for
+this symptom.
