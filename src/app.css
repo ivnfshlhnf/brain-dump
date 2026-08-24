@@ -1,80 +1,864 @@
-:root {
-  font-family: system-ui, sans-serif;
-  color: #1a1a1a;
-  background: #fafafa;
+/* Brain-dump — the design system.
+ *
+ * The app is a press: it takes something molten (a Dump — verbatim, unstructured) and sets
+ * it into something permanent (a Note in the Vault). State is therefore the material, and
+ * exactly two accents carry it:
+ *
+ *   ember — uncommitted. The Dump, the preview, the five-second countdown.
+ *   set   — in the Vault. The saved path, Related links, Ask citations.
+ *
+ * Neither colour appears anywhere it does not mean that. If you reach for ember as
+ * decoration, the system is broken.
+ *
+ * Two faces, no third. The machine speaks in mono (labels, tags, paths, wikilinks,
+ * frontmatter keys); your thought is set in serif (the Dump you type, titles, bodies,
+ * summaries). The contrast is the idea: the scaffolding is the app's job, the thought is
+ * yours.
+ *
+ * Fonts are self-hosted, not fetched from a CDN — this is an offline-capable PWA with an
+ * offline outbox, and a webfont request is exactly what fails when the app matters most.
+ * Newsreader (variable wght, latin) and IBM Plex Mono (400/500, latin) are both SIL OFL
+ * 1.1; the licences ship beside them in public/fonts/.
+ */
+
+@font-face {
+  font-family: 'Newsreader';
+  src: url('/fonts/newsreader-latin-wght-normal.woff2') format('woff2-variations');
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
 }
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('/fonts/ibm-plex-mono-latin-400-normal.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('/fonts/ibm-plex-mono-latin-500-normal.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* Raw values, kept separate from the resolved tokens so a pair can be recombined and so
+   * the no-light-dark() fallback below has something to switch. */
+  --ground-light: oklch(97% 0.008 240);
+  --ground-dark: oklch(21% 0.028 235);
+  --raised-light: oklch(100% 0 0);
+  --raised-dark: oklch(25% 0.03 235);
+  --text-light: oklch(28% 0.02 240);
+  --text-dark: oklch(92% 0.012 230);
+  --dim-light: oklch(52% 0.02 240);
+  --dim-dark: oklch(70% 0.018 230);
+  --rule-light: oklch(76% 0.013 240);
+  --rule-dark: oklch(40% 0.02 235);
+  --ember-light: oklch(54% 0.15 55);
+  --ember-dark: oklch(75% 0.15 65);
+  --set-light: oklch(52% 0.09 195);
+  --set-dark: oklch(72% 0.09 195);
+  --alarm-light: oklch(52% 0.19 25);
+  --alarm-dark: oklch(74% 0.16 25);
+
+  /* The card's weight on the page: a tight close shadow + a soft far one, both with an
+   * offset (a zero-offset halo is decoration, not depth). Dark mode sits the card on a
+   * darker, wider, more present shadow — the ground is already dark, so the cast has to
+   * reach further and dig deeper to read as lift rather than vanish into the page. */
+  --shadow-card-light:
+    0 1px 2px oklch(28% 0.02 240 / 0.1),
+    0 8px 22px oklch(28% 0.02 240 / 0.08);
+  --shadow-card-dark:
+    0 2px 5px oklch(0% 0 0 / 0.7),
+    0 16px 40px oklch(0% 0 0 / 0.55);
+
+  --ground: var(--ground-light);
+  --raised: var(--raised-light);
+  --text: var(--text-light);
+  --dim: var(--dim-light);
+  --rule: var(--rule-light);
+  --ember: var(--ember-light);
+  --set: var(--set-light);
+  --alarm: var(--alarm-light);
+  --shadow-card: var(--shadow-card-light);
+
+  @media (prefers-color-scheme: dark) {
+    --ground: var(--ground-dark);
+    --raised: var(--raised-dark);
+    --text: var(--text-dark);
+    --dim: var(--dim-dark);
+    --rule: var(--rule-dark);
+    --ember: var(--ember-dark);
+    --set: var(--set-dark);
+    --alarm: var(--alarm-dark);
+    --shadow-card: var(--shadow-card-dark);
+  }
+
+  @supports (color: light-dark(white, black)) {
+    --ground: light-dark(var(--ground-light), var(--ground-dark));
+    --raised: light-dark(var(--raised-light), var(--raised-dark));
+    --text: light-dark(var(--text-light), var(--text-dark));
+    --dim: light-dark(var(--dim-light), var(--dim-dark));
+    --rule: light-dark(var(--rule-light), var(--rule-dark));
+    --ember: light-dark(var(--ember-light), var(--ember-dark));
+    --set: light-dark(var(--set-light), var(--set-dark));
+    --alarm: light-dark(var(--alarm-light), var(--alarm-dark));
+    --shadow-card: light-dark(var(--shadow-card-light), var(--shadow-card-dark));
+  }
+
+  /* Native UI — scrollbars, form controls, the canvas — follows the user's system setting. */
+  color-scheme: light dark;
+  accent-color: var(--ember);
+
+  --serif: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --text-xs: 0.6875rem;
+  --text-sm: 0.8125rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-dump: clamp(1.15rem, 1rem + 0.9vw, 1.4rem);
+  --text-title: clamp(1.4rem, 1.1rem + 1.4vw, 1.9rem);
+
+  --s1: 0.25rem;
+  --s2: 0.5rem;
+  --s3: 0.75rem;
+  --s4: 1rem;
+  --s5: 1.5rem;
+  --s6: 2rem;
+  --s7: 3rem;
+
+  --measure: 34rem;
+  --radius: 3px;
+  --radius-card: 4px; /* a second, larger step for stacked stock — cards are not controls */
+  --speed: 140ms; /* the 120–160ms tactility band; state changes resolve in one beat */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1); /* exponential ease-out — motion from rest */
+  --autosave: 5s; /* AUTOSAVE_DELAY_MS — the countdown must agree with autosave.ts */
+
+  font-family: var(--serif);
+  font-size: 100%;
+  line-height: 1.55;
+  color: var(--text);
+  background: var(--ground);
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
 }
-main {
-  max-width: 32rem;
+
+/* ── The surfaces the browser draws ──────────────────────────────────────
+ *
+ * The caret, the selection, the scrollbars and the placeholder ship with defaults that
+ * belong to no design system. In a notebook they are not incidental: the caret is the nib —
+ * the one place ink is being laid down right now — so it is Wet Ink, and the selection is a
+ * wash of the same ink over text you are about to change. The scrollbar is ruling.
+ */
+
+::selection {
+  /* A wash, not a fill: the words stay Graphite and readable through it. */
+  background: color-mix(in oklab, var(--ember), transparent 78%);
+}
+
+:root {
+  scrollbar-color: var(--rule) transparent;
+}
+
+input,
+textarea {
+  caret-color: var(--ember);
+}
+
+/* The placeholder is the most-read text on the arrival screen ("What are you thinking?"),
+ * so it takes a known token rather than the browser's own fade, which lands under 4.5:1. */
+::placeholder {
+  color: var(--dim);
+  opacity: 1; /* Firefox fades placeholders by default; the token already carries the level. */
+}
+
+/* The page is the column; the masthead and the content are siblings inside it. The masthead
+ * sits outside <main> so it is a real `banner` landmark — a <header> only maps to banner when
+ * no article/aside/main/nav/section stands between it and the body, and a plain wrapper div
+ * does not. Landmark navigation now offers banner + main instead of main alone. */
+.page {
+  /* The notebook is one column, capped at the reading measure. border-box lets the column
+   * fill the viewport height (min-height below) without its padding pushing the page past
+   * 100dvh; max-width adds the side margins back on top of --measure, so the reading line
+   * stays at 34rem rather than measure-minus-padding. */
+  box-sizing: border-box;
+  max-width: calc(var(--measure) + var(--s4) * 2);
   margin: 0 auto;
-  padding: 1.5rem;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: var(--s5) var(--s4) var(--s7);
+  /* On notched / home-indicator phones (viewport-fit=cover) the safe-area insets are
+   * non-zero; on every other device they resolve to 0 and the fallback padding above
+   * holds. max() keeps the notebook's own margins and adds the safe area on top, so the
+   * masthead never sits under a notch and the last action never hides behind the home
+   * indicator. */
+  padding:
+    max(var(--s5), env(safe-area-inset-top))
+    max(var(--s4), env(safe-area-inset-right))
+    max(var(--s7), env(safe-area-inset-bottom))
+    max(var(--s4), env(safe-area-inset-left));
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--s4);
 }
-textarea {
-  width: 100%;
-  min-height: 8rem;
-  font: inherit;
-  padding: 0.5rem;
+
+/* main carries the surfaces and the status line, and takes the height the masthead leaves,
+ * so a short surface still centres against the space below the masthead. */
+main {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  min-height: 0;
+}
+
+/* Each view is one surface. When the surface's content is shorter than the viewport it
+ * centers in the space below the masthead — the capture Dump is the product, so it lands
+ * where the eye arrives, not at the top with empty ground beneath. When the content is
+ * taller (settings, the whole Note) it flows from the top and scrolls. auto margins, not
+ * justify-content: center, so a tall surface never clips its own top; the margins collapse
+ * to 0 once the content overflows. The status line lives outside every surface, so it sinks
+ * to the bottom of the page body. */
+.surface {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+.surface > :first-child {
+  margin-top: auto;
+}
+.surface > :last-child {
+  margin-bottom: auto;
+}
+
+/* The machine's voice: every label, tag, path, wikilink and status line. */
+.mono,
+label,
+nav,
+button,
+input,
+select,
+.hint,
+.diagnostics,
+.checks,
+.eyebrow,
+.meta,
+.rule-label,
+code {
+  font-family: var(--mono);
+  font-feature-settings: 'ss02' 1; /* Plex's disambiguated zero and l */
+}
+
+/* <code> inherits the browser's own monospace otherwise — Courier next to Plex, which breaks
+ * the two-hands rule in the one place the machine is quoting itself. */
+code {
+  font-size: 1em;
+}
+
+/* Present to assistive tech, absent on the page: for a control whose visible label would
+ * contradict the design (the Dump is a page to write on, not a labelled form field) and for
+ * a status word that must not ride on colour alone. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+h1,
+h2,
+h3 {
+  font-weight: 500;
+  line-height: 1.15;
+  text-wrap: balance;
+  margin: 0;
+}
+
+p {
+  text-wrap: pretty;
+  margin: 0;
+}
+
+/* ── Masthead and tabs ───────────────────────────────────────────────── */
+
+.masthead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s4);
+  padding-bottom: var(--s3);
+  border-bottom: 1px solid var(--rule);
+}
+
+.wordmark {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  color: var(--dim);
+}
+
+nav {
+  display: flex;
+  gap: var(--s3);
+}
+
+nav button {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: var(--s2) var(--s2);
+  font-size: var(--text-sm);
+  letter-spacing: 0.04em;
+  color: var(--dim);
+  cursor: pointer;
+  /* The active indicator is a text underline, not a box-edge border, so it stays tight
+   * under the label while the padding grows the touch box — a tab is text, and the line
+   * belongs to the text, not to the box. */
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 4px;
+  text-decoration-thickness: 2px;
+  transition: color var(--speed) var(--ease), text-decoration-color var(--speed) var(--ease);
+}
+
+nav button:hover {
+  color: var(--text);
+}
+
+nav button.on {
+  color: var(--text);
+  text-decoration-color: var(--ember);
+}
+
+/* ── Controls ────────────────────────────────────────────────────────── */
+
+button {
+  font-size: var(--text-sm);
+  letter-spacing: 0.02em;
+  padding: var(--s2) var(--s4);
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  cursor: pointer;
   box-sizing: border-box;
+  /* Nothing moves silently: every state a control can be in resolves over one beat,
+   * never a snap. The press is a real depression, not a flicker. */
+  transition:
+    transform var(--speed) var(--ease),
+    border-color var(--speed) var(--ease),
+    background-color var(--speed) var(--ease),
+    box-shadow var(--speed) var(--ease);
 }
+
+button:hover:not(:disabled) {
+  border-color: var(--dim);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+/* A disabled control is absent, not broken: it takes its own colour treatment — desaturated
+ * and dropped to the page — rather than a flat opacity fade that reads as half-rendered. */
+button:disabled {
+  color: var(--dim);
+  background: var(--ground);
+  border-color: var(--rule);
+  cursor: not-allowed;
+}
+
+button.primary {
+  color: var(--ground);
+  background: var(--ember);
+  border-color: var(--ember);
+  font-weight: 500;
+}
+
+/* The committing action, deactivated: the ink is washed out toward pencil, not dimmed to a
+ * ghost. The label stays light so it still reads, only the fill loses its conviction.
+ *
+ * Mixed in oklab, never oklch. oklch interpolates the *hue angle*, and ember and pencil sit
+ * on opposite sides of the wheel (55° vs 240°), so the shorter arc between them runs through
+ * colours that are in neither: `in oklch` resolved this fill to hue 336° — plum — in light,
+ * and hue 139° — green — in dark. That put two invented accents on the most-pressed control
+ * in the app, in its resting state, in flat breach of the two-inks rule. oklab is
+ * rectangular, so there is no arc to travel: the hue stays ember's own (54°/67°) and only the
+ * chroma drains, which is what "washed out" was always supposed to mean. */
+button.primary:disabled {
+  background: color-mix(in oklab, var(--ember), var(--dim) 45%);
+  border-color: color-mix(in oklab, var(--ember), var(--dim) 45%);
+  color: var(--ground);
+}
+
+:focus-visible {
+  outline: 2px solid var(--ember);
+  outline-offset: 2px;
+}
+
 label {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.9rem;
+  gap: var(--s1);
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
 }
+
 input,
-select {
-  font: inherit;
-  padding: 0.3rem;
+select,
+textarea {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: var(--s2);
+  box-sizing: border-box;
+  width: 100%;
+  transition: border-color var(--speed) var(--ease), box-shadow var(--speed) var(--ease);
 }
-nav {
-  display: flex;
-  gap: 0.5rem;
+
+/* Every field you write into grows with what you write, and none of them shows a resize
+ * grabber. The grabber is the single detail that reads "form control" rather than "something
+ * to write in", and having it on two of the three textareas and not the third was drift. */
+textarea {
+  field-sizing: content;
+  resize: none;
+  min-height: 6rem;
+  max-height: 60vh; /* past this it scrolls, so the committing button stays in the viewport */
 }
-nav button {
+
+/* Where a field cannot size itself to its content, dragging is the only way to see a long
+ * one, so the grabber earns its place back. */
+@supports not (field-sizing: content) {
+  textarea {
+    resize: vertical;
+  }
+}
+
+/* A checkbox is not a text field, and `width: 100%` above was stretching it into a 544×13px
+ * bar floating in the middle of the column. It keeps its own size, sits beside its words, and
+ * the whole row is the target — the label is clickable, so the 44px belongs to the row rather
+ * than to the 18px box. */
+label:has(> input[type='checkbox']) {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 44px;
   cursor: pointer;
 }
-nav button.on {
-  font-weight: 600;
-  text-decoration: underline;
-}
-.hint {
-  font-size: 0.85rem;
-  opacity: 0.75;
-}
-.diagnostics {
-  list-style: none;
+
+input[type='checkbox'] {
+  width: auto;
+  flex: none;
+  inline-size: 1.125rem;
+  block-size: 1.125rem;
+  margin: 0;
   padding: 0;
-  margin: 0.5rem 0 0;
-  max-height: 20rem;
-  overflow-y: auto;
-  font-size: 0.8rem;
 }
-.diagnostics li {
-  padding: 0.15rem 0;
-  border-bottom: 1px solid rgba(128, 128, 128, 0.2);
-  word-break: break-word;
+
+/* The Dump you type is the one input set in the content face, at content size: it is the
+ * product, not a form field. It grows with the thought instead of scrolling inside a fixed
+ * box, and it shows no resize grabber — a grabber in the corner is the single detail that
+ * reads "form control" rather than "page to write on". */
+textarea.dump {
+  font-family: var(--serif);
+  font-size: var(--text-dump);
+  line-height: 1.5;
+  min-height: 9rem;
+  padding: var(--s3);
 }
-.diagnostics li.err {
-  color: #b00020;
+
+.hint {
+  font-size: var(--text-xs);
+  letter-spacing: 0.02em;
+  color: var(--dim);
 }
-.diagnostics .detail {
-  opacity: 0.7;
+
+.actions {
+  display: flex;
+  gap: var(--s2);
+  flex-wrap: wrap;
 }
+
+/* The committing controls are touch targets first: a 44px floor so the thumb lands them
+   one-handed. Applied to the whole row so a primary and its siblings share one height
+   instead of mismatching. The nav tabs are text, not commit buttons, and stay slim. */
+.actions button {
+  min-height: 44px;
+}
+
+/* ── Status ──────────────────────────────────────────────────────────── */
+
+.status {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.03em;
+  color: var(--dim);
+}
+
+.status.err {
+  color: var(--alarm);
+}
+
+/* ── Diagnostics and health checks ───────────────────────────────────── */
+
+.diagnostics,
 .checks {
   list-style: none;
   padding: 0;
-  margin: 0.5rem 0 0;
-  font-size: 0.9rem;
+  margin: var(--s2) 0 0;
+  font-size: var(--text-xs);
 }
-.checks li {
-  padding: 0.2rem 0;
+
+.diagnostics {
+  max-height: 20rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
+
+.diagnostics li {
+  padding: var(--s1) 0;
+  border-bottom: 1px solid var(--rule);
+  word-break: break-word;
+}
+
+/* A log is read down its left edge: the timestamps line up only if the digits are one width. */
+.diagnostics code {
+  font-variant-numeric: tabular-nums;
+}
+
+.diagnostics li.err,
 .checks li.err {
-  color: #b00020;
+  color: var(--alarm);
+}
+
+.diagnostics .detail {
+  color: var(--dim);
+}
+
+.checks li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s2);
+  padding: var(--s1) 0;
+}
+
+/* Drawn marks, one stroke weight, taking the row's colour — a passed check is Graphite, a
+ * failed one is Alarm. They replace a ✓/✗ character pair, which borrowed whatever the
+ * system font felt like drawing and matched nothing else in the app. The result is never
+ * carried by the mark alone: each row also states it in a word, for the screen reader and
+ * for anyone who cannot separate the two colours. */
+.check-mark {
+  flex: none;
+  width: 0.875rem;
+  height: 0.875rem;
+  margin-top: 0.2em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ── The settings wall ───────────────────────────────────────────────────
+ *
+ * Twelve fields in one undifferentiated stack asked the reader to hold twelve things at once.
+ * They are two decisions — where the notes live, and which model does the work — so the wall
+ * is grouped into two, marked with the same ruled section labels the surface already uses for
+ * `connection` and `diagnostics`. A fieldset says the same thing to a screen reader that the
+ * ruling says to the eye.
+ */
+
+.field-group {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  /* fieldsets size to min-content by default, which collapses the column. */
+  min-inline-size: 0;
+}
+
+.field-group > legend {
+  width: 100%;
+  padding: 0;
+  margin-bottom: var(--s4);
+}
+
+/* "Save settings" commits both groups, so it needs a beat more air than the gap between two
+ * fields — otherwise it reads as belonging to whichever field it happens to sit under. */
+.field-group + .actions {
+  margin-top: var(--s3);
+}
+
+/* ── The Note ────────────────────────────────────────────────────────────
+ *
+ * The signature. A Note card carries its own state on its top edge, and the edge only moves
+ * when the move is honest. While a new Note is uncommitted the edge is an ember hairline
+ * burning down over the autosave window, so the card *is* the clock — a save really will
+ * fire at the end. An unconfirmed append never autosaves, so on that path the edge is held:
+ * static, full, wet, not burning (the hint states the reason in words). When the Note reaches
+ * the Vault the edge stops, fills back to full, and cross-fades to `set`. That wet→dry
+ * cross-fade is the only moment of drama in the app, and it happens exactly where the
+ * meaning is — molten to permanent.
+ */
+
+.note {
+  position: relative;
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: var(--s5) var(--s4) var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  overflow: hidden;
+}
+
+.note .burn {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: var(--ember);
+  transform-origin: left center;
+  animation: burn-down var(--autosave) linear forwards;
+  transition: background-color var(--speed) var(--ease);
+}
+
+/* An unconfirmed append never autosaves — the clock must not run. The edge stays wet and
+ * full, holding the decision, instead of burning down to nothing and saving nothing. */
+.note .burn--held {
+  animation: none;
+  transform: scaleX(1);
+}
+
+@keyframes burn-down {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+/* The Note reaches the Vault: the edge stops, fills back to full, and turns to dry ink.
+ * That cross-fade is the one moment worth animating — molten to permanent — and it happens
+ * exactly where the meaning is. */
+.note.committed .burn {
+  background: var(--set);
+  animation: none;
+  transform: scaleX(1);
+  transition: background-color 260ms var(--ease), transform 260ms var(--ease);
+}
+
+/* The countdown is motion. Without it, say the same thing in words instead: the edge holds
+ * full in either state, and only the colour carries wet→dry. */
+@media (prefers-reduced-motion: reduce) {
+  .note .burn {
+    animation: none;
+    transform: scaleX(1);
+  }
+  .note.committed .burn {
+    transform: scaleX(1);
+    transition: background-color var(--speed) var(--ease);
+  }
+}
+
+.eyebrow {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ember);
+}
+
+.note.committed .eyebrow {
+  color: var(--set);
+  text-transform: none;
+  letter-spacing: 0.02em;
+  word-break: break-all;
+}
+
+/* The pending eyebrow is an uppercase machine marking — but the appended Note's title is a
+ * person's words, and uppercasing it destroys their casing ("OFFLINE CAPTURE…" ). The
+ * decision prefix uppercases; the title keeps its own case. */
+.eyebrow .keep-case {
+  text-transform: none;
+}
+
+/* The commit, promoted onto the card: the "FILED TO OBSIDIAN" line where the eyebrow was,
+ * with the vault path as a real door back into the Vault. The mark is the machine's filing
+ * stamp (uppercase, Dry Ink); the path below it is the link. */
+.eyebrow .filed-mark {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+/* Doors back into the Vault. A saved path, a Related link and an Ask citation all open the
+ * real file in Obsidian via obsidian://. Dry Ink — a filed thought does not shout — no
+ * underline at rest, underline on hover so the link says "follow me" only when reached for.
+ * Visited stays Dry: a followed link is not a different state here. */
+.vault-link {
+  color: var(--set);
+  text-decoration: none;
+  word-break: break-all;
+}
+.vault-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.vault-link:visited {
+  color: var(--set);
+}
+
+/* Doors are meant to be walked through: the saved path, a Related link and a citation are
+ * each a 44px touch target, not a 13px line of text. The eyebrow's inline path link keeps
+ * its inline flow; only the stacked lists grow. */
+.note .links .vault-link,
+.answer .sources .vault-link {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+/* Touch has no hover. The underline that says "follow me" is hover-gated for pointers; on
+ * a touch device it can never be revealed, so show it at rest instead — the link announces
+ * itself without being reached for. */
+@media (hover: none) {
+  .vault-link {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}
+
+.note h2 {
+  font-family: var(--serif);
+  font-size: var(--text-title);
+  font-weight: 400;
+}
+
+.meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--s1) var(--s3);
+  font-size: var(--text-xs);
+  letter-spacing: 0.02em;
+}
+
+.meta dt {
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.meta dd {
+  margin: 0;
+  color: var(--text);
+}
+
+.note-body {
+  font-family: var(--serif);
+  font-size: var(--text-base);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* A section marker that is a rule with a name on it, not a heading: these are the file's
+ * own sections, and they carry less weight than the Note's title. */
+.rule-label {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  font-size: var(--text-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.rule-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--rule);
+}
+
+.note ul {
+  margin: 0;
+  padding-left: var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
+
+.note .links {
+  list-style: none;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--set);
+  word-break: break-all;
+}
+
+.note .pending {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--dim);
+}
+
+.context-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
+
+/* ── Ask ─────────────────────────────────────────────────────────────── */
+
+/* An answer is stock resting on the page, exactly like a Note: same card radius, same ambient
+ * shadow. It used to carry a 2px Dry Ink border-left, which was wrong twice over — a coloured
+ * side-tab is the callout cliché the detector flags, and it spent an ink that means "in the
+ * Vault" on a border that carries no state. The depth says "stacked"; the ink stays with the
+ * citations, where it is true. */
+.answer {
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: var(--s5) var(--s4) var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  font-size: var(--text-base);
+}
+
+.answer .sources {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--set);
+  word-break: break-all;
 }

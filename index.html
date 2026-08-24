@@ -2,7 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- Declared before rendering starts so the browser themes the canvas, scrollbars and
+         form controls from the first paint instead of flashing a light frame first. -->
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f0f6fa" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0a1a23" />
     <title>Brain-dump</title>
   </head>
   <body>

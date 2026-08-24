@@ -162,6 +162,11 @@ export interface Settings {
   couchdbPassword: string;
   managedFolder: string; // e.g. "Brain Dump"
   dumpsFolder: string; // e.g. "_dumps"
+  /** The Obsidian vault name on *this* device — used to build `obsidian://open?vault=…&file=…`
+   *  links back into the Vault. Per-device (the vault may be named differently on the laptop
+   *  and the phone); empty falls back to `obsidian://open?file=…`, which opens in the active
+   *  vault. Not the CouchDB database name. */
+  vaultName: string;
   caseSensitive: boolean; // LiveSync "Handle files as Case-Sensitive" (default off)
   hashAlgorithm: 'sha1' | 'xxhash'; // must match the user's LiveSync chunk hash
   // Cloud LLM / embedder (used by later tickets)
@@ -181,6 +186,7 @@ export const DEFAULT_SETTINGS: Settings = {
   couchdbPassword: '',
   managedFolder: 'Brain Dump',
   dumpsFolder: '_dumps',
+  vaultName: '',
   caseSensitive: false,
   hashAlgorithm: 'sha1',
   // Real defaults, not suggestions. A greyed placeholder that looks like a default but

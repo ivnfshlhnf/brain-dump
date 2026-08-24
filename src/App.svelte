@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { loadSettings, saveSettings } from './lib/settings';
   import { createRemoteDb, createDatabaseAdmin, createEmbeddingsDb } from './lib/db';
   import {
@@ -16,10 +16,11 @@
   import { defaultSha1Hex } from './lib/livesync';
   import { createAutosaver } from './lib/autosave';
   import { createLog, createDevFileSink, type Log, type LogEvent } from './lib/logger';
+  import { obsidianUrl, linkHref, linkText } from './lib/obsidian';
   import { checkConnections, type HealthReport, type CheckResult } from './lib/health';
   import { createCachingEmbedder } from './lib/embedding-cache';
   import { validateProviderUrl } from './lib/config';
-  import { DEFAULT_SETTINGS, type Settings, type Citation } from './lib/types';
+  import { DEFAULT_SETTINGS, type Settings, type Citation, type Note } from './lib/types';
 
   // Diagnostics. In dev the sink POSTs each event to the Vite middleware, which appends
   // it to logs/brain-dump.jsonl in the project folder; in a production build there is no
@@ -35,8 +36,54 @@
     logEvents = logStore.events();
   };
 
+  // ── The Dump draft: a thought in flight must outlive a closed tab. ──────────
+  // Persistence is the cheap, invisible half of "the thought survives, whatever else fails"
+  // — the raw Dump has always reached the Vault at Capture, but until that press the typed
+  // text lived only in memory. Now it rides in localStorage, restored on the next load.
+  const DRAFT_KEY = 'brain-dump:dump-draft';
+  let draftTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function readDraft(): string {
+    try {
+      return localStorage.getItem(DRAFT_KEY) ?? '';
+    } catch {
+      // Private mode, storage disabled, or quota — degrade to the old behaviour: the
+      // draft lives only in memory, which is still no worse than before.
+      return '';
+    }
+  }
+
+  // Debounced: a paste of a long Note shouldn't write on every input event. The latest
+  // value is read at fire time, so rapid edits coalesce into one write.
+  function persistDraft() {
+    if (draftTimer) clearTimeout(draftTimer);
+    draftTimer = setTimeout(() => {
+      draftTimer = null;
+      try {
+        localStorage.setItem(DRAFT_KEY, text);
+      } catch {
+        /* Storage unavailable — nothing to persist, nothing to report. */
+      }
+    }, 250);
+  }
+
+  function clearDraft() {
+    if (draftTimer) {
+      clearTimeout(draftTimer);
+      draftTimer = null;
+    }
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+    } catch {
+      /* Storage unavailable — the in-memory text is already cleared. */
+    }
+  }
+
   let settings: Settings = { ...DEFAULT_SETTINGS };
-  let text = '';
+  // The uncommitted Dump is restored from localStorage on load, so an interrupted thought
+  // (a closed tab, a killed app, a bus ride) survives where it used to vanish from volatile
+  // memory before the Capture press. Cleared the moment a Dump is captured.
+  let text = readDraft();
   let status = '';
   let view: 'capture' | 'ask' | 'config' = 'capture';
   let busy = false;
@@ -45,8 +92,14 @@
   // Organize preview (held while Context is added), and the new-vs-append match.
   let session: CaptureSession | null = null;
   let context = '';
-  // The vault path of the last saved Note — used by the explicit Refresh metadata action.
+  // The vault path of the last saved Note — used by the explicit Re-organize Note action.
   let savedNotePath: string | null = null;
+  // The Note as it was actually written. The card shows this once it exists, so what you
+  // look at after the save is the document in the Vault — Related links included — and not
+  // the preview that preceded it.
+  let savedNote: Note | null = null;
+  // Bumped on every Context edit to restart the countdown animation, which is keyed on it.
+  let contextRevision = 0;
   // Append requires explicit user confirmation (spec: "the user confirms … with one
   // action"). The 5s autosave may finalize a 'new' decision on its own, but an 'append'
   // decision is held until the user taps Append — so the autosave no-ops an
@@ -83,13 +136,53 @@
     return { db: createRemoteDb(settings), settings, hash: defaultSha1Hex, log };
   }
 
+  // Autofocus the Dump whenever it mounts — on load (so the first character needs no tap to
+  // reach the field) and again after a New capture (so the next thought is one keystroke away).
+  // preventScroll keeps desktop from jumping; on mobile the keyboard rising is the point.
+  function focusOnMount(node: HTMLElement) {
+    node.focus({ preventScroll: true });
+  }
+
+  // Cmd/Ctrl+Enter commits the surface you're typing in. The product's thesis is speed at
+  // capture; until now no keyboard accelerator existed anywhere in the app.
+  function commitOnModEnter(e: KeyboardEvent, run: () => void, disabled: boolean) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      if (!disabled) run();
+    }
+  }
+
+  // On save the commit is promoted onto the card itself (the teal edge plus the "Filed to
+  // Obsidian" line). Bring the card to the top of the viewport so the peak-end frame is the
+  // filed Note, not the bottom-of-page status line that just scrolled past. Smooth, unless the
+  // user has asked motion to stop.
+  function scrollToNote() {
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    document.querySelector('.note')?.scrollIntoView({
+      behavior: reduce ? 'auto' : 'smooth',
+      block: 'start',
+    });
+  }
+
   onMount(async () => {
     settings = await loadSettings();
     // beforeunload can't await promises, so flush is best-effort: the Dump was
     // already persisted at capture, so if the close-time save doesn't land the
     // Note is generated from the surviving Dump later (the save-failure path).
     onBeforeUnload = () => {
+      // Flush the in-flight Note save (best-effort; the Dump is already persisted at capture).
       if (session && !session.saved) void autosaver.flush();
+      // And flush the uncommitted draft synchronously — a debounce in flight at close-time
+      // would otherwise lose the last 250ms of typing. localStorage writes are synchronous.
+      if (draftTimer) {
+        clearTimeout(draftTimer);
+        draftTimer = null;
+        try {
+          localStorage.setItem(DRAFT_KEY, text);
+        } catch {
+          /* Storage unavailable — the in-memory text is gone with the tab. */
+        }
+      }
     };
     window.addEventListener('beforeunload', onBeforeUnload);
 
@@ -127,6 +220,7 @@
       // than claiming the user is offline.
       if (outcome.kind === 'queued') {
         text = '';
+        clearDraft();
         await refreshQueueState();
         status =
           outcome.reason === 'offline'
@@ -138,13 +232,17 @@
       session = outcome.session;
       context = '';
       text = '';
+      clearDraft();
       savedNotePath = null;
+      savedNote = null;
+      contextRevision = 0;
       appendConfirmed = false;
       // Arm the 5s inactivity timer at capture, so a Dump with no added Context
       // still finalizes on its own. For an 'append' match the autosave no-ops until
       // the user confirms (see saveAndFinalize) — the Dump's Context is still saved.
       autosaver.schedule();
-      status = `Captured. Preview: "${session.preview.title}" — ${matchLabel(session)}`;
+      // No status line: the Note is on screen, and the card states its own decision.
+      status = '';
     } catch (e) {
       status = `Error: ${(e as Error).message}`;
     } finally {
@@ -159,6 +257,7 @@
     try {
       session = await addContext(session, context, storeDeps());
       autosaver.schedule();
+      contextRevision += 1;
     } catch (e) {
       status = `Error: ${(e as Error).message}`;
     }
@@ -182,10 +281,15 @@
       session = result.session;
       if (result.ok) {
         savedNotePath = result.written.path;
+        savedNote = result.note;
         status =
           session.match.kind === 'append'
             ? `Appended to: ${session.match.suggestion?.title ?? result.note.title}`
             : `Saved Note: ${result.note.title}`;
+        // The commit now lives on the card (teal edge + "Filed to Obsidian" line); bring it
+        // into view so the last frame is the filed Note, not the status line that scrolled past.
+        await tick();
+        scrollToNote();
       } else {
         // The Dump persists; the Note will be generated from it later.
         status = `Save failed — Dump kept: ${result.error.message}`;
@@ -203,17 +307,21 @@
   }
 
   // Override the match decision to 'new' — the user declines the append suggestion
-  // and chooses to found a fresh Note instead. Reschedules the autosave.
+  // and chooses to found a fresh Note instead. Reschedules the autosave and restarts the
+  // countdown edge, which was held while the append waited: now that a save will actually
+  // happen on its own, the clock runs honestly from full.
   function chooseNewNote() {
     if (!session || session.saved) return;
     session = { ...session, match: { kind: 'new' } };
     appendConfirmed = false;
+    contextRevision += 1;
     autosaver.schedule();
     status = 'Will save as a new Note.';
   }
 
-  // Explicit, user-triggered metadata refresh — re-derives title/tags/summary from
-  // the saved Note's body. Never automatic; the append itself never refreshes.
+  // Explicit, user-triggered re-organize — re-runs Organize on the saved Note's body to
+  // re-derive its title/tags/summary/category. Never automatic; the append itself never
+  // refreshes. (The button reads "Re-organize Note"; "metadata" is the internal name only.)
   async function refreshMetadata() {
     if (!savedNotePath) return;
     busy = true;
@@ -225,9 +333,9 @@
         hash: defaultSha1Hex,
         now: () => Date.now(),
       });
-      status = `Refreshed metadata: ${savedNotePath}`;
+      status = `Re-organized: ${savedNotePath}`;
     } catch (e) {
-      status = `Refresh failed: ${(e as Error).message}`;
+      status = `Re-organize failed: ${(e as Error).message}`;
     } finally {
       busy = false;
     }
@@ -272,19 +380,17 @@
       });
       await refreshQueueState();
       if (result.organized.length) {
-        status = `Organized ${result.organized.length} queued Dump(s) into Notes.`;
+        const n = result.organized.length;
+        status = n === 1
+          ? `Organized 1 queued Dump into a Note.`
+          : `Organized ${n} queued Dumps into Notes.`;
       } else if (result.failed.length) {
-        status = `${result.failed.length} queued Dump(s) still waiting: ${result.failed[0].error.message}`;
+        const n = result.failed.length;
+        status = `${n} queued ${n === 1 ? 'Dump' : 'Dumps'} still waiting: ${result.failed[0].error.message}`;
       }
     } finally {
       draining = false;
     }
-  }
-
-  function matchLabel(s: CaptureSession): string {
-    return s.match.kind === 'new'
-      ? 'new Note'
-      : `append to “${s.match.suggestion?.title ?? 'existing'}”`;
   }
 
   // Retrieve reads the whole vault (personal notes included) and writes nothing —
@@ -390,100 +496,218 @@
   }
 </script>
 
-<main>
-  <nav>
-    <button class:on={view === 'capture'} on:click={() => (view = 'capture')}>Capture</button>
-    <button class:on={view === 'ask'} on:click={() => (view = 'ask')}>Ask</button>
-    <button class:on={view === 'config'} on:click={() => (view = 'config')}>Config</button>
-  </nav>
+<!-- The masthead is a sibling of <main>, not a child of it: a <header> only becomes a `banner`
+     landmark when nothing like <main> stands between it and the body, so nesting it cost the
+     page its one other landmark. The wrapper div carries the column. -->
+<div class="page">
+  <header class="masthead">
+    <h1 class="wordmark">brain-dump</h1>
+    <nav>
+      <button
+        class:on={view === 'capture'}
+        aria-current={view === 'capture' ? 'page' : undefined}
+        on:click={() => (view = 'capture')}>capture</button>
+      <button
+        class:on={view === 'ask'}
+        aria-current={view === 'ask' ? 'page' : undefined}
+        on:click={() => (view = 'ask')}>ask</button>
+      <button
+        class:on={view === 'config'}
+        aria-current={view === 'config' ? 'page' : undefined}
+        on:click={() => (view = 'config')}>settings</button>
+    </nav>
+  </header>
 
+  <main>
   {#if view === 'capture'}
-    {#if queuedCount}
-      <p class="queued">{queuedCount} Dump(s) saved — they will be Organized when online.</p>
+    <section class="surface">
+    {#if queuedCount === 1}
+      <p class="status" aria-live="polite">1 Dump saved — it will be Organized when online.</p>
+    {:else if queuedCount}
+      <p class="status" aria-live="polite">{queuedCount} Dumps saved — they will be Organized when online.</p>
     {/if}
-    {#if queueError}<p class="queued">{queueError}</p>{/if}
+    {#if queueError}<p class="status err" aria-live="polite">{queueError}</p>{/if}
+
     {#if !session}
+      <!-- The Dump is the product, not a form field: set in the content face, at content size,
+           and named for assistive tech without a visible label — a label above it would make
+           it a form control, which is the one thing it must not look like. Every other field
+           in the app carries its label on screen; this one carries it in the name. -->
       <textarea
+        class="dump"
+        use:focusOnMount
         bind:value={text}
-        placeholder="Dump a thought..."
+        on:input={persistDraft}
+        on:keydown={(e) => commitOnModEnter(e, captureDump, busy || !text.trim())}
+        aria-label="Dump — what are you thinking?"
+        placeholder="What are you thinking?"
         disabled={busy}></textarea>
-      <button on:click={captureDump} disabled={busy || !text.trim()}>Capture</button>
+      <div class="actions">
+        <button class="primary" on:click={captureDump} disabled={busy || !text.trim()}>
+          {busy ? 'Capturing…' : 'Capture'}
+        </button>
+      </div>
     {:else}
-      <!-- Note preview (the initial Organize) shown alongside the match decision -->
-      <section class="preview">
-        <h2>{session.preview.title}</h2>
-        <p class="match">
-          {#if session.match.kind === 'append'}
-            Append to “{session.match.suggestion?.title}”
-          {:else}
+      {@const shown = savedNote ?? session.preview}
+      <!-- The whole Note, not a summary of it. Before the save this is the preview; after it
+           this is the document in the Vault. You are approving a Note, so you are shown one. -->
+      <article class="note" class:committed={session.saved}>
+        {#key contextRevision}
+          <div class="burn" class:burn--held={session.match.kind === 'append' && !appendConfirmed}></div>
+        {/key}
+
+        <p class="eyebrow">
+          {#if session.saved && savedNotePath}
+            <span class="filed-mark">Filed to Obsidian</span><br>
+            <a class="vault-link" href={obsidianUrl(settings.vaultName, savedNotePath)}>{savedNotePath}</a>
+          {:else if session.match.kind === 'new'}
             New Note
+          {:else}
+            Append to <span class="keep-case">&ldquo;{session.match.suggestion?.title ?? 'an existing Note'}&rdquo;</span>
           {/if}
         </p>
-        <p class="summary">{session.preview.summary}</p>
-        {#if session.preview.keyPoints.length}
-          <ul>{#each session.preview.keyPoints as p}<li>{p}</li>{/each}</ul>
+
+        <h2>{shown.title}</h2>
+
+        <dl class="meta">
+          {#if shown.tags.length}
+            <dt>tags</dt>
+            <dd>{shown.tags.join('  ')}</dd>
+          {/if}
+          {#if shown.category}
+            <dt>category</dt>
+            <dd>{shown.category}</dd>
+          {/if}
+        </dl>
+
+        {#if shown.body}
+          <div class="note-body">{shown.body}</div>
         {/if}
-        {#if session.preview.tags.length}
-          <p class="tags">{#each session.preview.tags as t}<span>{t}</span>{/each}</p>
+
+        {#if shown.summary}
+          <p class="rule-label">summary</p>
+          <p>{shown.summary}</p>
         {/if}
-      </section>
+
+        {#if shown.keyPoints.length}
+          <p class="rule-label">key points</p>
+          <ul>{#each shown.keyPoints as point}<li>{point}</li>{/each}</ul>
+        {/if}
+
+        <p class="rule-label">related</p>
+        {#if shown.related.length}
+          <ul class="links">{#each shown.related as link}<li><a class="vault-link" href={linkHref(settings.vaultName, link)}>{linkText(link)}</a></li>{/each}</ul>
+        {:else if session.saved}
+          <p class="pending">No Note in the Vault was close enough to link.</p>
+        {:else}
+          <p class="pending">Links are found when the Note is saved.</p>
+        {/if}
+      </article>
 
       {#if session.match.kind === 'append' && !session.saved}
         <!-- Confirm new-vs-append with one action: keep the append, or override to a new Note -->
-        <div class="confirm">
+        <div class="actions">
           <button class="primary" on:click={confirmAppend}>Append</button>
           <button on:click={chooseNewNote}>Save as new Note</button>
         </div>
       {/if}
 
-      <label class="context">
-        Add Context (preserves your original; saved after 5s idle or on close)
-        <textarea bind:value={context} on:input={onContextInput} disabled={session.saved}></textarea>
+      <label class="context-field">
+        add context
+        <textarea
+          bind:value={context}
+          on:input={onContextInput}
+          on:keydown={(e) => commitOnModEnter(
+            e,
+            () => autosaver.flush(),
+            // The context field only renders with a session; the !session guard is for the
+            // type checker, not the runtime — it makes an absent session a no-op rather than
+            // a null deref. Matches the "Save now" visibility rule from the harden pass.
+            !session || session.saved || (session.match.kind === 'append' && !appendConfirmed),
+          )}
+          disabled={session.saved}></textarea>
       </label>
+      <p class="hint">
+        {#if session.saved}
+          Dump frozen. Your verbatim original is kept inside it.
+        {:else if session.match.kind === 'append' && !appendConfirmed}
+          Append waits for your confirmation — it won’t save on its own. Your verbatim original is kept.
+        {:else}
+          Saves 5 seconds after you stop typing. Your verbatim original is kept.
+        {/if}
+      </p>
 
-      {#if session.saved}
-        <p class="saved">Saved — Dump frozen.</p>
-      {/if}
-      <button on:click={() => autosaver.flush()} disabled={session.saved}>Save now</button>
-      {#if session.saved && savedNotePath}
-        <!-- Explicit metadata refresh — never automatic -->
-        <button on:click={refreshMetadata} disabled={busy}>Refresh metadata</button>
-      {/if}
-      <button on:click={() => { session = null; autosaver.cancel(); }}>New capture</button>
+      <div class="actions">
+        {#if session.match.kind !== 'append' || appendConfirmed}
+          <!-- "Save now" forces the autosave. It is only honest where a save will actually
+               happen — an unconfirmed append no-ops, so on that path the decision buttons
+               above (Append / Save as new Note) are the save, and this one is absent. -->
+          <button on:click={() => autosaver.flush()} disabled={session.saved}>Save now</button>
+        {/if}
+        {#if session.saved && savedNotePath}
+          <!-- Explicit re-organize — never automatic -->
+          <button on:click={refreshMetadata} disabled={busy}>Re-organize Note</button>
+        {/if}
+        <button on:click={() => { session = null; savedNote = null; autosaver.cancel(); }}>New capture</button>
+      </div>
     {/if}
+    </section>
   {:else if view === 'ask'}
+    <section class="surface">
     <label class="ask">
-      Ask your vault
-      <textarea bind:value={question} placeholder="What did I think about...?" disabled={asking}
-      ></textarea>
+      ask your vault
+      <textarea
+        bind:value={question}
+        on:keydown={(e) => commitOnModEnter(e, askQuestion, asking || !question.trim())}
+        placeholder="What did I think about…"
+        disabled={asking}></textarea>
     </label>
-    <button on:click={askQuestion} disabled={asking || !question.trim()}>Ask</button>
+    <div class="actions">
+      <button class="primary" on:click={askQuestion} disabled={asking || !question.trim()}>
+        {asking ? 'Reading your vault…' : 'Ask'}
+      </button>
+    </div>
     {#if answer}
       <section class="answer">
         <p>{answer}</p>
         {#if citations.length}
-          <h3>Sources</h3>
-          <ul>
-            {#each citations as c}<li>{c.title} <code>{c.link}</code></li>{/each}
+          <p class="rule-label">sources</p>
+          <ul class="sources">
+            {#each citations as c}<li><a class="vault-link" href={obsidianUrl(settings.vaultName, c.path)}>{c.title}</a></li>{/each}
           </ul>
         {/if}
       </section>
     {/if}
+    </section>
   {:else}
-    <label>CouchDB URL <input bind:value={settings.couchdbUrl} placeholder="http://localhost:5984" /></label>
-    <label>Database <input bind:value={settings.couchdbDb} placeholder="obsidiannotes" /></label>
-    <label>Username <input bind:value={settings.couchdbUser} /></label>
-    <label>Password <input type="password" bind:value={settings.couchdbPassword} /></label>
-    <label>Managed folder <input bind:value={settings.managedFolder} /></label>
-    <label>Embeddings database <input bind:value={settings.embeddingsDb} /></label>
-    <label>Case-sensitive <input type="checkbox" bind:checked={settings.caseSensitive} /></label>
-    <label>LLM provider <input bind:value={settings.llmProvider} /></label>
-    <label>LLM model <input bind:value={settings.llmModel} /></label>
-    <label>LLM API key <input type="password" bind:value={settings.llmApiKey} /></label>
-    <label>Embedder model <input bind:value={settings.embedderModel} /></label>
-    <button on:click={saveConfig}>Save settings</button>
+    <section class="surface">
+    <!-- Twelve fields are two decisions: where the notes live, and which model does the
+         work. Grouped under the same ruled labels the rest of this surface already uses. -->
+    <fieldset class="field-group">
+      <legend class="rule-label">vault</legend>
+      <label>CouchDB URL <input bind:value={settings.couchdbUrl} placeholder="http://localhost:5984" /></label>
+      <label>Database <input bind:value={settings.couchdbDb} placeholder="obsidiannotes" /></label>
+      <label>Username <input bind:value={settings.couchdbUser} /></label>
+      <label>Password <input type="password" bind:value={settings.couchdbPassword} /></label>
+      <label>Managed folder <input bind:value={settings.managedFolder} /></label>
+      <label>Obsidian vault name <input bind:value={settings.vaultName} placeholder="your vault, on this device" /></label>
+      <label>Case-sensitive file names <input type="checkbox" bind:checked={settings.caseSensitive} /></label>
+    </fieldset>
 
-    <h2>Connection</h2>
+    <fieldset class="field-group">
+      <legend class="rule-label">model</legend>
+      <label>LLM provider <input bind:value={settings.llmProvider} /></label>
+      <label>LLM model <input bind:value={settings.llmModel} /></label>
+      <label>LLM API key <input type="password" bind:value={settings.llmApiKey} /></label>
+      <label>Embedder model <input bind:value={settings.embedderModel} /></label>
+      <label>Embeddings database <input bind:value={settings.embeddingsDb} /></label>
+    </fieldset>
+
+    <div class="actions">
+      <button class="primary" on:click={saveConfig}>Save settings</button>
+    </div>
+
+    <p class="rule-label">connection</p>
     <p class="hint">
       Checks CouchDB, the chat model, and the embedder independently, so a failure points at
       one field. The chat and embedder checks each make one small real request and
@@ -491,26 +715,41 @@
       immediately removes a throwaway database, to find out whether your CouchDB account may
       create one at all.
     </p>
-    <button on:click={testConnections} disabled={testing}>
-      {testing ? 'Testing…' : 'Test connection'}
-    </button>
+    <div class="actions">
+      <button on:click={testConnections} disabled={testing}>
+        {testing ? 'Testing…' : 'Test connection'}
+      </button>
+    </div>
     {#if health}
       <ul class="checks">
         {#each healthRows(health) as row}
           <li class:err={!row.result.ok}>
-            {row.result.ok ? '✓' : '✗'} <strong>{row.name}</strong> — {row.result.message}
+            <!-- Drawn, not typed: a ✓/✗ character pair borrows whatever the system font
+                 draws and belongs to no part of this design. The word beside it carries the
+                 result for anyone the colour and the mark do not reach. -->
+            <svg class="check-mark" viewBox="0 0 16 16" aria-hidden="true">
+              {#if row.result.ok}
+                <path d="M3.5 8.5 6.5 11.5 12.5 4.5" />
+              {:else}
+                <path d="M4.5 4.5 11.5 11.5 M11.5 4.5 4.5 11.5" />
+              {/if}
+            </svg>
+            <span><span class="sr-only">{row.result.ok ? 'Passed:' : 'Failed:'}</span>
+              <strong>{row.name}</strong> — {row.result.message}</span>
           </li>
         {/each}
       </ul>
     {/if}
 
-    <h2>Diagnostics</h2>
+    <p class="rule-label">diagnostics</p>
     <p class="hint">
       The last {logEvents.length} events, newest first. In dev these are also appended to
       <code>logs/brain-dump.jsonl</code> in the project folder.
     </p>
-    <button on:click={copyDiagnostics}>Copy diagnostics</button>
-    <button on:click={() => { logStore.clear(); logEvents = []; status = 'Diagnostics cleared'; }}>Clear</button>
+    <div class="actions">
+      <button on:click={copyDiagnostics}>Copy diagnostics</button>
+      <button on:click={() => { logStore.clear(); logEvents = []; status = 'Diagnostics cleared'; }}>Clear</button>
+    </div>
     <ul class="diagnostics">
       {#each logEvents.slice().reverse() as e}
         <li class:err={e.level === 'error'}>
@@ -521,7 +760,9 @@
         </li>
       {/each}
     </ul>
+    </section>
   {/if}
 
-  {#if status}<p>{status}</p>{/if}
-</main>
+  {#if status}<p class="status" aria-live="polite">{status}</p>{/if}
+  </main>
+</div>

@@ -1,0 +1,389 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-23T16:12:04.915779+00:00",
+  "title": "Design System: Brain-dump",
+  "extensions": {
+    "colorMeta": {
+      "wet-ink": {
+        "role": "primary",
+        "displayName": "Wet Ink",
+        "canonical": "oklch(58% 0.16 55)",
+        "tonalRamp": [
+          "oklch(15% 0.16 55.0)",
+          "oklch(26% 0.16 55.0)",
+          "oklch(37% 0.16 55.0)",
+          "oklch(48% 0.16 55.0)",
+          "oklch(59% 0.16 55.0)",
+          "oklch(70% 0.16 55.0)",
+          "oklch(82% 0.16 55.0)",
+          "oklch(95% 0.16 55.0)"
+        ]
+      },
+      "wet-ink-dark": {
+        "role": "primary",
+        "displayName": "Wet Ink (dark scheme)",
+        "canonical": "oklch(75% 0.15 65)",
+        "tonalRamp": [
+          "oklch(15% 0.15 65.0)",
+          "oklch(26% 0.15 65.0)",
+          "oklch(37% 0.15 65.0)",
+          "oklch(48% 0.15 65.0)",
+          "oklch(59% 0.15 65.0)",
+          "oklch(70% 0.15 65.0)",
+          "oklch(82% 0.15 65.0)",
+          "oklch(95% 0.15 65.0)"
+        ]
+      },
+      "dry-ink": {
+        "role": "secondary",
+        "displayName": "Dry Ink",
+        "canonical": "oklch(52% 0.09 195)",
+        "tonalRamp": [
+          "oklch(15% 0.09 195.0)",
+          "oklch(26% 0.09 195.0)",
+          "oklch(37% 0.09 195.0)",
+          "oklch(48% 0.09 195.0)",
+          "oklch(59% 0.09 195.0)",
+          "oklch(70% 0.09 195.0)",
+          "oklch(82% 0.09 195.0)",
+          "oklch(95% 0.09 195.0)"
+        ]
+      },
+      "dry-ink-dark": {
+        "role": "secondary",
+        "displayName": "Dry Ink (dark scheme)",
+        "canonical": "oklch(72% 0.09 195)",
+        "tonalRamp": [
+          "oklch(15% 0.09 195.0)",
+          "oklch(26% 0.09 195.0)",
+          "oklch(37% 0.09 195.0)",
+          "oklch(48% 0.09 195.0)",
+          "oklch(59% 0.09 195.0)",
+          "oklch(70% 0.09 195.0)",
+          "oklch(82% 0.09 195.0)",
+          "oklch(95% 0.09 195.0)"
+        ]
+      },
+      "alarm": {
+        "role": "tertiary",
+        "displayName": "Alarm",
+        "canonical": "oklch(52% 0.19 25)",
+        "tonalRamp": [
+          "oklch(15% 0.19 25.0)",
+          "oklch(26% 0.19 25.0)",
+          "oklch(37% 0.19 25.0)",
+          "oklch(48% 0.19 25.0)",
+          "oklch(59% 0.19 25.0)",
+          "oklch(70% 0.19 25.0)",
+          "oklch(82% 0.19 25.0)",
+          "oklch(95% 0.19 25.0)"
+        ]
+      },
+      "alarm-dark": {
+        "role": "tertiary",
+        "displayName": "Alarm (dark scheme)",
+        "canonical": "oklch(74% 0.16 25)",
+        "tonalRamp": [
+          "oklch(15% 0.16 25.0)",
+          "oklch(26% 0.16 25.0)",
+          "oklch(37% 0.16 25.0)",
+          "oklch(48% 0.16 25.0)",
+          "oklch(59% 0.16 25.0)",
+          "oklch(70% 0.16 25.0)",
+          "oklch(82% 0.16 25.0)",
+          "oklch(95% 0.16 25.0)"
+        ]
+      },
+      "page": {
+        "role": "neutral",
+        "displayName": "Page",
+        "canonical": "oklch(97% 0.008 240)",
+        "tonalRamp": [
+          "oklch(15% 0.008 240.0)",
+          "oklch(26% 0.008 240.0)",
+          "oklch(37% 0.008 240.0)",
+          "oklch(48% 0.008 240.0)",
+          "oklch(59% 0.008 240.0)",
+          "oklch(70% 0.008 240.0)",
+          "oklch(82% 0.008 240.0)",
+          "oklch(95% 0.008 240.0)"
+        ]
+      },
+      "page-dark": {
+        "role": "neutral",
+        "displayName": "Page (dark scheme)",
+        "canonical": "oklch(21% 0.028 235)",
+        "tonalRamp": [
+          "oklch(15% 0.028 235.0)",
+          "oklch(26% 0.028 235.0)",
+          "oklch(37% 0.028 235.0)",
+          "oklch(48% 0.028 235.0)",
+          "oklch(59% 0.028 235.0)",
+          "oklch(70% 0.028 235.0)",
+          "oklch(82% 0.028 235.0)",
+          "oklch(95% 0.028 235.0)"
+        ]
+      },
+      "card": {
+        "role": "neutral",
+        "displayName": "Card",
+        "canonical": "oklch(100% 0 0)",
+        "tonalRamp": [
+          "oklch(15% 0.0 0.0)",
+          "oklch(26% 0.0 0.0)",
+          "oklch(37% 0.0 0.0)",
+          "oklch(48% 0.0 0.0)",
+          "oklch(59% 0.0 0.0)",
+          "oklch(70% 0.0 0.0)",
+          "oklch(82% 0.0 0.0)",
+          "oklch(95% 0.0 0.0)"
+        ]
+      },
+      "card-dark": {
+        "role": "neutral",
+        "displayName": "Card (dark scheme)",
+        "canonical": "oklch(25% 0.03 235)",
+        "tonalRamp": [
+          "oklch(15% 0.03 235.0)",
+          "oklch(26% 0.03 235.0)",
+          "oklch(37% 0.03 235.0)",
+          "oklch(48% 0.03 235.0)",
+          "oklch(59% 0.03 235.0)",
+          "oklch(70% 0.03 235.0)",
+          "oklch(82% 0.03 235.0)",
+          "oklch(95% 0.03 235.0)"
+        ]
+      },
+      "graphite": {
+        "role": "neutral",
+        "displayName": "Graphite",
+        "canonical": "oklch(28% 0.02 240)",
+        "tonalRamp": [
+          "oklch(15% 0.02 240.0)",
+          "oklch(26% 0.02 240.0)",
+          "oklch(37% 0.02 240.0)",
+          "oklch(48% 0.02 240.0)",
+          "oklch(59% 0.02 240.0)",
+          "oklch(70% 0.02 240.0)",
+          "oklch(82% 0.02 240.0)",
+          "oklch(95% 0.02 240.0)"
+        ]
+      },
+      "graphite-dark": {
+        "role": "neutral",
+        "displayName": "Graphite (dark scheme)",
+        "canonical": "oklch(92% 0.012 230)",
+        "tonalRamp": [
+          "oklch(15% 0.012 230.0)",
+          "oklch(26% 0.012 230.0)",
+          "oklch(37% 0.012 230.0)",
+          "oklch(48% 0.012 230.0)",
+          "oklch(59% 0.012 230.0)",
+          "oklch(70% 0.012 230.0)",
+          "oklch(82% 0.012 230.0)",
+          "oklch(95% 0.012 230.0)"
+        ]
+      },
+      "pencil": {
+        "role": "neutral",
+        "displayName": "Pencil",
+        "canonical": "oklch(52% 0.02 240)",
+        "tonalRamp": [
+          "oklch(15% 0.02 240.0)",
+          "oklch(26% 0.02 240.0)",
+          "oklch(37% 0.02 240.0)",
+          "oklch(48% 0.02 240.0)",
+          "oklch(59% 0.02 240.0)",
+          "oklch(70% 0.02 240.0)",
+          "oklch(82% 0.02 240.0)",
+          "oklch(95% 0.02 240.0)"
+        ]
+      },
+      "pencil-dark": {
+        "role": "neutral",
+        "displayName": "Pencil (dark scheme)",
+        "canonical": "oklch(70% 0.018 230)",
+        "tonalRamp": [
+          "oklch(15% 0.018 230.0)",
+          "oklch(26% 0.018 230.0)",
+          "oklch(37% 0.018 230.0)",
+          "oklch(48% 0.018 230.0)",
+          "oklch(59% 0.018 230.0)",
+          "oklch(70% 0.018 230.0)",
+          "oklch(82% 0.018 230.0)",
+          "oklch(95% 0.018 230.0)"
+        ]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Rule",
+        "canonical": "oklch(88% 0.012 240)",
+        "tonalRamp": [
+          "oklch(15% 0.012 240.0)",
+          "oklch(26% 0.012 240.0)",
+          "oklch(37% 0.012 240.0)",
+          "oklch(48% 0.012 240.0)",
+          "oklch(59% 0.012 240.0)",
+          "oklch(70% 0.012 240.0)",
+          "oklch(82% 0.012 240.0)",
+          "oklch(95% 0.012 240.0)"
+        ]
+      },
+      "rule-dark": {
+        "role": "neutral",
+        "displayName": "Rule (dark scheme)",
+        "canonical": "oklch(32% 0.02 235)",
+        "tonalRamp": [
+          "oklch(15% 0.02 235.0)",
+          "oklch(26% 0.02 235.0)",
+          "oklch(37% 0.02 235.0)",
+          "oklch(48% 0.02 235.0)",
+          "oklch(59% 0.02 235.0)",
+          "oklch(70% 0.02 235.0)",
+          "oklch(82% 0.02 235.0)",
+          "oklch(95% 0.02 235.0)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "The capture field only. The thought being typed, set at reading size in the reading face."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "A Note's title. The only place type gets large."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Note bodies, summaries, key points, Ask answers. Capped at a 34rem measure."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Uppercase mono markings: field labels, eyebrows, section rules."
+      },
+      "meta": {
+        "displayName": "Meta",
+        "purpose": "Tags, paths, wikilinks, tab names, status, diagnostics. Anything the machine states as fact."
+      }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "burn-down",
+        "value": "scaleX(1) → scaleX(0) over 5s linear forwards",
+        "purpose": "The Note card's top edge consuming the autosave window. The only motion in the application."
+      }
+    ],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The committing action on a surface — Capture, Ask, Save settings.",
+      "html": "<button class=\"ds-btn-primary\">Capture</button>",
+      "css": ".ds-btn-primary { font-family: var(--mono); font-size: 0.8125rem; letter-spacing: 0.02em; font-weight: 500; padding: 0.5rem 1rem; color: var(--ground); background: var(--ember); border: 1px solid var(--ember); border-radius: 3px; cursor: pointer; } .ds-btn-primary:hover { border-color: var(--dim); } .ds-btn-primary:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; } .ds-btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }"
+    },
+    {
+      "name": "Default Button",
+      "kind": "button",
+      "refersTo": "button-default",
+      "description": "Every non-committing action: Save now, New capture, Test connection.",
+      "html": "<button class=\"ds-btn-default\">New capture</button>",
+      "css": ".ds-btn-default { font-family: var(--mono); font-size: 0.8125rem; letter-spacing: 0.02em; padding: 0.5rem 1rem; color: var(--text); background: var(--raised); border: 1px solid var(--rule); border-radius: 3px; cursor: pointer; } .ds-btn-default:hover { border-color: var(--dim); } .ds-btn-default:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }"
+    },
+    {
+      "name": "Navigation Tab",
+      "kind": "nav",
+      "refersTo": "nav-tab",
+      "description": "One of three lowercase tabs in the masthead. Active carries a Wet Ink underline.",
+      "html": "<nav class=\"ds-nav\"><button class=\"ds-nav-tab ds-nav-tab--on\">capture</button><button class=\"ds-nav-tab\">ask</button><button class=\"ds-nav-tab\">config</button></nav>",
+      "css": ".ds-nav { display: flex; gap: 0.75rem; } .ds-nav-tab { font-family: var(--mono); font-size: 0.8125rem; letter-spacing: 0.04em; background: none; border: 0; border-bottom: 2px solid transparent; padding: 0.25rem 0; color: var(--dim); cursor: pointer; } .ds-nav-tab:hover { color: var(--text); } .ds-nav-tab--on { color: var(--text); border-bottom-color: var(--ember); } .ds-nav-tab:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }"
+    },
+    {
+      "name": "Capture Field",
+      "kind": "input",
+      "refersTo": "input-dump",
+      "description": "The one field set in the reading face. The thought is the product, not a form value.",
+      "html": "<textarea class=\"ds-input-dump\" placeholder=\"What are you thinking?\"></textarea>",
+      "css": ".ds-input-dump { font-family: var(--serif); font-size: clamp(1.15rem, 1rem + 0.9vw, 1.4rem); line-height: 1.5; width: 100%; min-height: 9rem; padding: 0.75rem; color: var(--text); background: var(--raised); border: 1px solid var(--rule); border-radius: 3px; box-sizing: border-box; resize: vertical; } .ds-input-dump:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "Ordinary configuration input, mono, with its uppercase label above.",
+      "html": "<label class=\"ds-label\">Managed folder<input class=\"ds-input-field\" value=\"Brain Dump\" /></label>",
+      "css": ".ds-label { display: flex; flex-direction: column; gap: 0.25rem; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dim); } .ds-input-field { font-family: var(--mono); font-size: 0.8125rem; padding: 0.5rem; color: var(--text); background: var(--raised); border: 1px solid var(--rule); border-radius: 3px; box-sizing: border-box; width: 100%; } .ds-input-field:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }"
+    },
+    {
+      "name": "Note Card",
+      "kind": "custom",
+      "refersTo": "note-card",
+      "description": "The signature component. Shows the whole Note before it is committed, and carries the autosave countdown on its own top edge.",
+      "html": "<article class=\"ds-note\"><div class=\"ds-note-burn\"></div><p class=\"ds-note-eyebrow\">new Note</p><h2 class=\"ds-note-title\">vorssaint-utils GitHub repo</h2><dl class=\"ds-note-meta\"><dt>tags</dt><dd>github  utilities  mac</dd></dl><div class=\"ds-note-body\">Found from a YouTube video. Might replace some of my MacBook apps.</div><p class=\"ds-note-rule\">summary</p></article>",
+      "css": ".ds-note { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 0.75rem; padding: 1.5rem 1rem 1rem; background: var(--raised); border: 1px solid var(--rule); border-radius: 3px; } .ds-note-burn { position: absolute; inset: 0 0 auto; height: 2px; background: var(--ember); transform-origin: left center; animation: ds-burn 5s linear forwards; } @keyframes ds-burn { from { transform: scaleX(1); } to { transform: scaleX(0); } } .ds-note-eyebrow { margin: 0; font-family: var(--mono); font-size: 0.6875rem; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ember); } .ds-note-title { margin: 0; font-family: var(--serif); font-weight: 400; font-size: clamp(1.4rem, 1.1rem + 1.4vw, 1.9rem); line-height: 1.15; } .ds-note-meta { display: grid; grid-template-columns: auto 1fr; gap: 0.25rem 0.75rem; margin: 0; font-family: var(--mono); font-size: 0.6875rem; } .ds-note-meta dt { color: var(--dim); text-transform: uppercase; letter-spacing: 0.1em; } .ds-note-meta dd { margin: 0; } .ds-note-body { font-family: var(--serif); font-size: 1rem; white-space: pre-wrap; } .ds-note-rule { display: flex; align-items: center; gap: 0.75rem; margin: 0; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); } .ds-note-rule::after { content: ''; flex: 1; height: 1px; background: var(--rule); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Field Notebook",
+    "overview": "Brain-dump is the pocket notebook you already carry, except it files itself. Someone stops walking, catches a thought before it goes, and puts it down — and by the time they look again it has a title, a summary and links to what it belongs with. The world is that notebook: everyday, portable, personal, made to be written in rather than admired.\n\nA notebook is a physical object, and this system treats it as one. Pages and cards have weight and sit on each other; a control that can be pressed looks pressable and behaves that way; a state change is something you watch happen rather than something you find has happened. The one drama in the whole app is ink drying: a thought goes down wet — still yours, still editable, five seconds from permanent — and then it is dry, in the Vault.\n\nPhysical does not mean soft. This is a well-made notebook, not a scrapbook: crisp, precise, exactly aligned, the kind of object whose ruling is dead straight and whose corners are true.",
+    "keyCharacteristics": [
+      "Two inks, two states: wet means yours, dry means filed. No third accent.",
+      "The machine writes in mono; the person writes in serif.",
+      "Real material — paper, card, stacking, pressing — with instrument-grade precision on top.",
+      "One column, always. This is a book, not a workspace.",
+      "The whole Note is shown before it is committed. Never a summary of itself."
+    ],
+    "rules": [
+      {
+        "name": "The Two Inks Rule",
+        "section": "colors",
+        "body": "Wet Ink and Dry Ink are states, not decoration. If a colour appears somewhere it does not mean \"not yet saved\" or \"in the Vault\", the system is broken. Adding a third brand accent breaks it too — the vocabulary only reads because it is exactly two."
+      },
+      {
+        "name": "The Both Schemes Rule",
+        "section": "colors",
+        "body": "Every colour resolves through light-dark() with a prefers-color-scheme fallback. A value that only works in one scheme is not finished."
+      },
+      {
+        "name": "The Two Hands Rule",
+        "section": "typography",
+        "body": "The machine writes in mono; the person writes in serif. There is no third face and no case where a person's words are set in the machine's hand."
+      },
+      {
+        "name": "The Reading Measure Rule",
+        "section": "typography",
+        "body": "Body text never exceeds 34rem of measure, on any viewport. A Note is read, not scanned."
+      },
+      {
+        "name": "The Nothing Moves Silently Rule",
+        "section": "elevation",
+        "body": "Any element a person can act on acknowledges the action visibly — hover, focus and press are all distinct. An interface where pressing a control produces no visible change reads as broken, not as restrained."
+      },
+      {
+        "name": "The Reduced Motion Rule",
+        "section": "elevation",
+        "body": "Every motion respects prefers-reduced-motion. Where motion carries information — the countdown especially — the reduced variant states the same fact in words or a static mark rather than dropping it."
+      }
+    ],
+    "dos": [
+      "Do show the whole Note before it is committed — body included. The preview is the Note, not a description of it.",
+      "Do keep Wet Ink and Dry Ink tied to their two states, and add no third accent.",
+      "Do set the person's words in the serif and the machine's words in the mono.",
+      "Do give every interactive element a visible hover, focus and pressed state.",
+      "Do resolve every colour through light-dark() and verify both schemes before shipping.",
+      "Do respect prefers-reduced-motion, and restate in words anything motion was carrying.",
+      "Do cap the reading measure at 34rem."
+    ],
+    "donts": [
+      "Don't fade a disabled control to a flat opacity: 0.45 and call it a state.",
+      "Don't let the capture field look like a form field. It is a page to write on.",
+      "Don't add a second column, a sidebar, or a docked panel. This is a book.",
+      "Don't use Wet Ink or Dry Ink decoratively — on a border, a divider, or a heading that carries no state.",
+      "Don't fetch a font, an icon, or any asset from a CDN. Everything ships self-hosted; the offline path is the one that matters most."
+    ]
+  }
+}
