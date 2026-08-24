@@ -135,6 +135,50 @@ again or the app capturing more than once per press. Deliberately not diagnosed 
 wrong. If a capture appears to do nothing, note the wall-clock time before pressing again, so
 the Dump timestamps can later be matched against `logs/brain-dump.jsonl`.
 
+**Established since (2026-08-24, from a trace-replay of `logs/brain-dump.jsonl`):** the four
+orphans split into two stranding windows in the capture→Organize→write flow. The log records
+`capture` events carrying a `dumpId` (a UUID); the vault filename is `<createdAt>-<first 6 hex>`,
+so each orphan was matched to its trace.
+
+- **Window A — interrupted mid-Organize** (`f91477`, `3215d1`, the first two coffee Dumps): the
+  log shows `capture started` plus one chat request, and **no terminal event** — no `capture
+  session ready`, no `queued (offline)`, no `capture failed`. `beginCapture`
+  (`src/lib/operations.ts:309`) writes the Dump first (`capture()` → `writeDump`), then fires the
+  Organize chat call. An interruption there (the mobile tab backgrounded / closed, killing the
+  fetch) leaves the await unresolved: `captureOrQueue`'s try/catch never fires, so the Dump is
+  written but **not** added to the outbox (outbox.add only runs in the offline branch at line 667
+  or the catch at 680 — neither fired). No preview appeared, so the user saw nothing happen and
+  pressed again.
+- **Window B — Organized, but the Note never landed** (`673efa`, `23f61b`): the log shows
+  `capture session ready` (Organize succeeded, preview held), but no Note exists. The autosave
+  arms a 5s timer at capture (`src/App.svelte:243`); if the app closed before it fired, or
+  `finalizeCapture`'s `writeNote` failed — the same session produced a Dump reading
+  `Error: Invalid Adapter: undefined` at 08:17, the broken-PouchDB-adapter state — the session
+  stays unsaved and the Dump is stranded. `saveAndFinalize` *does* surface `Save failed — Dump
+  kept` when finalize runs and fails, but if the app closed before the 5s timer, finalize never
+  ran and nothing was surfaced.
+
+**Zero `drain` events in the log:** the offline-recovery path (`drainOutbox`) never ran — these
+were online captures that died or failed, not offline-queued ones, so the outbox never held them
+and drain could not have rescued them.
+
+**The repeated captures are a symptom, not a separate bug.** The capture button is
+`disabled={busy}` during the in-flight call (`src/App.svelte:546`), so the three coffee Dumps
+(55 s apart, three separate `dumpId`s) are three genuine presses, not an auto-double-trigger.
+Each press followed a Window-A capture that gave no feedback it was processing — the user pressed
+again because nothing told them the first one was working or had failed.
+
+**The root cause is a durability gap, not a logic bug.** The Dump is written at capture (Principle
+1 holds), but "this Dump still needs to be Organized into a Note" is **never persisted** — the
+only persisted state is the Dump file itself. There is no "pending Organize" record and no
+stranded-Dump detection, so any interruption between Dump-write and Note-write strands the Dump
+silently, and a restart cannot find or retry it. The fix is a feature — persist the pending
+state and/or detect stranded Dumps on start, and show in-progress feedback so the user does not
+re-press — not a one-line change. It belongs in the main flow (spec → implement), and the
+diagnosing-bugs skill stops here: the cause is established, but there is no in-process seam that
+goes red on an interruption and green on a fix, so a red→green regression loop cannot be built
+without the running app.
+
 ---
 
 ## 03 — The Note asserts things the Dump never said
