@@ -496,16 +496,29 @@
   }
 </script>
 
-<main>
+<!-- The masthead is a sibling of <main>, not a child of it: a <header> only becomes a `banner`
+     landmark when nothing like <main> stands between it and the body, so nesting it cost the
+     page its one other landmark. The wrapper div carries the column. -->
+<div class="page">
   <header class="masthead">
-    <span class="wordmark">brain-dump</span>
+    <h1 class="wordmark">brain-dump</h1>
     <nav>
-      <button class:on={view === 'capture'} on:click={() => (view = 'capture')}>capture</button>
-      <button class:on={view === 'ask'} on:click={() => (view = 'ask')}>ask</button>
-      <button class:on={view === 'config'} on:click={() => (view = 'config')}>settings</button>
+      <button
+        class:on={view === 'capture'}
+        aria-current={view === 'capture' ? 'page' : undefined}
+        on:click={() => (view = 'capture')}>capture</button>
+      <button
+        class:on={view === 'ask'}
+        aria-current={view === 'ask' ? 'page' : undefined}
+        on:click={() => (view = 'ask')}>ask</button>
+      <button
+        class:on={view === 'config'}
+        aria-current={view === 'config' ? 'page' : undefined}
+        on:click={() => (view = 'config')}>settings</button>
     </nav>
   </header>
 
+  <main>
   {#if view === 'capture'}
     <section class="surface">
     {#if queuedCount === 1}
@@ -516,13 +529,17 @@
     {#if queueError}<p class="status err" aria-live="polite">{queueError}</p>{/if}
 
     {#if !session}
-      <!-- The Dump is the product, not a form field: set in the content face, at content size. -->
+      <!-- The Dump is the product, not a form field: set in the content face, at content size,
+           and named for assistive tech without a visible label — a label above it would make
+           it a form control, which is the one thing it must not look like. Every other field
+           in the app carries its label on screen; this one carries it in the name. -->
       <textarea
         class="dump"
         use:focusOnMount
         bind:value={text}
         on:input={persistDraft}
         on:keydown={(e) => commitOnModEnter(e, captureDump, busy || !text.trim())}
+        aria-label="Dump — what are you thinking?"
         placeholder="What are you thinking?"
         disabled={busy}></textarea>
       <div class="actions">
@@ -664,18 +681,28 @@
     </section>
   {:else}
     <section class="surface">
-    <label>CouchDB URL <input bind:value={settings.couchdbUrl} placeholder="http://localhost:5984" /></label>
-    <label>Database <input bind:value={settings.couchdbDb} placeholder="obsidiannotes" /></label>
-    <label>Username <input bind:value={settings.couchdbUser} /></label>
-    <label>Password <input type="password" bind:value={settings.couchdbPassword} /></label>
-    <label>Managed folder <input bind:value={settings.managedFolder} /></label>
-    <label>Obsidian vault name <input bind:value={settings.vaultName} placeholder="your vault, on this device" /></label>
-    <label>Embeddings database <input bind:value={settings.embeddingsDb} /></label>
-    <label>Case-sensitive file names <input type="checkbox" bind:checked={settings.caseSensitive} /></label>
-    <label>LLM provider <input bind:value={settings.llmProvider} /></label>
-    <label>LLM model <input bind:value={settings.llmModel} /></label>
-    <label>LLM API key <input type="password" bind:value={settings.llmApiKey} /></label>
-    <label>Embedder model <input bind:value={settings.embedderModel} /></label>
+    <!-- Twelve fields are two decisions: where the notes live, and which model does the
+         work. Grouped under the same ruled labels the rest of this surface already uses. -->
+    <fieldset class="field-group">
+      <legend class="rule-label">vault</legend>
+      <label>CouchDB URL <input bind:value={settings.couchdbUrl} placeholder="http://localhost:5984" /></label>
+      <label>Database <input bind:value={settings.couchdbDb} placeholder="obsidiannotes" /></label>
+      <label>Username <input bind:value={settings.couchdbUser} /></label>
+      <label>Password <input type="password" bind:value={settings.couchdbPassword} /></label>
+      <label>Managed folder <input bind:value={settings.managedFolder} /></label>
+      <label>Obsidian vault name <input bind:value={settings.vaultName} placeholder="your vault, on this device" /></label>
+      <label>Case-sensitive file names <input type="checkbox" bind:checked={settings.caseSensitive} /></label>
+    </fieldset>
+
+    <fieldset class="field-group">
+      <legend class="rule-label">model</legend>
+      <label>LLM provider <input bind:value={settings.llmProvider} /></label>
+      <label>LLM model <input bind:value={settings.llmModel} /></label>
+      <label>LLM API key <input type="password" bind:value={settings.llmApiKey} /></label>
+      <label>Embedder model <input bind:value={settings.embedderModel} /></label>
+      <label>Embeddings database <input bind:value={settings.embeddingsDb} /></label>
+    </fieldset>
+
     <div class="actions">
       <button class="primary" on:click={saveConfig}>Save settings</button>
     </div>
@@ -697,7 +724,18 @@
       <ul class="checks">
         {#each healthRows(health) as row}
           <li class:err={!row.result.ok}>
-            {row.result.ok ? '✓' : '✗'} <strong>{row.name}</strong> — {row.result.message}
+            <!-- Drawn, not typed: a ✓/✗ character pair borrows whatever the system font
+                 draws and belongs to no part of this design. The word beside it carries the
+                 result for anyone the colour and the mark do not reach. -->
+            <svg class="check-mark" viewBox="0 0 16 16" aria-hidden="true">
+              {#if row.result.ok}
+                <path d="M3.5 8.5 6.5 11.5 12.5 4.5" />
+              {:else}
+                <path d="M4.5 4.5 11.5 11.5 M11.5 4.5 4.5 11.5" />
+              {/if}
+            </svg>
+            <span><span class="sr-only">{row.result.ok ? 'Passed:' : 'Failed:'}</span>
+              <strong>{row.name}</strong> — {row.result.message}</span>
           </li>
         {/each}
       </ul>
@@ -726,4 +764,5 @@
   {/if}
 
   {#if status}<p class="status" aria-live="polite">{status}</p>{/if}
-</main>
+  </main>
+</div>

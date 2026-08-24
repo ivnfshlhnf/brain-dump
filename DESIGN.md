@@ -174,6 +174,23 @@ third brand accent breaks it too — the vocabulary only reads because it is exa
 `prefers-color-scheme` fallback. A value that only works in one scheme is not finished. Test
 both before calling any colour decision done.
 
+### The surfaces the browser draws
+
+The caret, the text selection, the scrollbars and the placeholder ship with defaults that
+belong to no design system, and leaving them is the cheapest way for a built page to look
+assembled. Here they are not incidental — they are the notebook's own parts:
+
+- **The caret is the nib.** `caret-color` is Wet Ink. It marks the one place ink is being laid
+  down right now, which is exactly what the colour means everywhere else.
+- **Selection is a wash of the same ink** — Wet Ink at 22% over the text you are about to
+  change. A wash, not a fill: the words stay Graphite and stay readable through it.
+- **Scrollbars are ruling.** `scrollbar-color: var(--rule) transparent`, thin where a list
+  scrolls inside the page.
+- **The placeholder is Pencil**, a known token rather than the browser's own fade.
+
+This is the one place the two inks touch something that is not, strictly, a state — and they
+earn it: the caret and the selection both mark *uncommitted*, which is what Wet Ink is for.
+
 ## Typography
 
 **Display / Body Font:** Newsreader (variable weight, with Georgia fallback)
@@ -218,6 +235,13 @@ The page is structured top-down: a masthead carrying the wordmark and three tabs
 single rule, then the surface's content, then status. Nothing floats, nothing docks, and
 nothing is fixed to the viewport.
 
+The masthead is a **sibling** of `<main>`, not a child of it — both sit inside a `.page`
+wrapper that carries the column. A `<header>` only becomes a `banner` landmark when nothing
+like `<main>` stands between it and the body, so nesting it cost the page its one other
+landmark and left `main` alone in the landmark list. The wordmark is the page's `<h1>`,
+visually unchanged (mono, small, Pencil): heading navigation now starts at the document
+rather than at a Note's title.
+
 **Vertical composition.** The column fills the viewport height (`min-height: 100dvh`,
 `box-sizing: border-box` so the padding sits inside that height rather than pushing the page
 past it; `max-width` is `--measure` plus the side margins so the reading line stays at 34rem).
@@ -248,8 +272,8 @@ page it sits. Pressable things lift on hover and depress on press. State changes
 not discovered — every interactive element responds visibly, and the transition between wet
 and dry is the one moment worth animating properly.
 
-**Observed state: the Note card has its material; the rest of the surfaces do not yet.**
-The Note card now carries a two-layer ambient shadow (`--shadow-card`, an offset close
+**Observed state: stacked stock carries material; the fields are flat by intent.**
+The Note card and the Ask answer both carry a two-layer ambient shadow (`--shadow-card`, an offset close
 shadow plus a soft far one, resolved per scheme — darker and more present in dark mode where
 the ground itself is dark) and a card radius a step larger than the controls' (`--radius-card`
 4px vs `--radius` 3px). Every interactive element has a 140ms `--ease` transition and a real
@@ -258,10 +282,16 @@ cross-fades: the edge fills back to full and the ink turns from Wet to Dry over 
 of it falls back to static under `prefers-reduced-motion`, with the colour cross-fade kept
 because it carries the state and is not vestibular.
 
-What is still ahead: the tactility floor is in the stylesheet but the other surfaces (the
-empty Capture textarea, the Ask box, the Config wall) have not had their own bolder passes —
-they still read as generic shells. The `.answer` card still wears its old 2px Dry Ink
-`border-left`, an AI-slop tell the detector flags, pending its own pass.
+Two things are true of anything stacked on the page: it takes the card radius and the card
+shadow. The Ask answer used to be the exception — a 3px control radius, no shadow, and a 2px
+Dry Ink `border-left`. That border was wrong twice: a coloured side-tab is the callout cliché
+the detector flags, and it spent an ink that means *in the Vault* on an edge carrying no
+state. The answer is now stock like the Note, and the Dry Ink stays with its citations, where
+it is true.
+
+Fields stay flat, and that is the intent, not an unfinished pass: a field is a place to write,
+not an object resting on the page. What gives them presence is that they grow — every textarea
+sizes to its content and none of them shows a resize grabber.
 
 ### Named Rules
 
@@ -305,7 +335,14 @@ app.
   disabled primary keeps its light label but washes the Wet Ink fill out toward Pencil
   (`color-mix` of ember and pencil), so the action reads as deactivated without becoming a
   ghost. This replaced the old `opacity: 0.45` blanket fade, which read as half-rendered in
-  both schemes.
+  both schemes. **The mix is taken `in oklab`, never `in oklch`** — oklch interpolates the hue
+  *angle*, and Wet Ink and Pencil sit almost opposite each other on the wheel (55° vs 240°),
+  so the shorter arc between them runs through hues that are in neither colour. Mixed in
+  oklch this fill resolved to hue 336° — plum — in light and hue 139° — green — in dark,
+  putting two invented accents on the most-pressed control in the app, in the state it rests
+  in every time the app opens. oklab is rectangular: there is no arc to travel, the hue stays
+  Wet Ink's own, and only the chroma drains, which is what "washed out" always meant. Any
+  future mix between two tokens of different hue takes oklab for the same reason.
 
 ### Inputs / Fields
 - **Style:** Card fill, 1px Rule border, 3px radius, mono at 0.8125rem for ordinary fields.
@@ -320,14 +357,32 @@ app.
   Capture press, and ⌘/Ctrl+Enter commits from any commit field (Dump, Context, Ask) without
   reaching for the button. The draft is cleared the moment a Dump is actually captured;
   `beforeunload` flushes it synchronously so a sudden close does not lose the last 250ms.
-- **Observed defect:** the capture field still renders as a bordered box with a visible native
-  resize grabber, which reads as an ordinary form control rather than as a page to write on.
+- **Fields grow; nothing is dragged.** Every textarea takes `field-sizing: content` with its
+  minimum height as the floor (9rem for the Dump, 6rem for Context and Ask) and a `60vh`
+  ceiling past which it scrolls, so the committing button never leaves the viewport. None of
+  them shows a resize grabber: the grabber in the corner was the one detail that made the
+  capture field read as an ordinary form control rather than as a page to write on. Where
+  `field-sizing` is unsupported, `resize: vertical` returns — dragging is then the only way to
+  see a long Dump.
+- **The Dump is named without being labelled.** Every other field carries its label on screen;
+  a visible label above the capture field would make it a form control, which is the one thing
+  it must not look like. It carries an `aria-label` instead, so it has an accessible name
+  without a visible one.
+- **The placeholder takes Pencil**, not the browser's own fade, which lands under 4.5:1 —
+  "What are you thinking?" is the most-read text on the arrival screen.
+- **The case-sensitivity checkbox is a checkbox**, not a stretched field: the shared
+  `width: 100%` on inputs was inflating it to a 544×13px bar floating mid-column. It keeps its
+  own 18px size, sits beside its words, and the whole label row is a 44px target.
 
 ### Navigation
 - Three tabs — capture, ask, settings — in lowercase mono at 0.8125rem with `0.04em` tracking,
   right-aligned against the wordmark, separated from the content by a single Rule hairline.
   The third tab is `settings`, not `config`, so the noun matches its own surface — the `Save
   settings` button and the `Settings saved` status line all say the same word.
+- **The active tab says so twice:** in Wet Ink for the eye, and in `aria-current="page"` for
+  everyone else. Colour was carrying "you are here" on its own, so the only announcement a
+  screen-reader user got that the view had changed came from the status line, not the control
+  they pressed.
 - **Active:** Graphite text with a 2px Wet Ink underline carried as a `text-decoration`
   underline (it belongs to the label, not the box), so it stays tight under the word while
   the tab's padding grows the touch target. **Inactive:** Pencil text, a transparent
@@ -336,6 +391,24 @@ app.
   clears the 24px minimum target on touch (the narrow `ask` tab especially) without taking
   on the fill or border of a button.
 - The tab row does not change at phone width; three short words fit.
+
+### The settings wall
+
+Twelve fields in one undifferentiated stack asked the reader to hold twelve things at once.
+They are two decisions — **where the notes live** (`vault`: CouchDB URL, database, credentials,
+Managed folder, Obsidian vault name, case sensitivity) and **which model does the work**
+(`model`: provider, chat model, API key, embedder, embeddings database) — so the wall is two
+`fieldset`s whose `legend`s are the same ruled section markers the surface already uses for
+`connection` and `diagnostics`. Four ruled labels down one column, one pattern. The grouping
+is real markup, not just ruling: a fieldset tells a screen reader what the ruling tells the
+eye. `Save settings` commits both groups and takes a beat more air than the gap between two
+fields, so it does not read as belonging to whichever field it sits under.
+
+**The connection checks are drawn marks, not characters.** A `✓`/`✗` pair borrows whatever
+the system font feels like drawing and matches nothing else in the app; the marks are authored
+SVG at one stroke weight, taking the row's own colour — Graphite for a pass, Alarm for a
+failure. The result never rides on the mark and the colour alone: each row also states it in a
+word, carried for assistive tech and for anyone who cannot separate the two colours.
 
 ### Note card *(signature)*
 The one component the whole design exists for. A Note is shown **complete** before it is

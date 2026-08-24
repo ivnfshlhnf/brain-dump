@@ -1,7 +1,7 @@
 import { chromium } from 'playwright';
 const out = '/Users/ivanhanif/personal/shared-dev/brain-dump/.scratch/shots/pass-09';
 
-const HEAD = `<header class="masthead"><span class="wordmark">brain-dump</span><nav>
+const HEAD = `<header class="masthead"><h1 class="wordmark">brain-dump</h1><nav>
 <button class="on">capture</button><button>ask</button><button>settings</button></nav></header>`;
 
 const NOTE_BODY = `The outbox should retry on a timer as well as on the online event. A capture that fails while navigator.onLine is already true — a flaky connection, a captive portal, an LLM outage — never fires online, and the spec promises offline captures organize themselves without the user's intervention. Sixty seconds feels right; it is cheap and it is invisible.`;
@@ -48,7 +48,7 @@ const inner = (state) => {
   const saveNow = held
     ? ''
     : `<button ${committed ? 'disabled' : ''}>Save now</button>`;
-  const refresh = committed ? '<button>Refresh metadata</button>' : '';
+  const refresh = committed ? '<button>Re-organize Note</button>' : '';
   const status = committed
     ? '<p class="status">Saved Note: Outbox retry on a timer, not just on reconnect</p>'
     : '';
@@ -90,7 +90,10 @@ for (const scheme of ['light','dark']) {
       await page.goto('http://localhost:5173', { waitUntil:'load' });
       await page.evaluate(() => document.fonts.ready);
       await page.evaluate(([head, body]) => {
-        document.querySelector('main').innerHTML = head + '<section class="surface">' + body + '</section>';
+        // The masthead is a sibling of <main> inside .page, so the fixture rebuilds the
+        // whole column rather than injecting a header into main.
+        document.querySelector('.page').innerHTML =
+          head + '<main><section class="surface">' + body + '</section></main>';
       }, [HEAD, inner(state)]);
       // Let the counting animation advance for the 'new' state so the screenshot shows
       // the burn partway down; the held and saved states are static.
