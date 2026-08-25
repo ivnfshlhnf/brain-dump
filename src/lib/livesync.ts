@@ -83,10 +83,16 @@ function isConflict(e: unknown): boolean {
   return err.status === 409 || err.name === 'conflict';
 }
 
-/** A file read back out of the vault: its original-case path and full content. */
+/** A file read back out of the vault: its original-case path and full content.
+ *
+ *  `deleted` is Obsidian LiveSync's *soft* delete — the document keeps its chunks and is
+ *  marked rather than removed, so the content is still readable and the deletion still
+ *  replicates. Only reconciliation asks to see these; every other reader is shown the
+ *  Vault as the user sees it. */
 export interface VaultFile {
   path: string;
   content: string;
+  deleted?: boolean;
 }
 
 /** Read every file in the vault, reassembling each one's content from its chunks.
@@ -95,25 +101,56 @@ export interface VaultFile {
  *  are concatenated in order.
  *
  *  `include` filters by vault-relative path before any chunk is fetched, so a
- *  narrowed read (e.g. just the managed folder) costs only the metadata scan. */
+ *  narrowed read (e.g. just the managed folder) costs only the metadata scan.
+ *
+ *  Soft-deleted documents are **excluded by default**. The app used to ignore the flag
+ *  entirely, which meant Retrieve could answer from a Note the user had deleted and cite
+ *  it back as their own past thinking (dogfooding finding 04). Reconciliation is the one
+ *  caller that needs to see them — a deleted Note is exactly what it is looking for — and
+ *  it asks explicitly. */
 export async function readVaultFiles(
   db: DocStore,
   include: (path: string) => boolean,
+  opts: { includeDeleted?: boolean } = {},
 ): Promise<VaultFile[]> {
-  const all = await db.allDocs<{ path?: string; type?: string; children?: string[] }>({
-    include_docs: true,
-  });
+  const all = await db.allDocs<{
+    path?: string;
+    type?: string;
+    children?: string[];
+    deleted?: boolean;
+  }>({ include_docs: true });
   const files: VaultFile[] = [];
   for (const row of all.rows) {
     const doc = row.doc;
     if (!doc || doc.type !== 'plain' || typeof doc.path !== 'string') continue;
     if (!doc.children?.length || !include(doc.path)) continue;
+    if (doc.deleted && !opts.includeDeleted) continue;
     const chunks = await Promise.all(
       doc.children.map((id) => db.get<{ data: string }>(id)),
     );
-    files.push({ path: doc.path, content: chunks.map((c) => c.data).join('') });
+    files.push({
+      path: doc.path,
+      content: chunks.map((c) => c.data).join(''),
+      ...(doc.deleted ? { deleted: true } : {}),
+    });
   }
   return files;
+}
+
+/** Undo a soft delete: clear the flag and put the document back, keeping its chunks.
+ *  The content was never gone — LiveSync marks rather than removes — so this restores the
+ *  exact document that was deleted, edits included, and costs no LLM call.
+ *
+ *  A no-op for a file that is not deleted, so restoring twice is safe. */
+export async function restoreFile(
+  db: DocStore,
+  path: string,
+  settings: Settings,
+): Promise<void> {
+  const doc = await db.get<Record<string, unknown>>(docIdForPath(path, settings));
+  if (!doc.deleted) return;
+  const { deleted: _deleted, ...restored } = doc;
+  await putMetadata(db, restored);
 }
 
 /** Modify an EXISTING file's content with optimistic concurrency (ticket 04). Reads

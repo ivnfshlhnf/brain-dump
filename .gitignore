@@ -14,3 +14,7 @@ logs/
 
 # Screenshots of the running app — they show a real vault's Notes
 .scratch/shots/
+
+# Documents pulled back out of CouchDB after the 2026-08-25 deletion (finding 04).
+# Real Note and Dump content — the same reason logs/ and shots/ are ignored.
+.scratch/recovery/

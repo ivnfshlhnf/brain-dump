@@ -9,11 +9,14 @@ import type {
   NoteCandidate,
   Organizer,
   Matcher,
+  DismissedStore,
   PendingDump,
   PendingStore,
+  StrandedDump,
+  StrandedReason,
   Settings,
 } from './types';
-import { writeFile, modifyFile, readVaultFiles } from './livesync';
+import { writeFile, modifyFile, readVaultFiles, restoreFile } from './livesync';
 import { noopLog, type Log } from './logger';
 import { findRelated, type RelatedDeps } from './related';
 
@@ -878,7 +881,9 @@ export async function recoverPending(deps: RecoverDeps): Promise<RecoveryResult>
   log({ op: 'recover', message: 'recovery started', detail: { due: due.length } });
 
   // One Vault read for the whole run, and only when there is something to recover.
-  const vault = due.length ? await readVaultState(deps) : { dumps: new Map(), referenced: new Set() };
+  const vault: VaultState = due.length
+    ? await readVaultState(deps)
+    : { dumps: new Map(), referenced: new Set(), deletedRefs: new Map() };
 
   for (const record of due) {
     const path = dumpPath(record.dump, deps.settings);
@@ -898,7 +903,9 @@ export async function recoverPending(deps: RecoverDeps): Promise<RecoveryResult>
       // updates the record, so a death between those two leaves the Context only in the
       // Vault. Consequence worth knowing: this makes the Vault authoritative for the
       // thought, so a Dump file edited by hand in Obsidian is what gets Organized here.
-      const dump = vault.dumps.get(path) ?? record.dump;
+      // `referenced` counts live Notes only, so a Dump whose Note has since been deleted
+      // is recovered rather than treated as filed.
+      const dump = vault.dumps.get(path)?.dump ?? record.dump;
       const dumpWrite = await writeDump(dump, deps);
       const note = await organizeNote(dump, deps.organizer, deps.settings);
       const noteWrite = await writeNote(note, deps.db, deps.settings, deps.hash);
@@ -988,25 +995,42 @@ export function parseDumpFile(content: string): Dump | null {
   };
 }
 
-/** One read of both Managed folders: the Dumps that exist, and the Dumps that Notes cite. */
-async function readVaultState(
-  deps: StoreDeps,
-): Promise<{ dumps: Map<string, Dump>; referenced: Set<string> }> {
+/** One read of both Managed folders, deleted documents included — reconciliation is the
+ *  one caller that must see them, because a deleted Note is one of the things it reports.
+ *
+ *  `referenced` holds only the Dumps cited by a **live** Note: a deleted Note does not
+ *  file anything. `deletedRefs` maps a cited Dump to the deleted Note that cites it, so a
+ *  Dump orphaned by a deletion can name the document to restore. */
+interface VaultState {
+  dumps: Map<string, { dump: Dump; deleted: boolean }>;
+  referenced: Set<string>;
+  deletedRefs: Map<string, string>;
+}
+
+async function readVaultState(deps: StoreDeps): Promise<VaultState> {
   const { managedFolder, dumpsFolder } = deps.settings;
   const files = await readVaultFiles(
     deps.db,
     (path) => path.startsWith(`${managedFolder}/`) || path.startsWith(`${dumpsFolder}/`),
+    { includeDeleted: true },
   );
-  const dumps = new Map<string, Dump>();
+
+  const dumps = new Map<string, { dump: Dump; deleted: boolean }>();
   for (const file of files) {
     if (!file.path.startsWith(`${dumpsFolder}/`)) continue;
     const dump = parseDumpFile(file.content);
-    if (dump) dumps.set(file.path, dump);
+    if (dump) dumps.set(file.path, { dump, deleted: !!file.deleted });
   }
-  const referenced = referencedDumpLinks(
-    files.filter((f) => f.path.startsWith(`${managedFolder}/`)),
-  );
-  return { dumps, referenced };
+
+  const notes = files.filter((f) => f.path.startsWith(`${managedFolder}/`));
+  const referenced = referencedDumpLinks(notes.filter((f) => !f.deleted));
+  const deletedRefs = new Map<string, string>();
+  for (const note of notes.filter((f) => f.deleted)) {
+    for (const link of referencedDumpLinks([note])) {
+      if (!deletedRefs.has(link)) deletedRefs.set(link, note.path);
+    }
+  }
+  return { dumps, referenced, deletedRefs };
 }
 
 export interface ReconcileDeps extends StoreDeps {
@@ -1014,6 +1038,9 @@ export interface ReconcileDeps extends StoreDeps {
    *  known, and recovery is about to deal with them. Omit it and every unreferenced Dump in
    *  the Vault is reported, which is what a test asking only about the Vault wants. */
   pending?: PendingStore;
+  /** Optional. Dumps the user has decided not to file are excluded — that is the whole
+   *  point of dismissing one. */
+  dismissed?: DismissedStore;
 }
 
 /** Every Dump in the Vault that no Note cites — the thoughts the app took and never
@@ -1022,19 +1049,58 @@ export interface ReconcileDeps extends StoreDeps {
  *
  *  Dumps already in the Pending store are excluded: they are known, and recovery is
  *  about to deal with them. Oldest first. */
-export async function findStrandedDumps(deps: ReconcileDeps): Promise<Dump[]> {
-  const { dumps, referenced } = await readVaultState(deps);
+export async function findStrandedDumps(deps: ReconcileDeps): Promise<StrandedDump[]> {
+  const { dumps, referenced, deletedRefs } = await readVaultState(deps);
   const records = deps.pending ? await deps.pending.list() : [];
   const known = new Set(records.map((r) => r.dump.id));
-  const stranded: Dump[] = [];
-  for (const [path, dump] of dumps) {
-    if (referenced.has(wikilink(path)) || known.has(dump.id)) continue;
-    stranded.push(dump);
+  const dismissed = new Set(deps.dismissed ? await deps.dismissed.list() : []);
+
+  const stranded: StrandedDump[] = [];
+  for (const [path, { dump, deleted }] of dumps) {
+    const link = wikilink(path);
+    // A live Note cites it: filed, whatever else is true.
+    if (referenced.has(link)) continue;
+    if (known.has(dump.id) || dismissed.has(dump.id)) continue;
+    const notePath = deletedRefs.get(link);
+    // The Dump's own deletion outranks its Note's: restoring the Note alone would leave
+    // the thought itself out of the Vault.
+    const reason: StrandedReason = deleted ? 'dump-deleted' : notePath ? 'note-deleted' : 'unfiled';
+    stranded.push({ dump, reason, ...(notePath ? { notePath } : {}) });
   }
+
   (deps.log ?? noopLog)({
     op: 'reconcile',
     message: 'Vault reconciled',
-    detail: { dumps: dumps.size, referenced: referenced.size, stranded: stranded.length },
+    detail: {
+      dumps: dumps.size,
+      referenced: referenced.size,
+      stranded: stranded.length,
+      byReason: stranded.reduce<Record<string, number>>(
+        (acc, s) => ({ ...acc, [s.reason]: (acc[s.reason] ?? 0) + 1 }),
+        {},
+      ),
+    },
   });
-  return stranded.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+  return stranded.sort(
+    (a, b) => a.dump.createdAt - b.dump.createdAt || a.dump.id.localeCompare(b.dump.id),
+  );
+}
+
+/** Undo the deletion that stranded a Dump: bring back the Note, and the Dump too when it
+ *  was deleted as well. A soft delete keeps every chunk, so this restores the documents
+ *  exactly as they were — the user's edits included — and spends no LLM call.
+ *
+ *  Restoring a Dump whose Note was never written is meaningless, so `unfiled` is a no-op
+ *  here: that one wants Organize, not restore. */
+export async function restoreStranded(stranded: StrandedDump, deps: StoreDeps): Promise<void> {
+  const log = deps.log ?? noopLog;
+  if (stranded.reason === 'dump-deleted') {
+    await restoreFile(deps.db, dumpPath(stranded.dump, deps.settings), deps.settings);
+  }
+  if (stranded.notePath) await restoreFile(deps.db, stranded.notePath, deps.settings);
+  log({
+    op: 'reconcile',
+    message: 'restored a deleted document',
+    detail: { dumpId: stranded.dump.id, reason: stranded.reason, notePath: stranded.notePath },
+  });
 }

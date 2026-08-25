@@ -5,13 +5,17 @@
 import type { Dump, PendingDump } from './types';
 
 const DB_NAME = 'brain-dump';
-const VERSION = 3; // v1: settings; v2: + outbox; v3: outbox entries become PendingDump records
+const VERSION = 4; // v1: settings; v2: + outbox; v3: outbox entries become PendingDump records; v4: + dismissed
 
 export const SETTINGS_STORE = 'settings';
 /** The Pending store. The *key* is still `outbox` — the name it was created under in v2 —
  *  so no data has to move for the rename. The vocabulary changed (CONTEXT.md: Pending),
  *  the bytes did not. */
 export const PENDING_STORE = 'outbox';
+/** Dumps the user has seen in the Stranded list and chosen not to file. Their own store
+ *  rather than a `reason` on a Pending record: a Dismissed Dump is not Pending — no Note
+ *  is coming for it — and CONTEXT.md keeps those two words apart. */
+export const DISMISSED_STORE = 'dismissed';
 
 /** Open the app database, creating any missing object stores. Opened per operation
  *  rather than cached, so a store handle never outlives the connection it holds. */
@@ -23,6 +27,7 @@ export function openAppDb(): Promise<IDBDatabase> {
       // Tolerant of upgrading from v1 (where `settings` already exists).
       if (!db.objectStoreNames.contains(SETTINGS_STORE)) db.createObjectStore(SETTINGS_STORE);
       if (!db.objectStoreNames.contains(PENDING_STORE)) db.createObjectStore(PENDING_STORE);
+      if (!db.objectStoreNames.contains(DISMISSED_STORE)) db.createObjectStore(DISMISSED_STORE);
       if (event.oldVersion >= 2 && event.oldVersion < 3) migrateBareDumps(req.transaction);
     };
     req.onsuccess = () => resolve(req.result);

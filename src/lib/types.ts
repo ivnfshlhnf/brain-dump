@@ -171,6 +171,34 @@ export interface PendingStore {
   remove(id: string): Promise<void>;
 }
 
+/** Why a Dump appears in the Stranded list (CONTEXT.md: Stranded).
+ *
+ *  - `unfiled`      — no Note was ever written for it.
+ *  - `note-deleted` — a Note was written and has since been deleted.
+ *  - `dump-deleted` — the Dump document itself has been deleted.
+ *
+ *  The last two exist because Obsidian's own sync can delete what the app wrote
+ *  (dogfooding finding 04), and a thought removed by something other than the user is
+ *  exactly what this list is for. */
+export type StrandedReason = 'unfiled' | 'note-deleted' | 'dump-deleted';
+
+/** A Dump in the Vault that no live Note cites, and why. */
+export interface StrandedDump {
+  dump: Dump;
+  reason: StrandedReason;
+  /** The Note that cites this Dump, when one exists but has been deleted — the document
+   *  to restore. Absent when no Note was ever written. */
+  notePath?: string;
+}
+
+/** Dumps the user has decided not to file. Dismissing is a note to self: it writes
+ *  nothing to the Vault, and the Dump stays exactly where it is (see `dismissed.ts`). */
+export interface DismissedStore {
+  dismiss(id: string): Promise<void>;
+  list(): Promise<string[]>;
+  restore(id: string): Promise<void>;
+}
+
 /** A minimal read/write interface over the LiveSync CouchDB store.
  *  Satisfied by a PouchDB instance (http adapter in the app, memory adapter in tests). */
 export interface DocStore {

@@ -36,6 +36,10 @@ _Avoid_: queued, outbox, in progress, unprocessed
 A Pending Dump the app has stopped working on — the Organize failed repeatedly, or an interruption ended the session that would have finished it. Stranded is the app admitting it took a thought and did not file it, so it is always surfaced and never silent. The thought itself is safe in the Vault; what is missing is the Note, and it will not appear without a retry.
 _Avoid_: orphaned, lost, failed, abandoned
 
+**Dismissed**:
+A Stranded Dump the user has decided not to file. Dismissing is a note to self and nothing more: the Dump stays exactly where it is in the Vault, unchanged and still readable. It means "stop telling me about this", never "destroy this thought" — removing a thought is something only the user does, in their own editor.
+_Avoid_: ignored, archived, deleted, skipped
+
 **Append**:
 Adding a Dump's content to an existing Note, rather than founding a new Note. A Dump either founds a new Note or Appends to an existing one.
 _Avoid_: merge, update, edit

@@ -11,12 +11,14 @@
     adoptInterrupted,
     retryPending,
     findStrandedDumps,
+    restoreStranded,
     organizeDump,
     dumpPath,
     isStranded,
     type CaptureSession,
   } from './lib/operations';
   import { createIndexedDbPendingStore } from './lib/pending';
+  import { createIndexedDbDismissedStore } from './lib/dismissed';
   import { retrieve } from './lib/retrieve';
   import { createOrganizer, createMatcher, createEmbedder, createAnswerer, createRelater } from './lib/llm';
   import { defaultSha1Hex } from './lib/livesync';
@@ -33,6 +35,7 @@
     type Dump,
     type Note,
     type PendingDump,
+    type StrandedDump,
   } from './lib/types';
 
   // Diagnostics. In dev the sink POSTs each event to the Vite middleware, which appends
@@ -133,7 +136,8 @@
   let recovering = false;
   // Vault reconciliation (Config): the Dumps no Note cites, found by asking the Vault
   // rather than this device's Pending store. Manual — see the hint beside the button.
-  let strandedInVault: Dump[] = [];
+  const dismissed = createIndexedDbDismissedStore();
+  let strandedInVault: StrandedDump[] = [];
   let reconciled = false;
   let reconciling = false;
   let organizingStranded = '';
@@ -464,7 +468,7 @@
   async function findStranded() {
     reconciling = true;
     try {
-      strandedInVault = await findStrandedDumps({ ...storeDeps() });
+      strandedInVault = await findStrandedDumps({ ...storeDeps(), dismissed });
       reconciled = true;
       status = strandedInVault.length
         ? `${strandedInVault.length} stranded ${strandedInVault.length === 1 ? 'Dump' : 'Dumps'} in the Vault.`
@@ -481,13 +485,8 @@
   async function organizeStranded(dump: Dump) {
     organizingStranded = dump.id;
     try {
-      const result = await organizeDump(dump, {
-        db: createRemoteDb(settings),
-        settings,
-        organizer: createOrganizer(settings, log),
-        hash: defaultSha1Hex,
-      });
-      strandedInVault = strandedInVault.filter((d) => d.id !== dump.id);
+      const result = await organizeDump(dump, { ...storeDeps(), organizer: createOrganizer(settings, log) });
+      strandedInVault = strandedInVault.filter((s) => s.dump.id !== dump.id);
       status = `Saved Note: ${result.note.title}`;
     } catch (e) {
       status = `Could not Organize that Dump: ${(e as Error).message}`;
@@ -496,8 +495,38 @@
     }
   }
 
+  /** Bring back what was deleted. The documents kept their content, so this costs no LLM
+   *  call and returns the Note that existed — edits included — rather than a new one. */
+  async function restoreDeleted(stranded: StrandedDump) {
+    organizingStranded = stranded.dump.id;
+    try {
+      await restoreStranded(stranded, storeDeps());
+      strandedInVault = strandedInVault.filter((s) => s.dump.id !== stranded.dump.id);
+      status = 'Restored.';
+    } catch (e) {
+      status = `Could not restore: ${(e as Error).message}`;
+    } finally {
+      organizingStranded = '';
+    }
+  }
+
+  /** "Stop telling me about this." Writes nothing to the Vault — the Dump stays exactly
+   *  where it is, and deleting it for real is one tap in Obsidian. */
+  async function dismissStranded(stranded: StrandedDump) {
+    try {
+      await dismissed.dismiss(stranded.dump.id);
+      strandedInVault = strandedInVault.filter((s) => s.dump.id !== stranded.dump.id);
+      status = 'Dismissed — the Dump is untouched in your Vault.';
+    } catch (e) {
+      status = `Could not dismiss: ${(e as Error).message}`;
+    }
+  }
+
+  /** Only the ones Organize applies to: a deleted document wants restoring, not a new Note. */
+  $: unfiledStranded = strandedInVault.filter((s) => s.reason === 'unfiled');
+
   async function organizeAllStranded() {
-    for (const dump of strandedInVault.slice()) await organizeStranded(dump);
+    for (const s of unfiledStranded.slice()) await organizeStranded(s.dump);
   }
 
   // Retrieve reads the whole vault (personal notes included) and writes nothing —
@@ -877,7 +906,10 @@
       A Stranded Dump reached the Vault but never became a Note. The app retries the ones it
       knows about on its own; this asks the <strong>Vault</strong> instead, which is the only
       thing that knows about Dumps captured on another device or before this check existed.
-      Organizing one makes a real request and <strong>spends LLM credit</strong>.
+      Organizing one makes a real request and <strong>spends LLM credit</strong>. Restoring a
+      deleted document costs nothing — the content was never gone, only marked — and brings
+      back the Note that existed rather than writing a new one. Dismiss writes nothing to the
+      Vault: it only stops this list mentioning the Dump again.
     </p>
     {#if strandedRecords.length}
       <ul class="stranded">
@@ -898,9 +930,9 @@
       <button on:click={findStranded} disabled={reconciling}>
         {reconciling ? 'Reading the Vault…' : 'Find stranded Dumps'}
       </button>
-      {#if strandedInVault.length > 1}
+      {#if unfiledStranded.length > 1}
         <button on:click={organizeAllStranded} disabled={!!organizingStranded}>
-          Organize all {strandedInVault.length}
+          Organize all {unfiledStranded.length}
         </button>
       {/if}
     </div>
@@ -909,16 +941,40 @@
         <!-- Which thought, not just how many: "1 Dump couldn't be Organized" is a
              notification you cannot act on. The link opens the Dump in Obsidian, so the
              answer to "do I still care about this?" is one tap away. -->
+        <!-- One list, three states. They are one question — which of my thoughts are not
+             in my Vault? — so splitting them would make you look in two places to answer
+             it. Each row says which state it is in and offers only the action that fits:
+             a Dump nobody ever filed wants Organize, a deleted one wants its document
+             back. -->
         <ul class="stranded">
-          {#each strandedInVault as d (d.id)}
+          {#each strandedInVault as s (s.dump.id)}
             <li>
-              <a class="vault-link stranded-when" href={obsidianUrl(settings.vaultName, dumpPath(d, settings))}>
-                {new Date(d.createdAt).toLocaleString()}
+              <a class="vault-link stranded-when" href={obsidianUrl(settings.vaultName, dumpPath(s.dump, settings))}>
+                {new Date(s.dump.createdAt).toLocaleString()}
               </a>
-              <span class="stranded-text">{firstLine(d.content)}</span>
-              <button on:click={() => organizeStranded(d)} disabled={!!organizingStranded}>
-                {organizingStranded === d.id ? 'Organizing…' : 'Organize'}
-              </button>
+              <span class="stranded-text">
+                {firstLine(s.dump.content)}
+                <br />
+                <span class="detail">
+                  {#if s.reason === 'unfiled'}
+                    never became a Note
+                  {:else if s.reason === 'note-deleted'}
+                    its Note was deleted — {s.notePath}
+                  {:else}
+                    the Dump and its Note were both deleted
+                  {/if}
+                </span>
+              </span>
+              {#if s.reason === 'unfiled'}
+                <button on:click={() => organizeStranded(s.dump)} disabled={!!organizingStranded}>
+                  {organizingStranded === s.dump.id ? 'Organizing…' : 'Organize'}
+                </button>
+              {:else}
+                <button on:click={() => restoreDeleted(s)} disabled={!!organizingStranded}>
+                  {organizingStranded === s.dump.id ? 'Restoring…' : 'Restore'}
+                </button>
+              {/if}
+              <button on:click={() => dismissStranded(s)} disabled={!!organizingStranded}>Dismiss</button>
             </li>
           {/each}
         </ul>

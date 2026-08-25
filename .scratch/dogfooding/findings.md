@@ -322,3 +322,100 @@ prompt carries the clause, and an env-gated real-model symptom test
 (`tests/organize-faithfulness-smoke.test.ts`) asserts no invention against the live model. The
 model and the missing length constraint were secondary; the faithfulness clause subsumes them for
 this symptom.
+
+---
+
+## 04 — Obsidian deleted five documents the app had written
+
+**Date:** 2026-08-25
+
+**What I saw:** Obsidian on the phone flashed an error saying a Note was corrupted —
+`Brain Dump/2026-08-24-semekar-s-adenium-grind-adjustment-notes.md`. Minutes earlier, **Find
+stranded Dumps** had reported 2 Stranded Dumps where the vault on the laptop said 4. The two
+turned out to be the same event: LiveSync on the phone **deleted five documents the app had
+written** — four Notes and one Dump — and none of them had ever reached that phone's storage.
+
+```
+_dumps/20260824-081958-7d88b5.md                              ← a Dump, and its only copy
+Brain Dump/2026-08-23-improving-note-quality-from-brain-dumps.md
+Brain Dump/2026-08-24-claude-code-session-switching-issue.md
+Brain Dump/2026-08-24-old-coffee-for-cold-brew.md
+Brain Dump/2026-08-24-semekar-s-adenium-grind-adjustment-notes.md
+```
+
+**What I expected:** a Note the app wrote to stay written. Principle 1 says the thought survives
+whatever else fails; nothing in it anticipated the Vault's own sync plugin removing the Note.
+
+**Evidence:**
+
+- The phone's LiveSync log, all five within the same second at 11:42:49 local:
+  ```
+  [SF:OfflineScanner] NEWER_WINS: Treating missing local file as deletion (<path>)
+  [SF:OfflineScanner] DELETE DATABASE: <path>
+  [ServiceFileHandler] File <path> is missing on storage; deleting from the database by path
+  Entry removed: [DEL] <path>
+  ```
+  The plugin found five documents in its database with no matching file in the phone's vault
+  storage, and its `NEWER_WINS` policy read "no file" as "the user deleted this".
+- The five are **exactly** the gap measured 17 minutes earlier. The app's own reconcile line at
+  04:25:51 UTC (11:25 local) reads `{"dumps": 16, "referenced": 14, "stranded": 2}`; the laptop's
+  disk held 15 Dumps and 10 `source:` references. The delta — one Dump, four Notes — is this list.
+- Three of the four Notes are the ones that made `673efa`, `23f61b` and `ce968a` *not* appear as
+  Stranded at 11:25. They existed then. They were deleted at 11:42.
+- Every deleted document was written by brain-dump. Nothing under `memos/` — 45 files the app has
+  never touched — was affected.
+- Not caused by the app: `logs/brain-dump.jsonl` for 2026-08-25 contains three events, all
+  `reconcile`, all read-only. The app wrote nothing that day. The Pending store landing the same
+  morning is a coincidence of timing, not a cause.
+
+**What held:** the content. LiveSync's delete is a **soft** delete — the CouchDB document keeps
+`type`, `size`, `ctime`, its `children` chunk ids and every chunk, and only gains `deleted: true`
+at rev 2 or 3. All five were recovered whole and byte-verified into `.scratch/recovery/`,
+including the Dump that exists nowhere else:
+
+> semekar's adenium eastern beans roasted di 14 august di grind 0.4 nyangkut banget, padahal
+> kayaknya kemarin aman2 aja, lg coba ke grind 0.5.2, malah kecepetan, 25s for 40gr out...
+
+**Times seen:** 1 session; 5 documents in it.
+
+**Two code facts found while looking** (established, from the source):
+
+- **`settings.hashAlgorithm` is never read.** `src/lib/types.ts:198` declares it
+  `'sha1' | 'xxhash'` with the comment *"must match the user's LiveSync chunk hash"*, and
+  `App.svelte` passes `defaultSha1Hex` at all four call sites unconditionally. The app always
+  writes sha1-derived chunk ids whatever the setting says. The phone's LiveSync reports
+  `hashAlg is xxhash64`.
+- **The app has no concept of LiveSync's `deleted` flag.** The string appears nowhere in `src`
+  or `tests`. `readVaultFiles` (`src/lib/livesync.ts`) filters on `type === 'plain'` and
+  `children.length` only, so a soft-deleted document reads as a live one. Consequences today:
+  Retrieve can answer from a deleted Note and cite it; `readNoteCandidates` can suggest Appending
+  to a deleted Note; and reconciliation counts a deleted Note's `source:` line as filing its
+  Dump, so a Dump whose Note has been deleted does **not** appear as Stranded.
+
+**Not yet established:** why the five files were missing from the phone's storage in the first
+place. Candidates, none confirmed — the app wrote them to CouchDB while that phone's Obsidian was
+not running and they were never materialised; iCloud evicted the local copies from the vault
+folder; or LiveSync refused to write them because it judged them corrupt, which would make the
+"corrupted" toast the cause of the deletion rather than a symptom of it. The sha1/xxhash64
+mismatch above is a candidate for that last one, but ten other app-written files *did* materialise
+on the laptop, so it cannot be uniformly fatal. Deliberately not diagnosed here.
+
+**How to observe the rest, next time:** before opening Obsidian on a device that has been away,
+note whether the app-written files are present in that device's vault folder. If the toast
+appears, screenshot it *and* open the LiveSync log pane immediately (`Show log`) — the
+`OfflineScanner` lines are only in the log, and they name every path it is about to delete. The
+CouchDB side is checkable at any time: a document with `deleted: true` is a soft delete and its
+chunks are still there until compaction runs.
+
+**Resolved since (2026-08-25):** the second code fact is fixed. `readVaultFiles` now honours
+the `deleted` flag and excludes soft-deleted documents by default, so Retrieve can no longer
+answer from a deleted Note or cite one, and Append cannot suggest merging into one.
+Reconciliation is the single caller that opts back in (`includeDeleted`), because a deleted
+Note is one of the things it exists to report. It now returns a state per Dump — `unfiled`,
+`note-deleted`, `dump-deleted` — and offers Restore (an un-delete: no LLM call, the exact
+Note that existed) or Dismiss (a note to self; the Vault is untouched). Run against a mirror
+of the real CouchDB it reports all six: 2 unfiled, 3 note-deleted, 1 dump-deleted.
+
+**Still open:** the dead `hashAlgorithm` setting, and the question this finding was really
+about — why five documents the app wrote never materialised on any device. Nothing here
+prevents it happening again; it only means the app now *sees* it.

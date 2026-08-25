@@ -20,6 +20,8 @@ import {
   adoptInterrupted,
   retryPending,
   findStrandedDumps,
+  restoreStranded,
+  sourceWikilink,
   parseDumpFile,
   dumpFileContent,
   dumpPath,
@@ -30,6 +32,7 @@ import {
   CAPTURE_RETRY_MESSAGE,
 } from '../src/lib/operations';
 import { createIndexedDbPendingStore } from '../src/lib/pending';
+import { createIndexedDbDismissedStore } from '../src/lib/dismissed';
 import { docIdForPath } from '../src/lib/livesync';
 import {
   DEFAULT_SETTINGS,
@@ -602,7 +605,8 @@ describe('Vault reconciliation', () => {
 
     const stranded = await findStrandedDumps({ db, settings, hash: sha1Hex, pending });
 
-    expect(stranded.map((d) => d.content)).toEqual([strandedDump.content]);
+    expect(stranded.map((s) => s.dump.content)).toEqual([strandedDump.content]);
+    expect(stranded.map((s) => s.reason)).toEqual(['unfiled']);
   });
 
   it('ignores a Dump that a Note already cites', async () => {
@@ -698,5 +702,138 @@ describe('durability', () => {
     expect(records[0].reason).toBe('offline');
     expect(records[0].attempts).toBe(0);
     expect(records[0].enrolledAt).toBe(fixedNow);
+  });
+});
+
+// --- Deleted documents (dogfooding finding 04) ---------------------------
+// Obsidian LiveSync deletes softly: the document keeps its chunks and gains
+// `deleted: true`. Five documents the app had written were removed that way, and the
+// app could not see it — so a Dump whose Note had been deleted looked filed, and
+// Retrieve would still answer from the deleted Note.
+describe('deleted documents', () => {
+  const strandedDump: Dump = {
+    id: '7d88b526-c399-422e-8538-60741ccb885a',
+    content: 'semekar adenium di grind 0.4 nyangkut banget',
+    context: '',
+    createdAt: fixedNow,
+    modality: 'text',
+  };
+
+  /** Write a file, then soft-delete it the way LiveSync does. */
+  async function writeAndDelete(path: string, content: string): Promise<void> {
+    const { writeFile, docIdForPath } = await import('../src/lib/livesync');
+    await writeFile(db, path, content, { ctime: fixedNow, mtime: fixedNow, hash: sha1Hex, settings });
+    const doc = await db.get<Record<string, unknown>>(docIdForPath(path, settings));
+    await db.put({ ...doc, deleted: true });
+  }
+
+  async function writeDumpFile(dump: Dump): Promise<void> {
+    const { writeFile } = await import('../src/lib/livesync');
+    await writeFile(db, dumpPath(dump, settings), dumpFileContent(dump), {
+      ctime: dump.createdAt, mtime: dump.createdAt, hash: sha1Hex, settings,
+    });
+  }
+
+  /** A Note citing `dump`, written then soft-deleted. */
+  async function writeAndDeleteNoteFor(dump: Dump, notePath: string): Promise<void> {
+    await writeAndDelete(
+      notePath,
+      `---\ntitle: A Note\nsource: ${sourceWikilink(dump, settings)}\n---\n\nbody\n`,
+    );
+  }
+
+  it('reports a Dump whose Note was deleted, and says so', async () => {
+    await writeDumpFile(strandedDump);
+    await writeAndDeleteNoteFor(strandedDump, 'Brain Dump/2026-08-21-a-note.md');
+
+    const stranded = await findStrandedDumps({ db, settings, hash: sha1Hex });
+
+    expect(stranded).toHaveLength(1);
+    expect(stranded[0].reason).toBe('note-deleted');
+    expect(stranded[0].notePath).toBe('Brain Dump/2026-08-21-a-note.md');
+    expect(stranded[0].dump.content).toContain('semekar');
+  });
+
+  it('reports a Dump that was itself deleted, rather than letting it vanish', async () => {
+    await writeAndDelete(dumpPath(strandedDump, settings), dumpFileContent(strandedDump));
+    await writeAndDeleteNoteFor(strandedDump, 'Brain Dump/2026-08-21-a-note.md');
+
+    const stranded = await findStrandedDumps({ db, settings, hash: sha1Hex });
+
+    expect(stranded).toHaveLength(1);
+    expect(stranded[0].reason).toBe('dump-deleted');
+    // The thought is still readable — a soft delete keeps the chunks.
+    expect(stranded[0].dump.content).toContain('semekar');
+  });
+
+  it('still calls a Dump with no Note at all unfiled', async () => {
+    await writeDumpFile(strandedDump);
+
+    const stranded = await findStrandedDumps({ db, settings, hash: sha1Hex });
+
+    expect(stranded).toHaveLength(1);
+    expect(stranded[0].reason).toBe('unfiled');
+  });
+
+  it('does not report a Dump whose Note is alive', async () => {
+    await writeDumpFile(strandedDump);
+    const { writeFile } = await import('../src/lib/livesync');
+    await writeFile(
+      db,
+      'Brain Dump/2026-08-21-a-note.md',
+      `---\ntitle: A Note\nsource: ${sourceWikilink(strandedDump, settings)}\n---\n\nbody\n`,
+      { ctime: fixedNow, mtime: fixedNow, hash: sha1Hex, settings },
+    );
+
+    expect(await findStrandedDumps({ db, settings, hash: sha1Hex })).toEqual([]);
+  });
+
+  it('keeps deleted Notes out of everything else — Retrieve must not cite one', async () => {
+    const { readVaultFiles } = await import('../src/lib/livesync');
+    await writeAndDelete('Brain Dump/2026-08-21-deleted.md', 'a deleted Note');
+    const { writeFile } = await import('../src/lib/livesync');
+    await writeFile(db, 'Brain Dump/2026-08-21-live.md', 'a live Note', {
+      ctime: fixedNow, mtime: fixedNow, hash: sha1Hex, settings,
+    });
+
+    const visible = await readVaultFiles(db, () => true);
+    expect(visible.map((f) => f.path)).toEqual(['Brain Dump/2026-08-21-live.md']);
+
+    // Reconciliation is the one caller that must see them.
+    const all = await readVaultFiles(db, () => true, { includeDeleted: true });
+    expect(all.map((f) => f.path).sort()).toEqual([
+      'Brain Dump/2026-08-21-deleted.md',
+      'Brain Dump/2026-08-21-live.md',
+    ]);
+    expect(all.find((f) => f.path.endsWith('deleted.md'))?.deleted).toBe(true);
+  });
+
+  it('restores a soft-deleted document, chunks and all', async () => {
+    const { readVaultFiles } = await import('../src/lib/livesync');
+    await writeAndDelete(dumpPath(strandedDump, settings), dumpFileContent(strandedDump));
+    await writeAndDeleteNoteFor(strandedDump, 'Brain Dump/2026-08-21-a-note.md');
+
+    await restoreStranded(
+      { dump: strandedDump, reason: 'dump-deleted', notePath: 'Brain Dump/2026-08-21-a-note.md' },
+      { db, settings, hash: sha1Hex },
+    );
+
+    const live = (await readVaultFiles(db, () => true)).map((f) => f.path).sort();
+    expect(live).toEqual(['Brain Dump/2026-08-21-a-note.md', dumpPath(strandedDump, settings)].sort());
+    expect(await findStrandedDumps({ db, settings, hash: sha1Hex })).toEqual([]);
+  });
+
+  it('stops reporting a Dump the user dismissed, without touching the Vault', async () => {
+    await writeDumpFile(strandedDump);
+    const dismissed = createIndexedDbDismissedStore();
+
+    await dismissed.dismiss(strandedDump.id);
+
+    expect(await findStrandedDumps({ db, settings, hash: sha1Hex, dismissed })).toEqual([]);
+    // Dismissing is a note-to-self, not an edit: the Dump is untouched and still readable.
+    const { readVaultFiles } = await import('../src/lib/livesync');
+    expect(await readVaultFiles(db, () => true)).toHaveLength(1);
+    // And it survives a restart.
+    expect(await createIndexedDbDismissedStore().list()).toEqual([strandedDump.id]);
   });
 });
