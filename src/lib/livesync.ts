@@ -101,11 +101,17 @@ function byteLength(content: string): number {
  *  `deleted` is Obsidian LiveSync's *soft* delete — the document keeps its chunks and is
  *  marked rather than removed, so the content is still readable and the deletion still
  *  replicates. Only reconciliation asks to see these; every other reader is shown the
- *  Vault as the user sees it. */
+ *  Vault as the user sees it.
+ *
+ *  `unreadable` means the document's declared size disagrees with the content it holds, so
+ *  **Obsidian will refuse to write this file to disk** and the user will never see it — even
+ *  though it is present, live, and readable here. A Note in that state looks filed to the app
+ *  and does not exist to its author, which is the worst thing this app can say. */
 export interface VaultFile {
   path: string;
   content: string;
   deleted?: boolean;
+  unreadable?: boolean;
 }
 
 /** Read every file in the vault, reassembling each one's content from its chunks.
@@ -131,6 +137,7 @@ export async function readVaultFiles(
     type?: string;
     children?: string[];
     deleted?: boolean;
+    size?: number;
   }>({ include_docs: true });
   const files: VaultFile[] = [];
   for (const row of all.rows) {
@@ -141,38 +148,49 @@ export async function readVaultFiles(
     const chunks = await Promise.all(
       doc.children.map((id) => db.get<{ data: string }>(id)),
     );
+    const content = chunks.map((c) => c.data).join('');
     files.push({
       path: doc.path,
-      content: chunks.map((c) => c.data).join(''),
+      content,
       ...(doc.deleted ? { deleted: true } : {}),
+      ...(typeof doc.size === 'number' && doc.size !== byteLength(content)
+        ? { unreadable: true }
+        : {}),
     });
   }
   return files;
 }
 
-/** Undo a soft delete: clear the flag and put the document back, keeping its chunks.
- *  The content was never gone — LiveSync marks rather than removes — so this restores the
- *  exact document that was deleted, edits included, and costs no LLM call.
+/** Make a document readable again: clear any soft delete, and correct a declared size that
+ *  disagrees with the content. The content was never gone — LiveSync marks rather than
+ *  removes — so this restores the exact document, edits included, and costs no LLM call.
  *
- *  A no-op for a file that is not deleted, so restoring twice is safe. */
+ *  Both halves are needed, and the size half is needed *on its own*: un-deleting a document
+ *  whose size is wrong hands Obsidian the same file it already called corrupted, and the
+ *  offline scanner deletes it again — which is what happened on the first restore attempt.
+ *  A document can also be live and unreadable, which looks filed to the app and does not
+ *  exist to its author.
+ *
+ *  A no-op when there is nothing wrong, so repairing twice is safe. */
 export async function restoreFile(
   db: DocStore,
   path: string,
   settings: Settings,
 ): Promise<void> {
   const doc = await db.get<Record<string, unknown>>(docIdForPath(path, settings));
-  if (!doc.deleted) return;
-  const { deleted: _deleted, ...restored } = doc;
+  const { deleted, ...rest } = doc;
 
-  // Correct the declared size on the way back. A document deleted for having the wrong one
-  // would otherwise be handed to Obsidian unchanged, called corrupted a second time, and
-  // deleted again — which is exactly what happened on the first restore attempt.
-  const children = (restored.children as string[] | undefined) ?? [];
-  if (children.length) {
-    const chunks = await Promise.all(children.map((id) => db.get<{ data: string }>(id)));
-    restored.size = byteLength(chunks.map((c) => c.data).join(''));
-  }
-  await putMetadata(db, restored);
+  const children = (rest.children as string[] | undefined) ?? [];
+  const size = children.length
+    ? byteLength(
+        (await Promise.all(children.map((id) => db.get<{ data: string }>(id))))
+          .map((c) => c.data)
+          .join(''),
+      )
+    : (rest.size as number | undefined);
+
+  if (!deleted && size === rest.size) return;
+  await putMetadata(db, { ...rest, ...(size === undefined ? {} : { size }) });
 }
 
 /** Modify an EXISTING file's content with optimistic concurrency (ticket 04). Reads

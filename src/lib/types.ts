@@ -173,14 +173,17 @@ export interface PendingStore {
 
 /** Why a Dump appears in the Stranded list (CONTEXT.md: Stranded).
  *
- *  - `unfiled`      — no Note was ever written for it.
- *  - `note-deleted` — a Note was written and has since been deleted.
- *  - `dump-deleted` — the Dump document itself has been deleted.
+ *  - `unfiled`         — no Note was ever written for it.
+ *  - `note-deleted`    — a Note was written and has since been deleted.
+ *  - `dump-deleted`    — the Dump document itself has been deleted.
+ *  - `note-unreadable` — a Note exists and is live, but Obsidian refuses to write it to
+ *                        disk, so the thought is not in the Vault the user can see. The
+ *                        app would otherwise call this filed, which is a lie.
  *
  *  The last two exist because Obsidian's own sync can delete what the app wrote
  *  (dogfooding finding 04), and a thought removed by something other than the user is
  *  exactly what this list is for. */
-export type StrandedReason = 'unfiled' | 'note-deleted' | 'dump-deleted';
+export type StrandedReason = 'unfiled' | 'note-deleted' | 'dump-deleted' | 'note-unreadable';
 
 /** A Dump in the Vault that no live Note cites, and why. */
 export interface StrandedDump {

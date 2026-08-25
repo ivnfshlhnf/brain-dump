@@ -883,7 +883,7 @@ export async function recoverPending(deps: RecoverDeps): Promise<RecoveryResult>
   // One Vault read for the whole run, and only when there is something to recover.
   const vault: VaultState = due.length
     ? await readVaultState(deps)
-    : { dumps: new Map(), referenced: new Set(), deletedRefs: new Map() };
+    : { dumps: new Map(), referenced: new Set(), brokenRefs: new Map() };
 
   for (const record of due) {
     const path = dumpPath(record.dump, deps.settings);
@@ -998,13 +998,13 @@ export function parseDumpFile(content: string): Dump | null {
 /** One read of both Managed folders, deleted documents included — reconciliation is the
  *  one caller that must see them, because a deleted Note is one of the things it reports.
  *
- *  `referenced` holds only the Dumps cited by a **live** Note: a deleted Note does not
- *  file anything. `deletedRefs` maps a cited Dump to the deleted Note that cites it, so a
- *  Dump orphaned by a deletion can name the document to restore. */
+ *  `referenced` holds only the Dumps cited by a Note that is both live **and** readable: a
+ *  Note Obsidian will not write to disk files nothing, however healthy it looks here.
+ *  `brokenRefs` maps a cited Dump to that Note, so the row can name the document to repair. */
 interface VaultState {
   dumps: Map<string, { dump: Dump; deleted: boolean }>;
   referenced: Set<string>;
-  deletedRefs: Map<string, string>;
+  brokenRefs: Map<string, { path: string; deleted: boolean }>;
 }
 
 async function readVaultState(deps: StoreDeps): Promise<VaultState> {
@@ -1023,14 +1023,14 @@ async function readVaultState(deps: StoreDeps): Promise<VaultState> {
   }
 
   const notes = files.filter((f) => f.path.startsWith(`${managedFolder}/`));
-  const referenced = referencedDumpLinks(notes.filter((f) => !f.deleted));
-  const deletedRefs = new Map<string, string>();
-  for (const note of notes.filter((f) => f.deleted)) {
+  const referenced = referencedDumpLinks(notes.filter((f) => !f.deleted && !f.unreadable));
+  const brokenRefs = new Map<string, { path: string; deleted: boolean }>();
+  for (const note of notes.filter((f) => f.deleted || f.unreadable)) {
     for (const link of referencedDumpLinks([note])) {
-      if (!deletedRefs.has(link)) deletedRefs.set(link, note.path);
+      if (!brokenRefs.has(link)) brokenRefs.set(link, { path: note.path, deleted: !!note.deleted });
     }
   }
-  return { dumps, referenced, deletedRefs };
+  return { dumps, referenced, brokenRefs };
 }
 
 export interface ReconcileDeps extends StoreDeps {
@@ -1050,7 +1050,7 @@ export interface ReconcileDeps extends StoreDeps {
  *  Dumps already in the Pending store are excluded: they are known, and recovery is
  *  about to deal with them. Oldest first. */
 export async function findStrandedDumps(deps: ReconcileDeps): Promise<StrandedDump[]> {
-  const { dumps, referenced, deletedRefs } = await readVaultState(deps);
+  const { dumps, referenced, brokenRefs } = await readVaultState(deps);
   const records = deps.pending ? await deps.pending.list() : [];
   const known = new Set(records.map((r) => r.dump.id));
   const dismissed = new Set(deps.dismissed ? await deps.dismissed.list() : []);
@@ -1061,11 +1061,17 @@ export async function findStrandedDumps(deps: ReconcileDeps): Promise<StrandedDu
     // A live Note cites it: filed, whatever else is true.
     if (referenced.has(link)) continue;
     if (known.has(dump.id) || dismissed.has(dump.id)) continue;
-    const notePath = deletedRefs.get(link);
+    const broken = brokenRefs.get(link);
     // The Dump's own deletion outranks its Note's: restoring the Note alone would leave
     // the thought itself out of the Vault.
-    const reason: StrandedReason = deleted ? 'dump-deleted' : notePath ? 'note-deleted' : 'unfiled';
-    stranded.push({ dump, reason, ...(notePath ? { notePath } : {}) });
+    const reason: StrandedReason = deleted
+      ? 'dump-deleted'
+      : !broken
+        ? 'unfiled'
+        : broken.deleted
+          ? 'note-deleted'
+          : 'note-unreadable';
+    stranded.push({ dump, reason, ...(broken ? { notePath: broken.path } : {}) });
   }
 
   (deps.log ?? noopLog)({

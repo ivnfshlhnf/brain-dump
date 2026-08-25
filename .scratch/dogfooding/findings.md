@@ -470,3 +470,16 @@ back, so restoring a document deleted for this reason does not hand Obsidian the
 file again. Locked by `tests/livesync.test.ts`, which asserts the byte length for content with
 an em-dash, an arrow and an emoji, keeps the ASCII case as the reason it hid so long, and
 covers the re-deletion path directly.
+
+**Established since (2026-08-25, from a restore that appeared to work):** a document can be
+**live and unreadable**, and that state was invisible. The first Restore cleared the `deleted`
+flag — the document went to rev 3, undeleted, and reconciliation stopped reporting it, because
+a live Note now cited the Dump. But its `size` was still 1960, so Obsidian went on refusing the
+file and it never reached the disk. The app said filed; the Vault did not have it. That is the
+worst thing this app can say, and it said it silently.
+
+Fixed: `readVaultFiles` now compares each document's declared size against its content and
+marks the mismatch `unreadable`. A Note that is unreadable files nothing, so its Dump is
+reported as `note-unreadable` with a **Repair** action, and `restoreFile` corrects a wrong size
+whether or not the document was ever deleted. Against the live Vault the six now read: 2
+unfiled, 2 note-deleted, 1 dump-deleted, 1 note-unreadable.

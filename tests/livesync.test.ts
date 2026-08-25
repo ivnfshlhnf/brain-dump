@@ -92,3 +92,30 @@ describe('restoreFile', () => {
     expect(await meta('Brain Dump/note.md')).toEqual(before);
   });
 });
+
+describe('a file Obsidian will refuse', () => {
+  const text = 'A Note — with an em-dash';
+
+  it('is reported as unreadable, so a wrong size cannot pass for a filed Note', async () => {
+    const { readVaultFiles } = await import('../src/lib/livesync');
+    await writeFile(db, 'Brain Dump/note.md', text, { ctime: now, mtime: now, hash, settings });
+    const doc = await db.get<Record<string, unknown>>(docIdForPath('Brain Dump/note.md', settings));
+    await db.put({ ...doc, size: text.length }); // what the old code wrote
+
+    const [file] = await readVaultFiles(db, () => true);
+    expect(file.unreadable).toBe(true);
+    expect(file.content).toContain('em-dash'); // the content itself is fine
+  });
+
+  it('is repaired in place, without needing to be deleted first', async () => {
+    await writeFile(db, 'Brain Dump/note.md', text, { ctime: now, mtime: now, hash, settings });
+    const doc = await db.get<Record<string, unknown>>(docIdForPath('Brain Dump/note.md', settings));
+    await db.put({ ...doc, size: text.length });
+
+    await restoreFile(db, 'Brain Dump/note.md', settings);
+
+    expect((await meta('Brain Dump/note.md')).size).toBe(Buffer.byteLength(text, 'utf8'));
+    const { readVaultFiles } = await import('../src/lib/livesync');
+    expect((await readVaultFiles(db, () => true))[0].unreadable).toBeUndefined();
+  });
+});

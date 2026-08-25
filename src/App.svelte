@@ -960,6 +960,8 @@
                     never became a Note
                   {:else if s.reason === 'note-deleted'}
                     its Note was deleted — {s.notePath}
+                  {:else if s.reason === 'note-unreadable'}
+                    its Note exists but Obsidian will not write it — {s.notePath}
                   {:else}
                     the Dump and its Note were both deleted
                   {/if}
@@ -971,7 +973,11 @@
                 </button>
               {:else}
                 <button on:click={() => restoreDeleted(s)} disabled={!!organizingStranded}>
-                  {organizingStranded === s.dump.id ? 'Restoring…' : 'Restore'}
+                  {#if organizingStranded === s.dump.id}
+                    {s.reason === 'note-unreadable' ? 'Repairing…' : 'Restoring…'}
+                  {:else}
+                    {s.reason === 'note-unreadable' ? 'Repair' : 'Restore'}
+                  {/if}
                 </button>
               {/if}
               <button on:click={() => dismissStranded(s)} disabled={!!organizingStranded}>Dismiss</button>
