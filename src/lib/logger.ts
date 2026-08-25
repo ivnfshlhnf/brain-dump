@@ -14,7 +14,8 @@
 export type LogLevel = 'info' | 'error';
 
 /** One thing that happened, with enough context to act on it. `op` names the operation
- *  (`capture`, `organize`, `write`, `drain`, `retrieve`, `http`), `detail` carries the
+ *  (`capture`, `organize`, `write`, `pending`, `recover`, `reconcile`, `retrieve`,
+ *  `http`), `detail` carries the
  *  specifics — for an HTTP failure, the *resolved* URL, which is what makes a
  *  misconfigured provider self-evident rather than a mystery 404. */
 export interface LogEvent {

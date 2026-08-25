@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { expect } from 'vitest';
 import type { DocStore } from '../src/lib/types';
 
-/** SHA-1 hex, matching the app's default chunk hash (hashAlgorithm: 'sha1') and the
+/** SHA-1 hex, matching the chunk ids the app writes (see `writeFile`) and the
  *  `h:` prefix LiveSync's chunk IDs carry. The reader does not verify this digest (it
  *  fetches children by _id, not by recomputing the hash), so callers assert the `h:`
  *  convention and the children↔leaf linkage, not the digest value. */

@@ -1,7 +1,7 @@
 // "Test connection" — the external dependencies, checked independently.
 //
 // Every failure the app has hit in real use has been a configuration failure, and each
-// one was discovered the same way: by losing a capture into the outbox and reading a
+// one was discovered the same way: by losing a capture into the Pending store and reading a
 // stack trace. These checks move that discovery to the Config screen, before a thought
 // is at stake.
 //

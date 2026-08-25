@@ -9,10 +9,14 @@ import type {
   NoteCandidate,
   Organizer,
   Matcher,
-  OutboxStore,
+  DismissedStore,
+  PendingDump,
+  PendingStore,
+  StrandedDump,
+  StrandedReason,
   Settings,
 } from './types';
-import { writeFile, modifyFile, readVaultFiles } from './livesync';
+import { writeFile, modifyFile, readVaultFiles, restoreFile } from './livesync';
 import { noopLog, type Log } from './logger';
 import { findRelated, type RelatedDeps } from './related';
 
@@ -110,10 +114,9 @@ export async function capture(text: string, deps: CaptureDeps): Promise<CaptureR
 
 /** Write a Dump to the Dumps folder in LiveSync format. Idempotent for a given Dump:
  *  the path is derived from its id and capture time, so re-writing the same Dump
- *  (a Context edit, or a retried outbox sync) rewrites that one file. */
+ *  (a Context edit, or a retried recovery) rewrites that one file. */
 export async function writeDump(dump: Dump, deps: StoreDeps): Promise<WriteResult> {
-  const path = `${deps.settings.dumpsFolder}/${dumpFilename(dump.createdAt, dump.id)}`;
-  return writeAt(deps.db, path, dumpFileContent(dump), dump.createdAt, deps);
+  return writeAt(deps.db, dumpPath(dump, deps.settings), dumpFileContent(dump), dump.createdAt, deps);
 }
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -126,6 +129,12 @@ export function dumpFilename(createdAt: number, id: string): string {
   )}${pad2(d.getUTCMinutes())}${pad2(d.getUTCSeconds())}`;
   const short = id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 6);
   return `${stamp}-${short}.md`;
+}
+
+/** The vault-relative path a Dump is written to. Derived from its id and capture time, so
+ *  it is the same path on every device and on every rewrite of the same Dump. */
+export function dumpPath(dump: Dump, settings: Settings): string {
+  return `${settings.dumpsFolder}/${dumpFilename(dump.createdAt, dump.id)}`;
 }
 
 /** Minimal frontmatter + the verbatim original in a `## Original` section, plus a
@@ -212,7 +221,7 @@ export function wikilink(path: string): string {
 
 /** Obsidian wikilink to the source Dump. */
 export function sourceWikilink(dump: Dump, settings: Settings): string {
-  return wikilink(`${settings.dumpsFolder}/${dumpFilename(dump.createdAt, dump.id)}`);
+  return wikilink(dumpPath(dump, settings));
 }
 
 /** The v1 frontmatter block (the `---`-fenced schema), with the blank-line separator
@@ -280,7 +289,11 @@ export interface BeginCaptureDeps extends CaptureDeps {
 }
 
 /** Deps to add Context to a session's Dump (rewrite the Dump file). */
-export type ContextDeps = StoreDeps;
+export interface ContextDeps extends StoreDeps {
+  /** Kept in step with the Dump, so a recovery started after the app dies Organizes the
+   *  thought the user actually finished writing, not the one they started. */
+  pending?: PendingStore;
+}
 
 /** Deps to finalize a session (final Organize + write/append the Note). `now` stamps
  *  the appended section and the file mtime on the append path. */
@@ -296,6 +309,8 @@ export interface FinalizeDeps {
    *  existing tests are unaffected. */
   embedder?: Embedder;
   relater?: Relater;
+  /** The Dump stops being Pending here, and only here: the Note now exists. */
+  pending?: PendingStore;
 }
 
 /** Begin a capture review session: save the verbatim Dump immediately, run the
@@ -327,6 +342,8 @@ export async function addContext(
 
   const dump: Dump = { ...session.dump, context: ctx };
   await writeDump(dump, deps);
+  const record = await deps.pending?.get(dump.id);
+  if (record) await deps.pending?.save({ ...record, dump });
 
   return { ...session, dump };
 }
@@ -366,8 +383,17 @@ export async function finalizeCapture(
       session.match.kind === 'append' && session.match.suggestion
         ? await appendDumpToNote(note, session.match.suggestion.path, deps)
         : await writeNote(note, deps.db, deps.settings, deps.hash);
+    // The Note exists, so the Dump is no longer Pending. If this dequeue is the thing
+    // that fails, recovery's already-cited check dequeues it later without a second Note.
+    await deps.pending?.remove(session.dump.id);
     return { ok: true, note, written, session: { ...session, saved: true } };
   } catch (error) {
+    // The Dump stays Pending, and this counts as an attempt like any other: it is the one
+    // failure the user is actually watching, so it must back off and be retried on the
+    // timer rather than sit at `in-flight` waiting for a restart to notice it. The open
+    // session is excluded from recovery, so the retry cannot race the user's own save.
+    const record = await deps.pending?.get(session.dump.id);
+    if (record) await recordFailure(record, error as Error, deps.pending!, deps.now());
     return { ok: false, note, error: error as Error, session: { ...session, saved: false } };
   }
 }
@@ -601,55 +627,82 @@ export async function refreshNoteMetadata(
   return { path: notePath, metadataId, chunkId };
 }
 
-// --- Offline outbox (ticket 05) ------------------------------------------
-// Organize is an online-time step: a Capture with no connection cannot produce a
-// preview, so the Dump is queued in the IndexedDB outbox and the user is told it is
-// saved and will be Organized on reconnect. On reconnect the queued Dumps sync to
-// CouchDB and are Organized into Notes without the user's involvement.
-//
-// Because an unattended drain has nobody to confirm an append with (the one-tap
-// new-vs-append confirm from ticket 04), a drained Dump always founds a new Note.
 
-/** What the user is told when a Capture is queued with no connection. */
-export const OFFLINE_CAPTURE_MESSAGE = 'saved, will organize when online';
+// --- Pending Dumps and recovery (ticket 05; dogfooding finding 02) --------
+// Every Dump enrols in the Pending store the moment it is Captured and leaves only
+// once its Note exists. Before this, the only Dump the app durably remembered was one
+// it had *failed* to Organize — a capture interrupted mid-flight (the tab backgrounded
+// on a phone, the app closed during the 5s autosave) left no record at all, so the
+// thought sat in the Vault forever with nothing knowing it was never filed. Four Dumps
+// were lost that way before anyone noticed; see `.scratch/dogfooding/findings.md` 02.
+//
+// The store is durability only. Everything below — when a Dump is due, how long to back
+// off, when to stop retrying and call it Stranded — is the policy, kept in one place.
+//
+// Because an unattended recovery has nobody to confirm an append with (the one-tap
+// new-vs-append confirm from ticket 04), a recovered Dump always founds a new Note.
+// The accepted loss: a Dump that was showing an Append suggestion when the app died comes
+// back as a *separate* Note instead of a section in the Note it belonged with. Related is
+// what reconnects the two — Append and Related are the same judgment at two thresholds
+// (CONTEXT.md) — and a stray Note is recoverable where a stalled thought is not.
+
+/** What the user is told when a Capture is made with no connection. */
+export const OFFLINE_CAPTURE_MESSAGE = "saved, will organize when you're back online";
 
 /** What the user is told when a Capture that started online failed and fell back to
- *  the outbox. The user is not offline, so saying so would be a lie — the honest
+ *  the Pending store. The user is not offline, so saying so would be a lie — the honest
  *  promise is a retry. */
 export const CAPTURE_RETRY_MESSAGE = 'saved, will organize on the next retry';
 
-/** Why a Capture ended up in the outbox: there was no connection, or the online
- *  attempt failed mid-flight. The distinction is the user's to see — it is the
- *  difference between "you're offline" and "something went wrong". */
-export type QueuedReason = 'offline' | 'capture-failed';
+/** How long to wait before each successive retry of a failed Organize. Escalating,
+ *  because the failures worth retrying fast (a flaky connection) resolve fast, and the
+ *  ones that do not (a wrong API key, a broken adapter) should not cost an LLM call a
+ *  minute for the rest of the day. */
+export const RETRY_BACKOFF_MS = [60_000, 120_000, 300_000, 900_000];
 
-/** The result of a Capture that may have been offline: either a normal review
- *  session (online — preview + match) or a queued Dump (no preview). */
+/** After this many failed attempts the app stops retrying and the Dump becomes
+ *  Stranded (CONTEXT.md): surfaced with its error, waiting for the user. Retrying
+ *  forever against a permanently broken configuration is both expensive and dishonest —
+ *  the banner would claim progress that is not happening. */
+export const MAX_ORGANIZE_ATTEMPTS = 5;
+
+/** Why a Capture produced no preview: there was no connection, or the online attempt
+ *  failed mid-flight. The distinction is the user's to see — it is the difference between
+ *  "you're offline" and "something went wrong". */
+export type NoPreviewReason = 'offline' | 'capture-failed';
+
+/** The result of a Capture: either a normal review session (online — preview + match) or
+ *  a Pending Dump with no preview. Both leave the Dump Pending; only one of them opens a
+ *  review. */
 export type CaptureOutcome =
   | { kind: 'session'; session: CaptureSession }
-  | { kind: 'queued'; dump: Dump; reason: QueuedReason; message: string; error?: Error };
+  | { kind: 'pending'; dump: Dump; reason: NoPreviewReason; message: string; error?: Error };
 
-export interface OfflineCaptureDeps extends BeginCaptureDeps {
-  outbox: OutboxStore;
+export interface PendingCaptureDeps extends BeginCaptureDeps {
+  pending: PendingStore;
   isOnline: () => boolean;
+  /** Called the instant the Dump is durably Pending — before the Organize is even
+   *  attempted. The UI clears its draft here: from this moment the thought is the app's
+   *  responsibility, and leaving the text in the box invites the user to press Capture
+   *  again, which is exactly how three identical Dumps reached the Vault in finding 02. */
+  onPending?: (dump: Dump) => void;
 }
 
 /** Capture a thought whether or not there is a connection.
  *
- *  Online, this is the normal review flow (`beginCapture`): Dump saved, initial
- *  Organize, preview, new-vs-append match. Offline, the Dump is queued in the outbox
- *  and no preview is produced.
+ *  The Dump enrols as Pending *first*, before anything can fail: online or offline,
+ *  succeeding or not. That ordering is the whole fix. Enrolling only in the failure
+ *  branches — as this did — records nothing when the failure is an interruption, because
+ *  an interruption is not an error: the fetch never settles, so no catch ever runs.
  *
- *  The Dump is never lost: if the capture fails *after* `isOnline()` said yes (the
- *  connection dropped, the LLM is down, the credentials are wrong), it falls back to
- *  the outbox rather than surfacing an error with nothing saved. That outcome is
- *  reported as `capture-failed`, not `offline`, and carries the underlying error —
- *  the caller must not tell an online user they are offline. The queued Dump keeps
- *  the id and capture time the failed attempt used, so a later drain rewrites that
- *  same Dump file rather than creating a second one. */
-export async function captureOrQueue(
+ *  Online, this is the normal review flow (`beginCapture`): Dump saved, initial Organize,
+ *  preview, new-vs-append match. The record stays Pending until the Note is written
+ *  (`finalizeCapture`). Offline, the Dump waits for a connection and no preview is
+ *  produced. The record keeps the id and capture time the attempt used, so a later
+ *  recovery rewrites that same Dump file rather than creating a second one. */
+export async function captureThought(
   text: string,
-  deps: OfflineCaptureDeps,
+  deps: PendingCaptureDeps,
 ): Promise<CaptureOutcome> {
   const content = captureText(text);
   const dump: Dump = {
@@ -663,31 +716,44 @@ export async function captureOrQueue(
   const log = deps.log ?? noopLog;
   log({ op: 'capture', message: 'capture started', detail: { dumpId: dump.id, chars: content.length } });
 
-  if (!deps.isOnline()) {
-    await deps.outbox.add(dump);
-    log({ op: 'capture', message: 'queued (offline)', detail: { dumpId: dump.id } });
-    return { kind: 'queued', dump, reason: 'offline', message: OFFLINE_CAPTURE_MESSAGE };
+  const online = deps.isOnline();
+  await deps.pending.save({
+    dump,
+    reason: online ? 'in-flight' : 'offline',
+    enrolledAt: dump.createdAt,
+    attempts: 0,
+  });
+  log({ op: 'pending', message: 'Dump enrolled as Pending', detail: { dumpId: dump.id, reason: online ? 'in-flight' : 'offline' } });
+  deps.onPending?.(dump);
+
+  if (!online) {
+    return { kind: 'pending', dump, reason: 'offline', message: OFFLINE_CAPTURE_MESSAGE };
   }
 
-  // Pin the id and time the queued Dump already holds, so a fallback and its later
-  // drain address the same Dump file.
+  // Pin the id and time the Pending record already holds, so the attempt and its later
+  // recovery address the same Dump file.
   const pinned: BeginCaptureDeps = { ...deps, now: () => dump.createdAt, newId: () => dump.id };
   try {
     const session = { kind: 'session' as const, session: await beginCapture(content, pinned) };
     log({ op: 'capture', message: 'capture session ready', detail: { dumpId: dump.id } });
     return session;
   } catch (error) {
-    await deps.outbox.add(dump);
-    // The Dump is safe in the outbox; what the user needs to know is *why* the online
-    // path failed, which is almost always the cloud seam or the CouchDB connection.
+    await recordFailure(
+      { dump, reason: 'in-flight', enrolledAt: dump.createdAt, attempts: 0 },
+      error as Error,
+      deps.pending,
+      dump.createdAt,
+    );
+    // The Dump is safe in the Pending store; what the user needs to know is *why* the
+    // online path failed, which is almost always the cloud seam or the CouchDB connection.
     log({
       level: 'error',
       op: 'capture',
-      message: 'capture failed online — Dump queued for retry',
+      message: 'capture failed online — Dump left Pending for retry',
       detail: { dumpId: dump.id, error: (error as Error).message },
     });
     return {
-      kind: 'queued',
+      kind: 'pending',
       dump,
       reason: 'capture-failed',
       message: CAPTURE_RETRY_MESSAGE,
@@ -696,71 +762,351 @@ export async function captureOrQueue(
   }
 }
 
-/** One queued Dump that reached the vault as a Note. */
-export interface DrainedDump {
+/** Count a failed Organize attempt against a Dump: keep the error, and set when the next
+ *  attempt is due. Shared by the three places an attempt can fail — the Capture, the save
+ *  the user is watching, and the unattended recovery — so a Dump backs off the same way
+ *  whichever one hit the wall. */
+async function recordFailure(
+  record: PendingDump,
+  error: Error,
+  pending: PendingStore,
+  now: number,
+): Promise<PendingDump> {
+  const attempts = record.attempts + 1;
+  const next: PendingDump = {
+    ...record,
+    reason: 'failed',
+    attempts,
+    lastError: error.message,
+    nextAttemptAt: now + RETRY_BACKOFF_MS[Math.min(attempts - 1, RETRY_BACKOFF_MS.length - 1)],
+  };
+  await pending.save(next);
+  return next;
+}
+
+/** A Pending Dump the app has stopped working on: the attempts ran out. The other
+ *  Stranded case — a Dump the Pending store never knew about, because it was captured
+ *  before this existed or on another device — is found by `findStrandedDumps`. */
+export function isStranded(record: PendingDump): boolean {
+  return record.attempts >= MAX_ORGANIZE_ATTEMPTS;
+}
+
+/** Whether a record should be attempted now: still being worked on by this session,
+ *  out of attempts, or backing off all mean no. */
+function isDue(record: PendingDump, now: number): boolean {
+  if (record.reason === 'in-flight') return false;
+  if (isStranded(record)) return false;
+  return (record.nextAttemptAt ?? 0) <= now;
+}
+
+/** Adopt the records left `in-flight` by a session that ended. Nothing survived the
+ *  restart that could still be organizing them, so the label is a leftover claim: they
+ *  are `interrupted`, which makes them due for recovery.
+ *
+ *  Call this once at start, before recovering — never on the retry timer, which runs
+ *  while a capture may genuinely be in flight. (Two tabs open at once would have the
+ *  second adopt the first's live capture; brain-dump is a single-tab personal app, and
+ *  the cost is one redundant Organize, not a lost thought.) */
+export async function adoptInterrupted(
+  pending: PendingStore,
+  log: Log = noopLog,
+): Promise<PendingDump[]> {
+  const adopted: PendingDump[] = [];
+  for (const record of await pending.list()) {
+    if (record.reason !== 'in-flight') continue;
+    const next: PendingDump = { ...record, reason: 'interrupted' };
+    await pending.save(next);
+    adopted.push(next);
+    log({
+      op: 'pending',
+      message: 'Dump was interrupted mid-Organize — due for recovery',
+      detail: { dumpId: record.dump.id, enrolledAt: record.enrolledAt },
+    });
+  }
+  return adopted;
+}
+
+/** One Pending Dump that reached the Vault as a Note. */
+export interface RecoveredDump {
   dump: Dump;
   note: Note;
   dumpWrite: WriteResult;
   noteWrite: WriteResult;
 }
 
-export interface DrainResult {
-  organized: DrainedDump[];
+export interface RecoveryResult {
+  organized: RecoveredDump[];
   failed: Array<{ dump: Dump; error: Error }>;
+  /** No longer Pending, and never Organized twice: a Note in the Vault already cites them. */
+  alreadyOrganized: Dump[];
+  /** Out of attempts — Stranded, no longer retried, waiting for the user. */
+  stranded: PendingDump[];
 }
 
-export interface DrainDeps extends StoreDeps {
+export interface RecoverDeps extends StoreDeps {
   organizer: Organizer;
-  outbox: OutboxStore;
+  pending: PendingStore;
   isOnline: () => boolean;
+  now: () => number;
+  /** Dump ids the user is reviewing on screen right now. Their Notes are about to be
+   *  written by the session itself, so recovering them would race it into a second Note. */
+  exclude?: string[];
 }
 
-/** Drain the outbox on reconnect: sync each queued Dump to CouchDB and Organize it
- *  into a Note, oldest capture first. A Dump is removed from the outbox only once its
- *  Note has been written, so a failure mid-drain (the LLM is down, the connection
- *  drops again) leaves it queued for the next attempt — it is never lost. Both steps
- *  are idempotent for a given Dump: it is written at a path derived from its id and
- *  capture time, so a retry rewrites the same file. */
-export async function drainOutbox(deps: DrainDeps): Promise<DrainResult> {
-  const result: DrainResult = { organized: [], failed: [] };
+/** Recover every Pending Dump that is due: sync it to CouchDB and Organize it into a
+ *  Note, oldest capture first. Runs at start (for whatever the last session left behind),
+ *  on reconnect, and on the retry timer.
+ *
+ *  A Dump leaves the Pending store only once its Note has been written, so a failure
+ *  mid-recovery leaves it Pending for the next attempt — it is never lost. Two guards
+ *  keep a retry from producing a second Note for the same thought:
+ *
+ *  - A Dump already cited by a Note in the Vault stops being Pending untouched. That closes the
+ *    window between writing the Note and dequeuing (the Note filename is derived from the
+ *    LLM's title, so a second Organize would land in a *different* file, not overwrite the
+ *    first), and it means a Dump organized on the phone is not organized again on the laptop.
+ *  - The Dump is re-read from the Vault when it is already there, so any Context the user
+ *    added survives a recovery that the Pending record's snapshot predates. */
+export async function recoverPending(deps: RecoverDeps): Promise<RecoveryResult> {
+  const result: RecoveryResult = { organized: [], failed: [], alreadyOrganized: [], stranded: [] };
   const log = deps.log ?? noopLog;
   if (!deps.isOnline()) {
-    log({ op: 'drain', message: 'skipped — offline' });
+    log({ op: 'recover', message: 'skipped — offline' });
     return result;
   }
 
-  const queued = await deps.outbox.list();
-  log({ op: 'drain', message: 'drain started', detail: { queued: queued.length } });
+  const now = deps.now();
+  const exclude = new Set(deps.exclude ?? []);
+  const due = (await deps.pending.list()).filter((r) => isDue(r, now) && !exclude.has(r.dump.id));
+  log({ op: 'recover', message: 'recovery started', detail: { due: due.length } });
 
-  for (const dump of queued) {
+  // One Vault read for the whole run, and only when there is something to recover.
+  const vault: VaultState = due.length
+    ? await readVaultState(deps)
+    : { dumps: new Map(), referenced: new Set(), brokenRefs: new Map() };
+
+  for (const record of due) {
+    const path = dumpPath(record.dump, deps.settings);
     try {
+      if (vault.referenced.has(wikilink(path))) {
+        await deps.pending.remove(record.dump.id);
+        result.alreadyOrganized.push(record.dump);
+        log({
+          op: 'recover',
+          message: 'a Note already cites this Dump — no longer Pending, not re-Organized',
+          detail: { dumpId: record.dump.id, path },
+        });
+        continue;
+      }
+
+      // The Vault's copy wins where it exists: `addContext` writes the Dump file before it
+      // updates the record, so a death between those two leaves the Context only in the
+      // Vault. Consequence worth knowing: this makes the Vault authoritative for the
+      // thought, so a Dump file edited by hand in Obsidian is what gets Organized here.
+      // `referenced` counts live Notes only, so a Dump whose Note has since been deleted
+      // is recovered rather than treated as filed.
+      const dump = vault.dumps.get(path)?.dump ?? record.dump;
       const dumpWrite = await writeDump(dump, deps);
-      log({ op: 'drain', message: 'Dump written', detail: { dumpId: dump.id, path: dumpWrite.path } });
       const note = await organizeNote(dump, deps.organizer, deps.settings);
       const noteWrite = await writeNote(note, deps.db, deps.settings, deps.hash);
-      await deps.outbox.remove(dump.id);
+      await deps.pending.remove(dump.id);
       log({
-        op: 'drain',
-        message: 'Note written, Dump dequeued',
+        op: 'recover',
+        message: 'Note written, Dump no longer Pending',
         detail: { dumpId: dump.id, path: noteWrite.path, title: note.title },
       });
       result.organized.push({ dump, note, dumpWrite, noteWrite });
     } catch (error) {
-      // Stays queued deliberately — the next drain retries it. Logged every attempt so a
-      // repeating failure is visible as a repeating line rather than a silent spin.
+      const failed = await recordFailure(record, error as Error, deps.pending, now);
       log({
         level: 'error',
-        op: 'drain',
-        message: 'Dump stayed queued',
-        detail: { dumpId: dump.id, error: (error as Error).message },
+        op: 'recover',
+        message: isStranded(failed)
+          ? 'Dump is Stranded — out of attempts, no longer retried'
+          : 'Dump stayed Pending — will retry',
+        detail: { dumpId: record.dump.id, attempts: failed.attempts, error: failed.lastError },
       });
-      result.failed.push({ dump, error: error as Error });
+      result.failed.push({ dump: record.dump, error: error as Error });
     }
   }
+
+  result.stranded = (await deps.pending.list()).filter(isStranded);
   log({
-    op: 'drain',
-    message: 'drain finished',
-    detail: { organized: result.organized.length, failed: result.failed.length },
+    op: 'recover',
+    message: 'recovery finished',
+    detail: {
+      organized: result.organized.length,
+      failed: result.failed.length,
+      alreadyOrganized: result.alreadyOrganized.length,
+      stranded: result.stranded.length,
+    },
   });
   return result;
+}
+
+/** Arm a Stranded Dump for another attempt: the attempt count and backoff are cleared, so
+ *  the next recovery picks it up. The user asking to retry is new information — they have
+ *  usually just fixed the thing that was broken.
+ *
+ *  With no `ids` this is the Retry offered beside the Stranded line, so it arms **only the
+ *  Stranded** Dumps. A Dump that is merely backing off is not Stranded and is already going
+ *  to be retried; clearing its wait would put a broken provider straight back into a spin.
+ *  Naming a Dump explicitly arms it either way — that is a deliberate ask, not a blanket. */
+export async function retryPending(pending: PendingStore, ids?: string[]): Promise<void> {
+  const wanted = ids ? new Set(ids) : null;
+  for (const record of await pending.list()) {
+    if (wanted ? !wanted.has(record.dump.id) : !isStranded(record)) continue;
+    await pending.save({ ...record, attempts: 0, nextAttemptAt: undefined });
+  }
+}
+
+// --- Vault reconciliation ------------------------------------------------
+// The Pending store only knows about this device, since the day it shipped. The Vault
+// knows about every Dump ever captured — so the Vault is what you ask when you want the
+// truth. Deliberately manual (a Config action): a scan that Organizes on its own would,
+// on its first run, spend LLM calls on thoughts the user may have abandoned months ago.
+
+/** Every Dump a Note cites, as wikilinks — from a Note's `source:` frontmatter and from
+ *  the `_Source:` line of each appended dated section. Both forms matter: an Appended
+ *  Dump founded no Note of its own, and is filed exactly as thoroughly. */
+export function referencedDumpLinks(files: Array<{ content: string }>): Set<string> {
+  const links = new Set<string>();
+  for (const file of files) {
+    for (const match of file.content.matchAll(/^_?[Ss]ource:\s*(\[\[[^\]\n]+\]\])/gm)) {
+      links.add(match[1]);
+    }
+  }
+  return links;
+}
+
+/** Parse a Dump back out of its file — the inverse of `dumpFileContent`. Returns null
+ *  for a file that is not a Dump (no id in the frontmatter), so a stray file in the
+ *  Dumps folder is skipped rather than half-read. */
+export function parseDumpFile(content: string): Dump | null {
+  const { fields, body } = splitFrontmatter(content);
+  if (!fields.id) return null;
+  const [original = '', context = ''] = body.split(/\n+##\s+Context\s*\n+/);
+  return {
+    id: fields.id,
+    content: original.replace(/^\s*##\s+Original\s*\n+/, '').trim(),
+    context: context.trim(),
+    createdAt: Number(fields.created ?? 0),
+    modality: fields.modality === 'voice' ? 'voice' : 'text',
+  };
+}
+
+/** One read of both Managed folders, deleted documents included — reconciliation is the
+ *  one caller that must see them, because a deleted Note is one of the things it reports.
+ *
+ *  `referenced` holds only the Dumps cited by a Note that is both live **and** readable: a
+ *  Note Obsidian will not write to disk files nothing, however healthy it looks here.
+ *  `brokenRefs` maps a cited Dump to that Note, so the row can name the document to repair. */
+interface VaultState {
+  dumps: Map<string, { dump: Dump; deleted: boolean }>;
+  referenced: Set<string>;
+  brokenRefs: Map<string, { path: string; deleted: boolean }>;
+}
+
+async function readVaultState(deps: StoreDeps): Promise<VaultState> {
+  const { managedFolder, dumpsFolder } = deps.settings;
+  const files = await readVaultFiles(
+    deps.db,
+    (path) => path.startsWith(`${managedFolder}/`) || path.startsWith(`${dumpsFolder}/`),
+    { includeDeleted: true },
+  );
+
+  const dumps = new Map<string, { dump: Dump; deleted: boolean }>();
+  for (const file of files) {
+    if (!file.path.startsWith(`${dumpsFolder}/`)) continue;
+    const dump = parseDumpFile(file.content);
+    if (dump) dumps.set(file.path, { dump, deleted: !!file.deleted });
+  }
+
+  const notes = files.filter((f) => f.path.startsWith(`${managedFolder}/`));
+  const referenced = referencedDumpLinks(notes.filter((f) => !f.deleted && !f.unreadable));
+  const brokenRefs = new Map<string, { path: string; deleted: boolean }>();
+  for (const note of notes.filter((f) => f.deleted || f.unreadable)) {
+    for (const link of referencedDumpLinks([note])) {
+      if (!brokenRefs.has(link)) brokenRefs.set(link, { path: note.path, deleted: !!note.deleted });
+    }
+  }
+  return { dumps, referenced, brokenRefs };
+}
+
+export interface ReconcileDeps extends StoreDeps {
+  /** Optional. Dumps already in the Pending store are excluded from the result: they are
+   *  known, and recovery is about to deal with them. Omit it and every unreferenced Dump in
+   *  the Vault is reported, which is what a test asking only about the Vault wants. */
+  pending?: PendingStore;
+  /** Optional. Dumps the user has decided not to file are excluded — that is the whole
+   *  point of dismissing one. */
+  dismissed?: DismissedStore;
+}
+
+/** Every Dump in the Vault that no Note cites — the thoughts the app took and never
+ *  filed (CONTEXT.md: Stranded). This is the check from finding 02, run by the app
+ *  instead of by hand.
+ *
+ *  Dumps already in the Pending store are excluded: they are known, and recovery is
+ *  about to deal with them. Oldest first. */
+export async function findStrandedDumps(deps: ReconcileDeps): Promise<StrandedDump[]> {
+  const { dumps, referenced, brokenRefs } = await readVaultState(deps);
+  const records = deps.pending ? await deps.pending.list() : [];
+  const known = new Set(records.map((r) => r.dump.id));
+  const dismissed = new Set(deps.dismissed ? await deps.dismissed.list() : []);
+
+  const stranded: StrandedDump[] = [];
+  for (const [path, { dump, deleted }] of dumps) {
+    const link = wikilink(path);
+    // A live Note cites it: filed, whatever else is true.
+    if (referenced.has(link)) continue;
+    if (known.has(dump.id) || dismissed.has(dump.id)) continue;
+    const broken = brokenRefs.get(link);
+    // The Dump's own deletion outranks its Note's: restoring the Note alone would leave
+    // the thought itself out of the Vault.
+    const reason: StrandedReason = deleted
+      ? 'dump-deleted'
+      : !broken
+        ? 'unfiled'
+        : broken.deleted
+          ? 'note-deleted'
+          : 'note-unreadable';
+    stranded.push({ dump, reason, ...(broken ? { notePath: broken.path } : {}) });
+  }
+
+  (deps.log ?? noopLog)({
+    op: 'reconcile',
+    message: 'Vault reconciled',
+    detail: {
+      dumps: dumps.size,
+      referenced: referenced.size,
+      stranded: stranded.length,
+      byReason: stranded.reduce<Record<string, number>>(
+        (acc, s) => ({ ...acc, [s.reason]: (acc[s.reason] ?? 0) + 1 }),
+        {},
+      ),
+    },
+  });
+  return stranded.sort(
+    (a, b) => a.dump.createdAt - b.dump.createdAt || a.dump.id.localeCompare(b.dump.id),
+  );
+}
+
+/** Undo the deletion that stranded a Dump: bring back the Note, and the Dump too when it
+ *  was deleted as well. A soft delete keeps every chunk, so this restores the documents
+ *  exactly as they were — the user's edits included — and spends no LLM call.
+ *
+ *  Restoring a Dump whose Note was never written is meaningless, so `unfiled` is a no-op
+ *  here: that one wants Organize, not restore. */
+export async function restoreStranded(stranded: StrandedDump, deps: StoreDeps): Promise<void> {
+  const log = deps.log ?? noopLog;
+  if (stranded.reason === 'dump-deleted') {
+    await restoreFile(deps.db, dumpPath(stranded.dump, deps.settings), deps.settings);
+  }
+  if (stranded.notePath) await restoreFile(deps.db, stranded.notePath, deps.settings);
+  log({
+    op: 'reconcile',
+    message: 'restored a deleted document',
+    detail: { dumpId: stranded.dump.id, reason: stranded.reason, notePath: stranded.notePath },
+  });
 }

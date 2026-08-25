@@ -248,6 +248,7 @@ select,
 .hint,
 .diagnostics,
 .checks,
+.stranded,
 .eyebrow,
 .meta,
 .rule-label,
@@ -861,4 +862,50 @@ textarea.dump {
   font-size: var(--text-xs);
   color: var(--set);
   word-break: break-all;
+}
+
+/* ── Stranded Dumps ──────────────────────────────────────────────────────
+ *
+ * The list a user reads when the app is admitting it took a thought and never filed it.
+ * It has to answer "which thought?" before it answers anything else, so the Dump's own
+ * first line is the widest column and the timestamp beside it is the link into the Vault.
+ * Same ruled rows as the diagnostics list — this is the machine reporting on itself.
+ */
+
+.stranded {
+  list-style: none;
+  padding: 0;
+  margin: var(--s2) 0 0;
+  font-size: var(--text-xs);
+}
+
+.stranded li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  padding: var(--s1) 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.stranded li.err {
+  color: var(--alarm);
+}
+
+.stranded-when {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.stranded-text {
+  flex: 1;
+  min-inline-size: 0;
+  word-break: break-word;
+}
+
+.stranded .detail {
+  color: var(--dim);
+}
+
+.stranded button {
+  flex: none;
 }

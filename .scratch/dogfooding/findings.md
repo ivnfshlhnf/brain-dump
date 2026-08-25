@@ -179,6 +179,50 @@ diagnosing-bugs skill stops here: the cause is established, but there is no in-p
 goes red on an interruption and green on a fix, so a red→green regression loop cannot be built
 without the running app.
 
+**Resolved since (2026-08-24, spec→implement via /grill-with-docs):** the durability gap is
+closed. Every Dump now enrols in a **Pending** store (CONTEXT.md gained *Pending* and
+*Stranded*) the moment it is Captured — online or offline, before anything can fail — and
+leaves only once its Note has been written. The old outbox *was* durable, but it was only ever
+written in the offline branch or the catch, and an interruption is neither: the fetch never
+settles, so no catch runs.
+
+The red test is the finding in one assertion (`tests/pending.test.ts`): start a capture whose
+Organize never resolves, and look at the store while it hangs. Before the fix,
+`expected [] to have a length of 1`. After it, a record with `reason: 'in-flight'`.
+
+- **Window A** (interrupted mid-Organize): at start, `adoptInterrupted` retires the
+  `in-flight` claim on any record that survived the reload — nothing that could still be
+  organizing it exists — and recovery Organizes it. The retry timer deliberately never adopts,
+  so a capture genuinely in flight is not raced.
+- **Window B** (Organized, Note never landed): the same recovery covers it, because the record
+  is only removed by `finalizeCapture` once the write returns.
+- **The duplicate presses**: the draft and the textarea are now cleared the instant the Dump is
+  durably Pending (`onPending`), not when the capture resolves. The text sitting in the box
+  after a press that appeared to do nothing was the invitation to press again.
+- **Not re-Organizing what is already filed**: a Dump cited by a Note (`source:` frontmatter or
+  an appended `_Source:` line) is dequeued untouched. This matters because `noteFilename` is
+  `date-slug(title)` — a second Organize can retitle, so a duplicate recovery would write a
+  *second file*, not overwrite the first. Tested by killing the flow between `writeNote` and the
+  dequeue.
+- **Giving up honestly**: attempts back off 60s→2m→5m→15m and stop at 5. The session that
+  produced `Error: Invalid Adapter: undefined` would otherwise have spun an LLM call a minute
+  all day. After the cap the Dump is **Stranded**: surfaced with its error and a Retry, not
+  retried.
+- **The four existing orphans** are not reachable by any of that — they predate the store. They
+  are found by **Find stranded Dumps** in Config, which runs the orphan check from this finding
+  against the Vault. Manual on purpose: run automatically, its first act would be to spend four
+  LLM calls on thoughts from August 23–24, two of which are duplicates.
+
+Pending state is device-local, which is the one decision here worth an ADR
+(`docs/adr/0005-pending-state-is-device-local.md`): CouchDB was available and rejected, because
+an offline capture cannot write its own "I am offline" marker, and two devices recovering one
+record race into two Notes. The Vault is the cross-device answer instead.
+
+**Still worth watching:** whether a recovered Dump that *would* have been an Append founds a
+separate Note often enough to be annoying. Recovery always founds a new Note — an unattended
+Organize has nobody to confirm an Append with — and Related is supposed to reconnect the two.
+Unobserved either way.
+
 ---
 
 ## 03 — The Note asserts things the Dump never said
@@ -278,3 +322,164 @@ prompt carries the clause, and an env-gated real-model symptom test
 (`tests/organize-faithfulness-smoke.test.ts`) asserts no invention against the live model. The
 model and the missing length constraint were secondary; the faithfulness clause subsumes them for
 this symptom.
+
+---
+
+## 04 — Obsidian deleted five documents the app had written
+
+**Date:** 2026-08-25
+
+**What I saw:** Obsidian on the phone flashed an error saying a Note was corrupted —
+`Brain Dump/2026-08-24-semekar-s-adenium-grind-adjustment-notes.md`. Minutes earlier, **Find
+stranded Dumps** had reported 2 Stranded Dumps where the vault on the laptop said 4. The two
+turned out to be the same event: LiveSync on the phone **deleted five documents the app had
+written** — four Notes and one Dump — and none of them had ever reached that phone's storage.
+
+```
+_dumps/20260824-081958-7d88b5.md                              ← a Dump, and its only copy
+Brain Dump/2026-08-23-improving-note-quality-from-brain-dumps.md
+Brain Dump/2026-08-24-claude-code-session-switching-issue.md
+Brain Dump/2026-08-24-old-coffee-for-cold-brew.md
+Brain Dump/2026-08-24-semekar-s-adenium-grind-adjustment-notes.md
+```
+
+**What I expected:** a Note the app wrote to stay written. Principle 1 says the thought survives
+whatever else fails; nothing in it anticipated the Vault's own sync plugin removing the Note.
+
+**Evidence:**
+
+- The phone's LiveSync log, all five within the same second at 11:42:49 local:
+  ```
+  [SF:OfflineScanner] NEWER_WINS: Treating missing local file as deletion (<path>)
+  [SF:OfflineScanner] DELETE DATABASE: <path>
+  [ServiceFileHandler] File <path> is missing on storage; deleting from the database by path
+  Entry removed: [DEL] <path>
+  ```
+  The plugin found five documents in its database with no matching file in the phone's vault
+  storage, and its `NEWER_WINS` policy read "no file" as "the user deleted this".
+- The five are **exactly** the gap measured 17 minutes earlier. The app's own reconcile line at
+  04:25:51 UTC (11:25 local) reads `{"dumps": 16, "referenced": 14, "stranded": 2}`; the laptop's
+  disk held 15 Dumps and 10 `source:` references. The delta — one Dump, four Notes — is this list.
+- Three of the four Notes are the ones that made `673efa`, `23f61b` and `ce968a` *not* appear as
+  Stranded at 11:25. They existed then. They were deleted at 11:42.
+- Every deleted document was written by brain-dump. Nothing under `memos/` — 45 files the app has
+  never touched — was affected.
+- Not caused by the app: `logs/brain-dump.jsonl` for 2026-08-25 contains three events, all
+  `reconcile`, all read-only. The app wrote nothing that day. The Pending store landing the same
+  morning is a coincidence of timing, not a cause.
+
+**What held:** the content. LiveSync's delete is a **soft** delete — the CouchDB document keeps
+`type`, `size`, `ctime`, its `children` chunk ids and every chunk, and only gains `deleted: true`
+at rev 2 or 3. All five were recovered whole and byte-verified into `.scratch/recovery/`,
+including the Dump that exists nowhere else:
+
+> semekar's adenium eastern beans roasted di 14 august di grind 0.4 nyangkut banget, padahal
+> kayaknya kemarin aman2 aja, lg coba ke grind 0.5.2, malah kecepetan, 25s for 40gr out...
+
+**Times seen:** 1 session; 5 documents in it.
+
+**Two code facts found while looking** (established, from the source):
+
+- **`settings.hashAlgorithm` is never read.** `src/lib/types.ts:198` declares it
+  `'sha1' | 'xxhash'` with the comment *"must match the user's LiveSync chunk hash"*, and
+  `App.svelte` passes `defaultSha1Hex` at all four call sites unconditionally. The app always
+  writes sha1-derived chunk ids whatever the setting says. The phone's LiveSync reports
+  `hashAlg is xxhash64`.
+- **The app has no concept of LiveSync's `deleted` flag.** The string appears nowhere in `src`
+  or `tests`. `readVaultFiles` (`src/lib/livesync.ts`) filters on `type === 'plain'` and
+  `children.length` only, so a soft-deleted document reads as a live one. Consequences today:
+  Retrieve can answer from a deleted Note and cite it; `readNoteCandidates` can suggest Appending
+  to a deleted Note; and reconciliation counts a deleted Note's `source:` line as filing its
+  Dump, so a Dump whose Note has been deleted does **not** appear as Stranded.
+
+**Not yet established:** why the five files were missing from the phone's storage in the first
+place. Candidates, none confirmed — the app wrote them to CouchDB while that phone's Obsidian was
+not running and they were never materialised; iCloud evicted the local copies from the vault
+folder; or LiveSync refused to write them because it judged them corrupt, which would make the
+"corrupted" toast the cause of the deletion rather than a symptom of it. The sha1/xxhash64
+mismatch above is a candidate for that last one, but ten other app-written files *did* materialise
+on the laptop, so it cannot be uniformly fatal. Deliberately not diagnosed here.
+
+**How to observe the rest, next time:** before opening Obsidian on a device that has been away,
+note whether the app-written files are present in that device's vault folder. If the toast
+appears, screenshot it *and* open the LiveSync log pane immediately (`Show log`) — the
+`OfflineScanner` lines are only in the log, and they name every path it is about to delete. The
+CouchDB side is checkable at any time: a document with `deleted: true` is a soft delete and its
+chunks are still there until compaction runs.
+
+**Resolved since (2026-08-25):** the second code fact is fixed. `readVaultFiles` now honours
+the `deleted` flag and excludes soft-deleted documents by default, so Retrieve can no longer
+answer from a deleted Note or cite one, and Append cannot suggest merging into one.
+Reconciliation is the single caller that opts back in (`includeDeleted`), because a deleted
+Note is one of the things it exists to report. It now returns a state per Dump — `unfiled`,
+`note-deleted`, `dump-deleted` — and offers Restore (an un-delete: no LLM call, the exact
+Note that existed) or Dismiss (a note to self; the Vault is untouched). Run against a mirror
+of the real CouchDB it reports all six: 2 unfiled, 3 note-deleted, 1 dump-deleted.
+
+**Still open:** the dead `hashAlgorithm` setting, and the question this finding was really
+about — why five documents the app wrote never materialised on any device. Nothing here
+prevents it happening again; it only means the app now *sees* it.
+
+**Established since (2026-08-25, from the Mac's own LiveSync log — this is the cause):**
+the app declared the wrong file size, and Obsidian refuses a file whose declared size does
+not match the content it reassembles.
+
+```
+File Brain Dump/2026-08-23-improving-note-quality-from-brain-dumps.md
+seems to be corrupted! Writing prevented. (1960 != 1968)
+```
+
+`writeFile` set `size: content.length` (`src/lib/livesync.ts:59`) and `modifyFile` did the
+same. **`String.length` counts UTF-16 code units; Obsidian validates against UTF-8 bytes.**
+The two agree only for pure ASCII — which is why this went unnoticed through eight Notes and
+sixteen Dumps.
+
+The correlation is exact. Of the 28 documents the app has written, five declare a size that
+disagrees with their UTF-8 byte length, and those five are **precisely** the five that were
+deleted:
+
+| document | utf-16 | utf-8 | non-ASCII |
+|---|---|---|---|
+| `improving-note-quality-from-brain-dumps` | 1960 | 1968 | `–` ×4 |
+| `claude-code-session-switching-issue` | 2086 | 2088 | |
+| `old-coffee-for-cold-brew` | 899 | 901 | |
+| `semekar-s-adenium-grind-adjustment-notes` | 882 | 892 | `—`, `→` |
+| `_dumps/20260824-081958-7d88b5` | 336 | 341 | `’`, `😅` |
+
+Every other app-written document is pure ASCII, declares a size that matches, and is on disk.
+
+The full chain: Organize writes a Note containing an em-dash — which it does in almost every
+Note — the declared size falls short by two bytes per such character, Obsidian calls the file
+corrupted and **prevents the write**, the file therefore never exists on storage, and
+`OfflineScanner` then finds a database entry with no file and deletes it as
+`NEWER_WINS: Treating missing local file as deletion`. Nothing was ever wrong with the
+content; the app mis-measured it.
+
+This also explains the first restore attempt failing. Un-deleting left the wrong `size` in
+place, so Obsidian refused the file again and the scanner deleted it a second time within
+two minutes (rev 4).
+
+**The sha1/xxhash64 mismatch was not the cause.** It is real — the app writes 40-hex-char
+`h:` chunk ids where Obsidian writes 12 — and `hashAlgorithm` is still dead code, but the
+Notes that materialised carry the same sha1 ids as the ones that did not. The counter-evidence
+held; the size did not.
+
+**Resolved since (2026-08-25):** `byteLength()` (UTF-8) replaces `content.length` in both
+`writeFile` and `modifyFile`, and `restoreFile` recomputes the size from the chunks on the way
+back, so restoring a document deleted for this reason does not hand Obsidian the same broken
+file again. Locked by `tests/livesync.test.ts`, which asserts the byte length for content with
+an em-dash, an arrow and an emoji, keeps the ASCII case as the reason it hid so long, and
+covers the re-deletion path directly.
+
+**Established since (2026-08-25, from a restore that appeared to work):** a document can be
+**live and unreadable**, and that state was invisible. The first Restore cleared the `deleted`
+flag — the document went to rev 3, undeleted, and reconciliation stopped reporting it, because
+a live Note now cited the Dump. But its `size` was still 1960, so Obsidian went on refusing the
+file and it never reached the disk. The app said filed; the Vault did not have it. That is the
+worst thing this app can say, and it said it silently.
+
+Fixed: `readVaultFiles` now compares each document's declared size against its content and
+marks the mismatch `unreadable`. A Note that is unreadable files nothing, so its Dump is
+reported as `note-unreadable` with a **Repair** action, and `restoreFile` corrects a wrong size
+whether or not the document was ever deleted. Against the live Vault the six now read: 2
+unfiled, 2 note-deleted, 1 dump-deleted, 1 note-unreadable.

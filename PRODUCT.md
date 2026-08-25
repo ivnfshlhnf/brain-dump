@@ -73,7 +73,10 @@ mechanism the positioning rests on.
   the user did not just create.
 - **Ask** answers a natural-language question over the whole Vault and cites the Notes it
   used.
-- **Offline** captures queue in an IndexedDB outbox and organize themselves on reconnect.
+- **Every capture is Pending** until its Note exists — recorded durably at capture, so an
+  offline capture, a failed one, and one interrupted mid-Organize all get Organized later
+  without the user filing anything. A Dump the app gives up on is reported as Stranded, never
+  dropped silently.
 - **Writes are confined to two Managed folders.** Everything else in the Vault is readable and
   never written — a hard constraint, ADR-0002.
 - **Text only.** Voice capture is deferred; the domain model already accounts for it.
