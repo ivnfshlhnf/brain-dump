@@ -1,27 +1,61 @@
-// The app's single IndexedDB database, shared by the settings store and the offline
-// outbox. Both live in one database so they share a version — adding a store means
+// The app's single IndexedDB database, shared by the settings store and the Pending
+// store. Both live in one database so they share a version — adding a store means
 // bumping VERSION here and creating it in the upgrade below.
 
+import type { Dump, PendingDump } from './types';
+
 const DB_NAME = 'brain-dump';
-const VERSION = 2; // v1: settings; v2: + outbox
+const VERSION = 3; // v1: settings; v2: + outbox; v3: outbox entries become PendingDump records
 
 export const SETTINGS_STORE = 'settings';
-export const OUTBOX_STORE = 'outbox';
+/** The Pending store. The *key* is still `outbox` — the name it was created under in v2 —
+ *  so no data has to move for the rename. The vocabulary changed (CONTEXT.md: Pending),
+ *  the bytes did not. */
+export const PENDING_STORE = 'outbox';
 
 /** Open the app database, creating any missing object stores. Opened per operation
  *  rather than cached, so a store handle never outlives the connection it holds. */
 export function openAppDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, VERSION);
-    req.onupgradeneeded = () => {
+    req.onupgradeneeded = (event) => {
       const db = req.result;
       // Tolerant of upgrading from v1 (where `settings` already exists).
       if (!db.objectStoreNames.contains(SETTINGS_STORE)) db.createObjectStore(SETTINGS_STORE);
-      if (!db.objectStoreNames.contains(OUTBOX_STORE)) db.createObjectStore(OUTBOX_STORE);
+      if (!db.objectStoreNames.contains(PENDING_STORE)) db.createObjectStore(PENDING_STORE);
+      if (event.oldVersion >= 2 && event.oldVersion < 3) migrateBareDumps(req.transaction);
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
+}
+
+/** v2 stored a bare `Dump` per key; v3 stores a `PendingDump` envelope around it. Wrap
+ *  whatever is already there rather than dropping it: an entry in this store is a thought
+ *  that has not become a Note yet, which is the one thing this store exists to not lose.
+ *
+ *  A v2 entry could only have been captured offline or after a failed capture, and both
+ *  retry the same way, so `offline` is the honest label for it. */
+function migrateBareDumps(tx: IDBTransaction | null): void {
+  if (!tx) return;
+  const cursorReq = tx.objectStore(PENDING_STORE).openCursor();
+  cursorReq.onsuccess = () => {
+    const cursor = cursorReq.result;
+    if (!cursor) return;
+    const value = cursor.value as Record<string, unknown> | undefined;
+    // Typed on the way out: this function's whole job is not losing a thought, so a typo
+    // in `reason` should be a compile error rather than a record recovery silently skips.
+    if (value && !('dump' in value) && typeof value.content === 'string') {
+      const wrapped: PendingDump = {
+        dump: value as unknown as Dump,
+        reason: 'offline',
+        enrolledAt: typeof value.createdAt === 'number' ? value.createdAt : 0,
+        attempts: 0,
+      };
+      cursor.update(wrapped);
+    }
+    cursor.continue();
+  };
 }
 
 /** Run a transaction over one store, resolving with the request's result once the

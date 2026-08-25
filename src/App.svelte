@@ -3,14 +3,20 @@
   import { loadSettings, saveSettings } from './lib/settings';
   import { createRemoteDb, createDatabaseAdmin, createEmbeddingsDb } from './lib/db';
   import {
-    captureOrQueue,
+    captureThought,
     addContext,
     finalizeCapture,
     refreshNoteMetadata,
-    drainOutbox,
+    recoverPending,
+    adoptInterrupted,
+    retryPending,
+    findStrandedDumps,
+    organizeDump,
+    dumpPath,
+    isStranded,
     type CaptureSession,
   } from './lib/operations';
-  import { createIndexedDbOutbox } from './lib/outbox';
+  import { createIndexedDbPendingStore } from './lib/pending';
   import { retrieve } from './lib/retrieve';
   import { createOrganizer, createMatcher, createEmbedder, createAnswerer, createRelater } from './lib/llm';
   import { defaultSha1Hex } from './lib/livesync';
@@ -20,7 +26,14 @@
   import { checkConnections, type HealthReport, type CheckResult } from './lib/health';
   import { createCachingEmbedder } from './lib/embedding-cache';
   import { validateProviderUrl } from './lib/config';
-  import { DEFAULT_SETTINGS, type Settings, type Citation, type Note } from './lib/types';
+  import {
+    DEFAULT_SETTINGS,
+    type Settings,
+    type Citation,
+    type Dump,
+    type Note,
+    type PendingDump,
+  } from './lib/types';
 
   // Diagnostics. In dev the sink POSTs each event to the Vite middleware, which appends
   // it to logs/brain-dump.jsonl in the project folder; in a production build there is no
@@ -111,18 +124,47 @@
   let citations: Citation[] = [];
   let asking = false;
 
-  // The durable offline queue. A Capture with no connection lands here and is
-  // Organized on reconnect; `queuedCount` keeps the user informed that it is safe.
-  const outbox = createIndexedDbOutbox();
-  let queuedCount = 0;
-  let queueError = '';
-  let draining = false;
-  // While Dumps are queued, retry on a timer as well as on the `online` event: a
+  // The durable record of every Dump that still needs Organizing. A Capture enrols here
+  // before anything can fail and leaves only once its Note exists, so an interruption
+  // cannot strand a thought silently the way it did four times in finding 02.
+  const pending = createIndexedDbPendingStore();
+  let pendingRecords: PendingDump[] = [];
+  let pendingError = '';
+  let recovering = false;
+  // Vault reconciliation (Config): the Dumps no Note cites, found by asking the Vault
+  // rather than this device's Pending store. Manual — see the hint beside the button.
+  let strandedInVault: Dump[] = [];
+  let reconciled = false;
+  let reconciling = false;
+  let organizingStranded = '';
+  // While Dumps are Pending, retry on a timer as well as on the `online` event: a
   // capture that failed while `navigator.onLine` was already true (a flaky
   // connection, a captive portal, an LLM outage) never fires `online`, and the spec
   // promises offline captures organize themselves without the user's intervention.
   const RETRY_INTERVAL_MS = 60_000;
   let retryTimer: ReturnType<typeof setInterval> | null = null;
+
+  // The banner speaks for the records rather than a single counter. A generic "waiting"
+  // would reintroduce the exact ambiguity that made the user press Capture three times:
+  // they could not tell working from nothing-happening.
+  $: openSessionId = session && !session.saved ? session.dump.id : null;
+  // The Dump on screen is the session's business, not the banner's — its Note is about
+  // to be written by the review flow itself.
+  $: bannerRecords = pendingRecords.filter((r) => r.dump.id !== openSessionId);
+  $: strandedRecords = bannerRecords.filter(isStranded);
+  $: liveRecords = bannerRecords.filter((r) => !isStranded(r));
+  $: offlineCount = liveRecords.filter((r) => r.reason === 'offline').length;
+  $: inFlightCount = liveRecords.filter((r) => r.reason === 'in-flight').length;
+  // Only the ones a *past* session left behind. A Dump that failed a minute ago in this
+  // session is backing off, which is a different thing and says so below.
+  $: recoveringCount = liveRecords.filter((r) => r.reason === 'interrupted').length;
+  $: retryingCount = liveRecords.filter((r) => r.reason === 'failed').length;
+
+  /** The first line of a Dump, for a list that has to say *which thought* this is. */
+  function firstLine(content: string): string {
+    const line = content.trim().split('\n')[0];
+    return line.length > 80 ? `${line.slice(0, 79)}…` : line;
+  }
 
   // 5s inactivity → finalize; close → flush. saveAndFinalize always resolves
   // (it catches its own errors), so the autosaver's run never rejects.
@@ -133,7 +175,7 @@
   // The store + hash deps shared by every operation call. Built per call so a
   // settings change between capture and save is picked up.
   function storeDeps() {
-    return { db: createRemoteDb(settings), settings, hash: defaultSha1Hex, log };
+    return { db: createRemoteDb(settings), settings, hash: defaultSha1Hex, log, pending };
   }
 
   // Autofocus the Dump whenever it mounts — on load (so the first character needs no tap to
@@ -186,12 +228,19 @@
     };
     window.addEventListener('beforeunload', onBeforeUnload);
 
-    // Reconnect drains the outbox automatically — offline Dumps become Notes with
-    // no user intervention. Also drained at startup, for a queue left by a past session.
-    onOnline = () => void drain();
+    // Reconnect recovers Pending Dumps automatically — they become Notes with no user
+    // intervention, which is the promise: you do not file anything, the app files
+    // everything it took.
+    onOnline = () => void recover();
     window.addEventListener('online', onOnline);
-    await refreshQueueState();
-    if (navigator.onLine && queuedCount) void drain();
+    // Anything still marked in-flight belongs to a session that ended — nothing survived
+    // this reload that could still be organizing it. Done once, at start, never on the
+    // retry timer, which runs while a capture may genuinely be in flight.
+    await adoptInterrupted(pending, log);
+    await refreshPending();
+    // Read the records, not the derived `liveRecords`: reactive statements have not
+    // recomputed yet at this point in the same tick.
+    if (navigator.onLine && pendingRecords.some((r) => !isStranded(r))) void recover();
   });
 
   onDestroy(() => {
@@ -205,23 +254,29 @@
     busy = true;
     status = '';
     try {
-      const outcome = await captureOrQueue(text, {
+      const outcome = await captureThought(text, {
         ...storeDeps(),
         organizer: createOrganizer(settings, log),
         matcher: createMatcher(settings, log),
-        outbox,
         isOnline: () => navigator.onLine,
         now: () => Date.now(),
         newId: () => crypto.randomUUID(),
+        // The instant the Dump is durably Pending it is the app's responsibility. Empty
+        // the box then and there: text still sitting in it after a press that appears to
+        // do nothing is an invitation to press again, which is how three byte-identical
+        // Dumps reached the Vault 55 seconds apart.
+        onPending: () => {
+          text = '';
+          clearDraft();
+          void refreshPending();
+        },
       });
 
-      // Queued: the Dump is safe, there is no preview, and no review session opens.
-      // A capture that failed while online says so — and names the error — rather
-      // than claiming the user is offline.
-      if (outcome.kind === 'queued') {
-        text = '';
-        clearDraft();
-        await refreshQueueState();
+      // Pending with no preview: the Dump is safe and no review session opens. A capture
+      // that failed while online says so — and names the error — rather than claiming the
+      // user is offline.
+      if (outcome.kind === 'pending') {
+        await refreshPending();
         status =
           outcome.reason === 'offline'
             ? `Captured — ${outcome.message}.`
@@ -231,8 +286,6 @@
 
       session = outcome.session;
       context = '';
-      text = '';
-      clearDraft();
       savedNotePath = null;
       savedNote = null;
       contextRevision = 0;
@@ -279,6 +332,7 @@
         now: () => Date.now(),
       });
       session = result.session;
+      await refreshPending();
       if (result.ok) {
         savedNotePath = result.written.path;
         savedNote = result.note;
@@ -341,23 +395,24 @@
     }
   }
 
-  // Read the queue and arm or disarm the retry timer to match it. A failure to read
-  // the outbox is surfaced, never swallowed to a reassuring zero — the banner exists
-  // to tell the user their Dumps are safe, so it must not hide that it can't tell.
-  async function refreshQueueState() {
+  // Read the Pending records and arm or disarm the retry timer to match them. A failure
+  // to read is surfaced, never swallowed to a reassuring zero — the banner exists to tell
+  // the user their Dumps are safe, so it must not hide that it cannot tell.
+  async function refreshPending() {
     try {
-      queuedCount = (await outbox.list()).length;
-      queueError = '';
+      pendingRecords = await pending.list();
+      pendingError = '';
     } catch (e) {
-      queueError = `Could not read the offline queue: ${(e as Error).message}`;
+      pendingError = `Could not read the Pending Dumps: ${(e as Error).message}`;
     }
-    if (queuedCount) startRetrying();
+    // A Stranded Dump is not retried on a timer: the app has stopped, and says so.
+    if (pendingRecords.some((r) => !isStranded(r))) startRetrying();
     else stopRetrying();
   }
 
   function startRetrying() {
     if (retryTimer) return;
-    retryTimer = setInterval(() => void drain(), RETRY_INTERVAL_MS);
+    retryTimer = setInterval(() => void recover(), RETRY_INTERVAL_MS);
   }
 
   function stopRetrying() {
@@ -366,31 +421,83 @@
     retryTimer = null;
   }
 
-  // Sync the queued Dumps to CouchDB and Organize them into Notes. A Dump that
-  // fails (the LLM or the connection is still down) stays queued for the next drain.
-  async function drain() {
-    if (draining) return;
-    draining = true;
+  // Sync the Pending Dumps to CouchDB and Organize them into Notes. A Dump that fails
+  // (the LLM or the connection is still down) stays Pending for the next attempt, and
+  // after the attempt cap it becomes Stranded and stops costing calls.
+  async function recover() {
+    if (recovering) return;
+    recovering = true;
     try {
-      const result = await drainOutbox({
+      const result = await recoverPending({
         ...storeDeps(),
         organizer: createOrganizer(settings, log),
-        outbox,
         isOnline: () => navigator.onLine,
+        now: () => Date.now(),
+        // Never race the review flow into a second Note for the Dump on screen.
+        exclude: session && !session.saved ? [session.dump.id] : [],
       });
-      await refreshQueueState();
+      await refreshPending();
       if (result.organized.length) {
         const n = result.organized.length;
         status = n === 1
-          ? `Organized 1 queued Dump into a Note.`
-          : `Organized ${n} queued Dumps into Notes.`;
+          ? `Organized 1 Dump into a Note.`
+          : `Organized ${n} Dumps into Notes.`;
       } else if (result.failed.length) {
         const n = result.failed.length;
-        status = `${n} queued ${n === 1 ? 'Dump' : 'Dumps'} still waiting: ${result.failed[0].error.message}`;
+        status = `${n} ${n === 1 ? 'Dump is' : 'Dumps are'} still waiting: ${result.failed[0].error.message}`;
       }
     } finally {
-      draining = false;
+      recovering = false;
     }
+  }
+
+  /** Arm the Stranded Dumps for another attempt and run it now. The user asking is new
+   *  information: they have usually just fixed whatever was broken. */
+  async function retryStranded(ids?: string[]) {
+    await retryPending(pending, ids);
+    await refreshPending();
+    await recover();
+  }
+
+  /** Ask the Vault, not this device: which Dumps does no Note cite? Manual, because a
+   *  scan that Organized on its own would spend LLM calls on old thoughts unasked. */
+  async function findStranded() {
+    reconciling = true;
+    try {
+      strandedInVault = await findStrandedDumps({ ...storeDeps() });
+      reconciled = true;
+      status = strandedInVault.length
+        ? `${strandedInVault.length} stranded ${strandedInVault.length === 1 ? 'Dump' : 'Dumps'} in the Vault.`
+        : 'Every Dump in the Vault is filed.';
+    } catch (e) {
+      status = `Could not read the Vault: ${(e as Error).message}`;
+    } finally {
+      reconciling = false;
+    }
+  }
+
+  /** Organize one Dump found by reconciliation. It founds a new Note: an unattended
+   *  Organize has nobody to confirm an Append with. */
+  async function organizeStranded(dump: Dump) {
+    organizingStranded = dump.id;
+    try {
+      const result = await organizeDump(dump, {
+        db: createRemoteDb(settings),
+        settings,
+        organizer: createOrganizer(settings, log),
+        hash: defaultSha1Hex,
+      });
+      strandedInVault = strandedInVault.filter((d) => d.id !== dump.id);
+      status = `Saved Note: ${result.note.title}`;
+    } catch (e) {
+      status = `Could not Organize that Dump: ${(e as Error).message}`;
+    } finally {
+      organizingStranded = '';
+    }
+  }
+
+  async function organizeAllStranded() {
+    for (const dump of strandedInVault.slice()) await organizeStranded(dump);
   }
 
   // Retrieve reads the whole vault (personal notes included) and writes nothing —
@@ -521,12 +628,36 @@
   <main>
   {#if view === 'capture'}
     <section class="surface">
-    {#if queuedCount === 1}
-      <p class="status" aria-live="polite">1 Dump saved — it will be Organized when online.</p>
-    {:else if queuedCount}
-      <p class="status" aria-live="polite">{queuedCount} Dumps saved — they will be Organized when online.</p>
+    <!-- Four states, kept distinct on purpose. Collapsing them into one "waiting" line
+         would restore the ambiguity that caused finding 02: the user could not tell a
+         Dump being worked on from one nothing was happening to. Stranded outranks the
+         rest — it is the app admitting it broke its promise. -->
+    {#if strandedRecords.length}
+      <p class="status err" aria-live="polite">
+        {strandedRecords.length === 1
+          ? "1 Dump couldn't be Organized"
+          : `${strandedRecords.length} Dumps couldn't be Organized`}: {strandedRecords[0].lastError}
+      </p>
+      <div class="actions"><button on:click={() => retryStranded()}>Retry</button></div>
+    {:else if recoveringCount}
+      <p class="status" aria-live="polite">
+        Organizing {recoveringCount === 1 ? '1 Dump' : `${recoveringCount} Dumps`} left from your last session…
+      </p>
+    {:else if retryingCount}
+      <p class="status" aria-live="polite">
+        {retryingCount === 1 ? "1 Dump couldn't be Organized" : `${retryingCount} Dumps couldn't be Organized`} —
+        trying again shortly.
+      </p>
+    {:else if offlineCount}
+      <p class="status" aria-live="polite">
+        {offlineCount === 1
+          ? '1 Dump saved — it will be Organized'
+          : `${offlineCount} Dumps saved — they will be Organized`} when you're back online.
+      </p>
+    {:else if inFlightCount}
+      <p class="status" aria-live="polite">Organizing your Dump…</p>
     {/if}
-    {#if queueError}<p class="status err" aria-live="polite">{queueError}</p>{/if}
+    {#if pendingError}<p class="status err" aria-live="polite">{pendingError}</p>{/if}
 
     {#if !session}
       <!-- The Dump is the product, not a form field: set in the content face, at content size,
@@ -739,6 +870,61 @@
           </li>
         {/each}
       </ul>
+    {/if}
+
+    <p class="rule-label">stranded dumps</p>
+    <p class="hint">
+      A Stranded Dump reached the Vault but never became a Note. The app retries the ones it
+      knows about on its own; this asks the <strong>Vault</strong> instead, which is the only
+      thing that knows about Dumps captured on another device or before this check existed.
+      Organizing one makes a real request and <strong>spends LLM credit</strong>.
+    </p>
+    {#if strandedRecords.length}
+      <ul class="stranded">
+        {#each strandedRecords as r (r.dump.id)}
+          <li class="err">
+            <!-- The timestamp is the way into the Vault: reading the thought is how you
+                 decide whether you still want it Organized at all. -->
+            <a class="vault-link stranded-when" href={obsidianUrl(settings.vaultName, dumpPath(r.dump, settings))}>
+              {new Date(r.dump.createdAt).toLocaleString()}
+            </a>
+            <span class="stranded-text">{firstLine(r.dump.content)}<br /><span class="detail">{r.lastError}</span></span>
+            <button on:click={() => retryStranded([r.dump.id])}>Retry</button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+    <div class="actions">
+      <button on:click={findStranded} disabled={reconciling}>
+        {reconciling ? 'Reading the Vault…' : 'Find stranded Dumps'}
+      </button>
+      {#if strandedInVault.length > 1}
+        <button on:click={organizeAllStranded} disabled={!!organizingStranded}>
+          Organize all {strandedInVault.length}
+        </button>
+      {/if}
+    </div>
+    {#if reconciled}
+      {#if strandedInVault.length}
+        <!-- Which thought, not just how many: "1 Dump couldn't be Organized" is a
+             notification you cannot act on. The link opens the Dump in Obsidian, so the
+             answer to "do I still care about this?" is one tap away. -->
+        <ul class="stranded">
+          {#each strandedInVault as d (d.id)}
+            <li>
+              <a class="vault-link stranded-when" href={obsidianUrl(settings.vaultName, dumpPath(d, settings))}>
+                {new Date(d.createdAt).toLocaleString()}
+              </a>
+              <span class="stranded-text">{firstLine(d.content)}</span>
+              <button on:click={() => organizeStranded(d)} disabled={!!organizingStranded}>
+                {organizingStranded === d.id ? 'Organizing…' : 'Organize'}
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {:else}
+        <p class="hint">Every Dump in the Vault is filed.</p>
+      {/if}
     {/if}
 
     <p class="rule-label">diagnostics</p>

@@ -179,6 +179,50 @@ diagnosing-bugs skill stops here: the cause is established, but there is no in-p
 goes red on an interruption and green on a fix, so a red→green regression loop cannot be built
 without the running app.
 
+**Resolved since (2026-08-24, spec→implement via /grill-with-docs):** the durability gap is
+closed. Every Dump now enrols in a **Pending** store (CONTEXT.md gained *Pending* and
+*Stranded*) the moment it is Captured — online or offline, before anything can fail — and
+leaves only once its Note has been written. The old outbox *was* durable, but it was only ever
+written in the offline branch or the catch, and an interruption is neither: the fetch never
+settles, so no catch runs.
+
+The red test is the finding in one assertion (`tests/pending.test.ts`): start a capture whose
+Organize never resolves, and look at the store while it hangs. Before the fix,
+`expected [] to have a length of 1`. After it, a record with `reason: 'in-flight'`.
+
+- **Window A** (interrupted mid-Organize): at start, `adoptInterrupted` retires the
+  `in-flight` claim on any record that survived the reload — nothing that could still be
+  organizing it exists — and recovery Organizes it. The retry timer deliberately never adopts,
+  so a capture genuinely in flight is not raced.
+- **Window B** (Organized, Note never landed): the same recovery covers it, because the record
+  is only removed by `finalizeCapture` once the write returns.
+- **The duplicate presses**: the draft and the textarea are now cleared the instant the Dump is
+  durably Pending (`onPending`), not when the capture resolves. The text sitting in the box
+  after a press that appeared to do nothing was the invitation to press again.
+- **Not re-Organizing what is already filed**: a Dump cited by a Note (`source:` frontmatter or
+  an appended `_Source:` line) is dequeued untouched. This matters because `noteFilename` is
+  `date-slug(title)` — a second Organize can retitle, so a duplicate recovery would write a
+  *second file*, not overwrite the first. Tested by killing the flow between `writeNote` and the
+  dequeue.
+- **Giving up honestly**: attempts back off 60s→2m→5m→15m and stop at 5. The session that
+  produced `Error: Invalid Adapter: undefined` would otherwise have spun an LLM call a minute
+  all day. After the cap the Dump is **Stranded**: surfaced with its error and a Retry, not
+  retried.
+- **The four existing orphans** are not reachable by any of that — they predate the store. They
+  are found by **Find stranded Dumps** in Config, which runs the orphan check from this finding
+  against the Vault. Manual on purpose: run automatically, its first act would be to spend four
+  LLM calls on thoughts from August 23–24, two of which are duplicates.
+
+Pending state is device-local, which is the one decision here worth an ADR
+(`docs/adr/0005-pending-state-is-device-local.md`): CouchDB was available and rejected, because
+an offline capture cannot write its own "I am offline" marker, and two devices recovering one
+record race into two Notes. The Vault is the cross-device answer instead.
+
+**Still worth watching:** whether a recovered Dump that *would* have been an Append founds a
+separate Note often enough to be annoying. Recovery always founds a new Note — an unattended
+Organize has nobody to confirm an Append with — and Related is supposed to reconnect the two.
+Unobserved either way.
+
 ---
 
 ## 03 — The Note asserts things the Dump never said

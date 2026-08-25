@@ -42,8 +42,13 @@ similarity, and asks the model to synthesize an answer citing them. Embeddings a
 content in the app's own CouchDB database, so each document is embedded once rather than once
 per question ([ADR-0004](./docs/adr/0004-embedding-cache-sibling-database.md)).
 
-**Offline**, a capture is queued in an IndexedDB outbox and shows "saved, will organize when
-online." On reconnect it syncs and Organizes automatically.
+**Every Dump is Pending** from the moment it is captured until its Note exists, recorded in
+IndexedDB. Offline, it shows "saved, will organize when you're back online"; interrupted — the
+tab closed mid-Organize — it is picked up and Organized on the next start. Repeated failures
+back off and then stop, and the Dump is reported as **Stranded** rather than retried forever.
+Pending state is per-device; **Find stranded Dumps** in Config asks the Vault instead, which is
+the only thing that knows about Dumps from another device
+([ADR-0005](./docs/adr/0005-pending-state-is-device-local.md)).
 
 Two folders are written, and only two: `Brain Dump/` for Notes and `_dumps/` for raw Dumps.
 Retrieve *reads* your whole vault, including personal notes — the app never writes outside
@@ -113,7 +118,7 @@ npm run typecheck # svelte-check
 npm run build     # typecheck + production build
 ```
 
-**Seam A** drives the operation layer (`capture`, `organize`, `append`, outbox, `retrieve`)
+**Seam A** drives the operation layer (`capture`, `organize`, `append`, recovery, `retrieve`)
 as black boxes against an in-memory PouchDB and deterministic LLM fakes. It asserts the
 app's orchestration, never model output. This is what runs by default and what should stay
 green.
@@ -172,7 +177,7 @@ src/lib/operations.ts   the operation layer — capture, organize, append, match
 src/lib/retrieve.ts     RAG: embed the vault, rank, synthesize, cite
 src/lib/livesync.ts     LiveSync document format — metadata + content-addressed chunks
 src/lib/llm.ts          the cloud seam (OpenAI-compatible)
-src/lib/outbox.ts       the offline queue
+src/lib/pending.ts      the Pending store — Dumps that still need Organizing
 src/App.svelte          a thin UI shell over the operation layer
 ```
 

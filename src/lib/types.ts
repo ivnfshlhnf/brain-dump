@@ -130,17 +130,44 @@ export interface RetrieveResult {
   citations: Citation[];
 }
 
-/** The offline queue seam: Dumps captured with no connection wait here until a
- *  reconnect syncs them to CouchDB and Organizes them into Notes. A queued Dump is
- *  a Dump — it carries the id and capture time assigned at capture, so once synced
- *  it is dated by when the thought occurred, not by when the connection came back.
- *  The operation layer depends on this interface; the app passes the durable
- *  IndexedDB outbox (see `outbox.ts`). */
-export interface OutboxStore {
-  /** Queue a Dump, keyed by its id — re-adding the same Dump replaces it. */
-  add(dump: Dump): Promise<void>;
-  /** Queued Dumps in capture order (FIFO). */
-  list(): Promise<Dump[]>;
+/** Why a Dump is still Pending — see CONTEXT.md for Pending and Stranded.
+ *
+ *  - `offline`     — captured with no connection; waiting for one.
+ *  - `in-flight`   — the Organize is running right now, in this session.
+ *  - `interrupted` — it was `in-flight` when the app stopped. Nothing is working on it,
+ *                    because nothing survived the restart that could be.
+ *  - `failed`      — an attempt threw. Retried with backoff until the attempt cap. */
+export type PendingReason = 'offline' | 'in-flight' | 'interrupted' | 'failed';
+
+/** A Dump that has been Captured but whose Note does not exist yet (CONTEXT.md: Pending),
+ *  plus the bookkeeping needed to retry it honestly: how many attempts it has cost, what
+ *  the last one said, and when the next is due.
+ *
+ *  The Dump inside carries the id and capture time assigned at Capture, so a Note written
+ *  from it days later is still dated by when the thought occurred. */
+export interface PendingDump {
+  dump: Dump;
+  reason: PendingReason;
+  enrolledAt: number; // ms epoch — when the Dump became Pending
+  attempts: number; // failed Organize attempts so far
+  lastError?: string; // the message from the most recent failure
+  nextAttemptAt?: number; // ms epoch — backoff; undefined means "due now"
+}
+
+/** The durable record of every Dump that still needs Organizing — the one thing whose
+ *  absence stranded four Dumps silently (dogfooding finding 02). A Dump enrols the
+ *  moment it is Captured, online or offline, and leaves only once its Note exists.
+ *
+ *  Deliberately dumb: durability only, no policy. Backoff, the attempt cap and the
+ *  decision to retry live in the operation layer, where they can be read in one place.
+ *  The app passes the IndexedDB implementation (see `pending.ts`); tests pass a fake. */
+export interface PendingStore {
+  /** Write a record, keyed by its Dump's id — saving the same Dump replaces it. */
+  save(record: PendingDump): Promise<void>;
+  get(id: string): Promise<PendingDump | undefined>;
+  /** Every Pending Dump, oldest capture first — they are Organized in the order the
+   *  thoughts occurred. */
+  list(): Promise<PendingDump[]>;
   remove(id: string): Promise<void>;
 }
 

@@ -28,7 +28,7 @@ const EXAMPLE = 'https://openrouter.ai/api/v1';
  *
  *  A blank or scheme-less value resolves against the app's own origin, so every cloud call
  *  quietly 404s against the dev server instead of reaching the provider — a failure that only
- *  shows up later, as a queued Dump. Catching it at save time points at the field while it is
+ *  shows up later, as a Dump left Pending. Catching it at save time points at the field while it is
  *  on screen.
  */
 export function validateProviderUrl(url: string): ProviderUrlProblem | null {
