@@ -419,3 +419,54 @@ of the real CouchDB it reports all six: 2 unfiled, 3 note-deleted, 1 dump-delete
 **Still open:** the dead `hashAlgorithm` setting, and the question this finding was really
 about — why five documents the app wrote never materialised on any device. Nothing here
 prevents it happening again; it only means the app now *sees* it.
+
+**Established since (2026-08-25, from the Mac's own LiveSync log — this is the cause):**
+the app declared the wrong file size, and Obsidian refuses a file whose declared size does
+not match the content it reassembles.
+
+```
+File Brain Dump/2026-08-23-improving-note-quality-from-brain-dumps.md
+seems to be corrupted! Writing prevented. (1960 != 1968)
+```
+
+`writeFile` set `size: content.length` (`src/lib/livesync.ts:59`) and `modifyFile` did the
+same. **`String.length` counts UTF-16 code units; Obsidian validates against UTF-8 bytes.**
+The two agree only for pure ASCII — which is why this went unnoticed through eight Notes and
+sixteen Dumps.
+
+The correlation is exact. Of the 28 documents the app has written, five declare a size that
+disagrees with their UTF-8 byte length, and those five are **precisely** the five that were
+deleted:
+
+| document | utf-16 | utf-8 | non-ASCII |
+|---|---|---|---|
+| `improving-note-quality-from-brain-dumps` | 1960 | 1968 | `–` ×4 |
+| `claude-code-session-switching-issue` | 2086 | 2088 | |
+| `old-coffee-for-cold-brew` | 899 | 901 | |
+| `semekar-s-adenium-grind-adjustment-notes` | 882 | 892 | `—`, `→` |
+| `_dumps/20260824-081958-7d88b5` | 336 | 341 | `’`, `😅` |
+
+Every other app-written document is pure ASCII, declares a size that matches, and is on disk.
+
+The full chain: Organize writes a Note containing an em-dash — which it does in almost every
+Note — the declared size falls short by two bytes per such character, Obsidian calls the file
+corrupted and **prevents the write**, the file therefore never exists on storage, and
+`OfflineScanner` then finds a database entry with no file and deletes it as
+`NEWER_WINS: Treating missing local file as deletion`. Nothing was ever wrong with the
+content; the app mis-measured it.
+
+This also explains the first restore attempt failing. Un-deleting left the wrong `size` in
+place, so Obsidian refused the file again and the scanner deleted it a second time within
+two minutes (rev 4).
+
+**The sha1/xxhash64 mismatch was not the cause.** It is real — the app writes 40-hex-char
+`h:` chunk ids where Obsidian writes 12 — and `hashAlgorithm` is still dead code, but the
+Notes that materialised carry the same sha1 ids as the ones that did not. The counter-evidence
+held; the size did not.
+
+**Resolved since (2026-08-25):** `byteLength()` (UTF-8) replaces `content.length` in both
+`writeFile` and `modifyFile`, and `restoreFile` recomputes the size from the chunks on the way
+back, so restoring a document deleted for this reason does not hand Obsidian the same broken
+file again. Locked by `tests/livesync.test.ts`, which asserts the byte length for content with
+an em-dash, an arrow and an emoji, keeps the ASCII case as the reason it hid so long, and
+covers the re-deletion path directly.

@@ -56,7 +56,7 @@ export async function writeFile(
     children: [chunkId],
     ctime: opts.ctime,
     mtime: opts.mtime,
-    size: content.length,
+    size: byteLength(content),
     type: 'plain',
     eden: {},
   };
@@ -81,6 +81,19 @@ async function putMetadata(db: DocStore, doc: Record<string, unknown>): Promise<
 function isConflict(e: unknown): boolean {
   const err = e as { status?: number; name?: string };
   return err.status === 409 || err.name === 'conflict';
+}
+
+/** The size Obsidian expects in a file's metadata: the content's length in **UTF-8 bytes**.
+ *
+ *  Not `content.length`, which counts UTF-16 code units. The two agree only for pure ASCII,
+ *  which is why writing `content.length` here went unnoticed for so long — and then cost five
+ *  documents. Obsidian validates this field against the content it reassembles, and on a
+ *  mismatch it reports the file as corrupted, refuses to write it to disk, and its offline
+ *  scanner subsequently deletes it from the database for being "missing on storage"
+ *  (dogfooding finding 04). An em-dash is three bytes and one code unit; Organize puts one in
+ *  almost every Note. */
+function byteLength(content: string): number {
+  return new TextEncoder().encode(content).length;
 }
 
 /** A file read back out of the vault: its original-case path and full content.
@@ -150,6 +163,15 @@ export async function restoreFile(
   const doc = await db.get<Record<string, unknown>>(docIdForPath(path, settings));
   if (!doc.deleted) return;
   const { deleted: _deleted, ...restored } = doc;
+
+  // Correct the declared size on the way back. A document deleted for having the wrong one
+  // would otherwise be handed to Obsidian unchanged, called corrupted a second time, and
+  // deleted again — which is exactly what happened on the first restore attempt.
+  const children = (restored.children as string[] | undefined) ?? [];
+  if (children.length) {
+    const chunks = await Promise.all(children.map((id) => db.get<{ data: string }>(id)));
+    restored.size = byteLength(chunks.map((c) => c.data).join(''));
+  }
   await putMetadata(db, restored);
 }
 
@@ -193,7 +215,12 @@ export async function modifyFile(
     // Write the metadata doc with the _rev we read. A 409 here means a concurrent
     // edit landed: loop, re-fetch fresh content, and re-apply the transform.
     try {
-      await db.put({ ...meta, children: [newChunkId], mtime: opts.mtime, size: newContent.length });
+      await db.put({
+        ...meta,
+        children: [newChunkId],
+        mtime: opts.mtime,
+        size: byteLength(newContent),
+      });
       return { metadataId, chunkId: newChunkId };
     } catch (e) {
       if (!isConflict(e)) throw e;
