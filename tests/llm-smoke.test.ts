@@ -77,7 +77,6 @@ const settings: Settings = {
   dumpsFolder: '_dumps',
   managedFolder: 'Brain Dump',
   caseSensitive: false,
-  hashAlgorithm: 'sha1',
   llmProvider: LLM_PROVIDER,
   llmModel: LLM_MODEL,
   llmApiKey: LLM_API_KEY,

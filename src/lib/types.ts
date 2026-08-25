@@ -226,7 +226,6 @@ export interface Settings {
    *  vault. Not the CouchDB database name. */
   vaultName: string;
   caseSensitive: boolean; // LiveSync "Handle files as Case-Sensitive" (default off)
-  hashAlgorithm: 'sha1' | 'xxhash'; // must match the user's LiveSync chunk hash
   // Cloud LLM / embedder (used by later tickets)
   llmProvider: string;
   llmModel: string;
@@ -246,7 +245,6 @@ export const DEFAULT_SETTINGS: Settings = {
   dumpsFolder: '_dumps',
   vaultName: '',
   caseSensitive: false,
-  hashAlgorithm: 'sha1',
   // Real defaults, not suggestions. A greyed placeholder that looks like a default but
   // is not one cost a dogfooding session: the fields read as pre-filled, were actually
   // empty, and every LLM call resolved against the app's own origin. The values below are

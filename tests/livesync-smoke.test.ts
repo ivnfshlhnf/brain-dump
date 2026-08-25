@@ -76,7 +76,6 @@ const settings: Settings = {
   dumpsFolder: '_dumps',
   managedFolder: 'Brain Dump',
   caseSensitive: false,
-  hashAlgorithm: 'sha1',
 };
 
 // A deterministic Organize fake — no real LLM. The smoke test is about the doc format,

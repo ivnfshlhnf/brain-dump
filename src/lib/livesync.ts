@@ -39,6 +39,12 @@ export async function writeFile(
   content: string,
   opts: { ctime: number; mtime: number; hash: HashFn; settings: Settings },
 ): Promise<WrittenDoc> {
+  // Content-addressed by SHA-1. This need not match the hash Obsidian LiveSync is
+  // configured with — it resolves a file's chunks by the ids listed in `children` and does
+  // not recompute them — so the app's ids simply look different from the ones LiveSync
+  // writes itself (40 hex characters against xxhash64's 12). A `hashAlgorithm` setting used
+  // to sit in Settings claiming these had to agree; nothing ever read it, and the claim was
+  // wrong. If a future LiveSync starts verifying chunk ids, this is the line to change.
   const chunkId = 'h:' + (await opts.hash(content));
 
   // Content-addressed chunk: if an identical chunk already exists, that's dedup — keep it.
