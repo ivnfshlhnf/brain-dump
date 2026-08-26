@@ -10,6 +10,7 @@
     adoptInterrupted,
     retryPending,
     findStrandedDumps,
+    findDismissedDumps,
     restoreStranded,
     organizeDump,
     dumpPath,
@@ -107,13 +108,13 @@
   // memory before the Capture press. Cleared the moment a Dump is captured.
   let text = readDraft();
   let status = '';
-  // The grid is the persistent surface and Capture, Note and Ask are sheets over it (tickets
-  // 05–07). Settings is still a view beside the grid; ticket 08 turns it into a sheet too and
-  // ticket 10 takes the nav with it.
+  // The grid is the persistent surface and every other surface — Capture, Note, Ask, Settings
+  // — is a sheet over it (tickets 05–08). `view` is vestigial now that Settings is a sheet too:
+  // it is only ever 'grid', and ticket 10 deletes it along with the rest of the old view switch.
   let view: 'config' | 'grid' = 'grid';
   // The one open sheet, or none. Sheets do not nest, so this is a single value and not a
   // stack: a sheet is a place you drop into from the grid and return from.
-  let sheet: 'capture' | 'note' | 'ask' | null = null;
+  let sheet: 'capture' | 'note' | 'ask' | 'settings' | null = null;
   let busy = false;
 
   // The Note sheet (ticket 06): the whole Note a card opens onto, read live from the Vault —
@@ -160,6 +161,13 @@
   let reconciled = false;
   let reconciling = false;
   let organizingStranded = '';
+  // The Dumps the user has dismissed, shown in the Settings sheet so a dismissed thought stays
+  // reachable (CONTEXT.md: Dismissed). Dismissing writes nothing to the Vault — the Dump is held
+  // out of the Stranded list by the dismissed-id set, not removed — so restoring is its mirror:
+  // the id leaves the set and the Dump returns to the Stranded band on the next reconcile.
+  let dismissedDumps: StrandedDump[] = [];
+  let dismissedLoaded = false;
+  let loadingDismissed = false;
   // The home grid (ticket 02). The grid is the road to capture, so the card read must never
   // gate the Capture control: it paints from a device-local cache and reconciles behind it
   // (ADR-0007). A cold, failed or empty cache shows the Capture control and an empty grid.
@@ -418,6 +426,65 @@
    *  Return to the grid; the question and answer stay in state, so reopening drops back in. */
   function onAskSheetClose() {
     sheet = null;
+  }
+
+  // ── The Settings sheet (ticket 08) ───────────────────────────────────────────
+  // The fourth sheet, reached from the grid and returned to it like every other. The two
+  // fieldsets, the connection checks, the Stranded reconcile and the diagnostics carry over from
+  // the old config view unchanged in substance; what is new is the home for a Dismissed Dump — the
+  // one thing that deliberately has no card. Dismissing is a note to self, never destructive, so a
+  // Dismissed Dump must not sit on the grid but must stay reachable, here, restorable to the
+  // Stranded band. The sheet writes nothing to the Vault on the user's behalf — nothing here fires
+  // a Vault write silently. Save persists the device-local settings, not the Vault, and the new
+  // Dismiss/Restore-dismissed touch only the device-local dismissed set. The carried-over Stranded
+  // actions (Organize, Restore-deleted) do write to the Vault, but only at an explicit button
+  // press — the user filing or un-deleting a thought — never automatically.
+
+  /** Open the Settings sheet, focusing the close control the way a reading sheet does. */
+  function openSettings() {
+    sheet = 'settings';
+  }
+
+  /** Ask the sheet to close; `onSettingsSheetClose` does the work, and it is the one way out. */
+  function closeSettings() {
+    sheetEl?.close();
+  }
+
+  /** The Settings sheet closed, however it was asked to (Esc, the close control, the back
+   *  gesture). Return to the grid. A Dismissed Dump the user restored mid-session is already back
+   *  on the Stranded band — `restoreDismissed` re-derived it — so the grid is current. */
+  function onSettingsSheetClose() {
+    sheet = null;
+  }
+
+  /** List the Dumps the user has dismissed — `findDismissedDumps` inverts `findStrandedDumps`'s
+   *  exclusion, so each carries the reason it was stranded for. The Vault is the only thing that
+   *  knows what a dismissed Dump is, so this reads it (the way "Find stranded Dumps" does). */
+  async function showDismissed() {
+    loadingDismissed = true;
+    try {
+      dismissedDumps = await findDismissedDumps({ ...storeDeps(), dismissed });
+      dismissedLoaded = true;
+    } catch (e) {
+      status = `Could not read the Vault: ${(e as Error).message}`;
+    } finally {
+      loadingDismissed = false;
+    }
+  }
+
+  /** Restore a Dismissed Dump: the id leaves the dismissed set, so the next reconcile no longer
+   *  excludes it and the Dump returns to the Stranded band. Writes nothing to the Vault — the
+   *  thought was never gone, only held out of the list. */
+  async function restoreDismissed(stranded: StrandedDump) {
+    try {
+      await dismissed.restore(stranded.dump.id);
+      dismissedDumps = dismissedDumps.filter((d) => d.dump.id !== stranded.dump.id);
+      status = 'Restored — the Dump is back on the Stranded band.';
+      // Re-derive the Stranded list so the grid (and the Stranded section) show it again.
+      await findStranded();
+    } catch (e) {
+      status = `Could not restore: ${(e as Error).message}`;
+    }
   }
 
   onMount(async () => {
@@ -899,6 +966,31 @@
   </article>
 {/snippet}
 
+{#snippet strandedRowHead(s: StrandedDump)}
+  <!-- The row head every stranded list shares — which thought, when, and why it stranded — so the
+       Stranded list and the Dismissed list draw it the same way. The reason cascade lives here once,
+       not in each list: a Dump nobody filed, a deleted Note, a Note Obsidian won't write, or both
+       gone. The action buttons differ per list and stay in the caller. -->
+  <a class="vault-link stranded-when" href={obsidianUrl(settings.vaultName, dumpPath(s.dump, settings))}>
+    {new Date(s.dump.createdAt).toLocaleString()}
+  </a>
+  <span class="stranded-text">
+    {firstLine(s.dump.content)}
+    <br />
+    <span class="detail">
+      {#if s.reason === 'unfiled'}
+        never became a Note
+      {:else if s.reason === 'note-deleted'}
+        its Note was deleted — {s.notePath}
+      {:else if s.reason === 'note-unreadable'}
+        its Note exists but Obsidian will not write it — {s.notePath}
+      {:else}
+        the Dump and its Note were both deleted
+      {/if}
+    </span>
+  </span>
+{/snippet}
+
 <div class="page" class:wide={view === 'grid'}>
   <header class="masthead">
     <h1 class="wordmark">brain-dump</h1>
@@ -919,9 +1011,9 @@
         title={vaultIsEmpty ? 'Ask needs a Note to answer from' : undefined}
         on:click={() => { view = 'grid'; openAsk(); }}>ask</button>
       <button
-        class:on={view === 'config'}
-        aria-current={view === 'config' ? 'page' : undefined}
-        on:click={() => (view = 'config')}>settings</button>
+        class:on={sheet === 'settings'}
+        aria-current={sheet === 'settings' ? 'page' : undefined}
+        on:click={() => { view = 'grid'; openSettings(); }}>settings</button>
     </nav>
   </header>
 
@@ -1043,176 +1135,6 @@
            truly empty case. -->
       <div class="grid"></div>
     {/if}
-    </section>
-  {:else}
-    <section class="surface">
-    <!-- Twelve fields are two decisions: where the notes live, and which model does the
-         work. Grouped under the same ruled labels the rest of this surface already uses. -->
-    <fieldset class="field-group">
-      <legend class="rule-label">vault</legend>
-      <label>CouchDB URL <input bind:value={settings.couchdbUrl} placeholder="http://localhost:5984" /></label>
-      <label>Database <input bind:value={settings.couchdbDb} placeholder="obsidiannotes" /></label>
-      <label>Username <input bind:value={settings.couchdbUser} /></label>
-      <label>Password <input type="password" bind:value={settings.couchdbPassword} /></label>
-      <label>Managed folder <input bind:value={settings.managedFolder} /></label>
-      <label>Obsidian vault name <input bind:value={settings.vaultName} placeholder="your vault, on this device" /></label>
-      <label>Case-sensitive file names <input type="checkbox" bind:checked={settings.caseSensitive} /></label>
-    </fieldset>
-
-    <fieldset class="field-group">
-      <legend class="rule-label">model</legend>
-      <label>LLM provider <input bind:value={settings.llmProvider} /></label>
-      <label>LLM model <input bind:value={settings.llmModel} /></label>
-      <label>LLM API key <input type="password" bind:value={settings.llmApiKey} /></label>
-      <label>Embedder model <input bind:value={settings.embedderModel} /></label>
-      <label>Embeddings database <input bind:value={settings.embeddingsDb} /></label>
-    </fieldset>
-
-    <div class="actions">
-      <button class="primary" on:click={saveConfig}>Save settings</button>
-    </div>
-
-    <p class="rule-label">connection</p>
-    <p class="hint">
-      Checks CouchDB, the chat model, and the embedder independently, so a failure points at
-      one field. The chat and embedder checks each make one small real request and
-      <strong>spend LLM credit</strong> — a fraction of a cent per press. It also creates and
-      immediately removes a throwaway database, to find out whether your CouchDB account may
-      create one at all.
-    </p>
-    <div class="actions">
-      <button on:click={testConnections} disabled={testing}>
-        {testing ? 'Testing…' : 'Test connection'}
-      </button>
-    </div>
-    {#if health}
-      <ul class="checks">
-        {#each healthRows(health) as row}
-          <li class:err={!row.result.ok}>
-            <!-- Drawn, not typed: a ✓/✗ character pair borrows whatever the system font
-                 draws and belongs to no part of this design. The word beside it carries the
-                 result for anyone the colour and the mark do not reach. -->
-            <svg class="check-mark" viewBox="0 0 16 16" aria-hidden="true">
-              {#if row.result.ok}
-                <path d="M3.5 8.5 6.5 11.5 12.5 4.5" />
-              {:else}
-                <path d="M4.5 4.5 11.5 11.5 M11.5 4.5 4.5 11.5" />
-              {/if}
-            </svg>
-            <span><span class="sr-only">{row.result.ok ? 'Passed:' : 'Failed:'}</span>
-              <strong>{row.name}</strong> — {row.result.message}</span>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-
-    <p class="rule-label">stranded dumps</p>
-    <p class="hint">
-      A Stranded Dump reached the Vault but never became a Note. The app retries the ones it
-      knows about on its own; this asks the <strong>Vault</strong> instead, which is the only
-      thing that knows about Dumps captured on another device or before this check existed.
-      Organizing one makes a real request and <strong>spends LLM credit</strong>. Restoring a
-      deleted document costs nothing — the content was never gone, only marked — and brings
-      back the Note that existed rather than writing a new one. Dismiss writes nothing to the
-      Vault: it only stops this list mentioning the Dump again.
-    </p>
-    {#if strandedRecords.length}
-      <ul class="stranded">
-        {#each strandedRecords as r (r.dump.id)}
-          <li class="err">
-            <!-- The timestamp is the way into the Vault: reading the thought is how you
-                 decide whether you still want it Organized at all. -->
-            <a class="vault-link stranded-when" href={obsidianUrl(settings.vaultName, dumpPath(r.dump, settings))}>
-              {new Date(r.dump.createdAt).toLocaleString()}
-            </a>
-            <span class="stranded-text">{firstLine(r.dump.content)}<br /><span class="detail">{r.lastError}</span></span>
-            <button on:click={() => retryStranded([r.dump.id])}>Retry</button>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-    <div class="actions">
-      <button on:click={findStranded} disabled={reconciling}>
-        {reconciling ? 'Reading the Vault…' : 'Find stranded Dumps'}
-      </button>
-      {#if unfiledStranded.length > 1}
-        <button on:click={organizeAllStranded} disabled={!!organizingStranded}>
-          Organize all {unfiledStranded.length}
-        </button>
-      {/if}
-    </div>
-    {#if reconciled}
-      {#if strandedInVault.length}
-        <!-- Which thought, not just how many: "1 Dump couldn't be Organized" is a
-             notification you cannot act on. The link opens the Dump in Obsidian, so the
-             answer to "do I still care about this?" is one tap away. -->
-        <!-- One list, three states. They are one question — which of my thoughts are not
-             in my Vault? — so splitting them would make you look in two places to answer
-             it. Each row says which state it is in and offers only the action that fits:
-             a Dump nobody ever filed wants Organize, a deleted one wants its document
-             back. -->
-        <ul class="stranded">
-          {#each strandedInVault as s (s.dump.id)}
-            <li>
-              <a class="vault-link stranded-when" href={obsidianUrl(settings.vaultName, dumpPath(s.dump, settings))}>
-                {new Date(s.dump.createdAt).toLocaleString()}
-              </a>
-              <span class="stranded-text">
-                {firstLine(s.dump.content)}
-                <br />
-                <span class="detail">
-                  {#if s.reason === 'unfiled'}
-                    never became a Note
-                  {:else if s.reason === 'note-deleted'}
-                    its Note was deleted — {s.notePath}
-                  {:else if s.reason === 'note-unreadable'}
-                    its Note exists but Obsidian will not write it — {s.notePath}
-                  {:else}
-                    the Dump and its Note were both deleted
-                  {/if}
-                </span>
-              </span>
-              {#if s.reason === 'unfiled'}
-                <button on:click={() => organizeStranded(s.dump)} disabled={!!organizingStranded}>
-                  {organizingStranded === s.dump.id ? 'Organizing…' : 'Organize'}
-                </button>
-              {:else}
-                <button on:click={() => restoreDeleted(s)} disabled={!!organizingStranded}>
-                  {#if organizingStranded === s.dump.id}
-                    {s.reason === 'note-unreadable' ? 'Repairing…' : 'Restoring…'}
-                  {:else}
-                    {s.reason === 'note-unreadable' ? 'Repair' : 'Restore'}
-                  {/if}
-                </button>
-              {/if}
-              <button on:click={() => dismissStranded(s)} disabled={!!organizingStranded}>Dismiss</button>
-            </li>
-          {/each}
-        </ul>
-      {:else}
-        <p class="hint">Every Dump in the Vault is filed.</p>
-      {/if}
-    {/if}
-
-    <p class="rule-label">diagnostics</p>
-    <p class="hint">
-      The last {logEvents.length} events, newest first. In dev these are also appended to
-      <code>logs/brain-dump.jsonl</code> in the project folder.
-    </p>
-    <div class="actions">
-      <button on:click={copyDiagnostics}>Copy diagnostics</button>
-      <button on:click={() => { logStore.clear(); logEvents = []; status = 'Diagnostics cleared'; }}>Clear</button>
-    </div>
-    <ul class="diagnostics">
-      {#each logEvents.slice().reverse() as e}
-        <li class:err={e.level === 'error'}>
-          <code>{new Date(e.at).toLocaleTimeString()}</code>
-          <strong>{e.op}</strong>
-          {e.message}
-          {#if e.detail}<code class="detail">{JSON.stringify(e.detail)}</code>{/if}
-        </li>
-      {/each}
-    </ul>
     </section>
   {/if}
 
@@ -1509,6 +1431,211 @@
             {/if}
           </section>
         {/if}
+      </div>
+    </div>
+  </dialog>
+{/if}
+
+{#if sheet === 'settings'}
+  <!-- The Settings sheet (ticket 08) — the fourth sheet, reached from the grid and returned to it
+       like every other. The two fieldsets, the connection checks, the Stranded reconcile and the
+       diagnostics carry over from the old config view unchanged in substance; what is new is the
+       home for a Dismissed Dump — the one thing that deliberately has no card. Dismiss/Restore touch
+       only the device-local dismissed set, never the Vault: dismissing is a note to self, and
+       restoring returns the Dump to the Stranded band because the next reconcile no longer
+       excludes it. -->
+  <dialog
+    class="sheet"
+    bind:this={sheetEl}
+    on:close={onSettingsSheetClose}
+    aria-label="Settings">
+    <div class="sheet__inner">
+      <div class="sheet__bar">
+        <p class="sheet__title">settings</p>
+        <button class="sheet__close" on:click={closeSettings}>close</button>
+      </div>
+      <div class="sheet__body">
+    <!-- Twelve fields are two decisions: where the notes live, and which model does the
+         work. Grouped under the same ruled labels the rest of this surface already uses. -->
+    <fieldset class="field-group">
+      <legend class="rule-label">vault</legend>
+      <label>CouchDB URL <input bind:value={settings.couchdbUrl} placeholder="http://localhost:5984" /></label>
+      <label>Database <input bind:value={settings.couchdbDb} placeholder="obsidiannotes" /></label>
+      <label>Username <input bind:value={settings.couchdbUser} /></label>
+      <label>Password <input type="password" bind:value={settings.couchdbPassword} /></label>
+      <label>Managed folder <input bind:value={settings.managedFolder} /></label>
+      <label>Obsidian vault name <input bind:value={settings.vaultName} placeholder="your vault, on this device" /></label>
+      <label>Case-sensitive file names <input type="checkbox" bind:checked={settings.caseSensitive} /></label>
+    </fieldset>
+
+    <fieldset class="field-group">
+      <legend class="rule-label">model</legend>
+      <label>LLM provider <input bind:value={settings.llmProvider} /></label>
+      <label>LLM model <input bind:value={settings.llmModel} /></label>
+      <label>LLM API key <input type="password" bind:value={settings.llmApiKey} /></label>
+      <label>Embedder model <input bind:value={settings.embedderModel} /></label>
+      <label>Embeddings database <input bind:value={settings.embeddingsDb} /></label>
+    </fieldset>
+
+    <div class="actions">
+      <button class="primary" on:click={saveConfig}>Save settings</button>
+    </div>
+
+    <p class="rule-label">connection</p>
+    <p class="hint">
+      Checks CouchDB, the chat model, and the embedder independently, so a failure points at
+      one field. The chat and embedder checks each make one small real request and
+      <strong>spend LLM credit</strong> — a fraction of a cent per press. It also creates and
+      immediately removes a throwaway database, to find out whether your CouchDB account may
+      create one at all.
+    </p>
+    <div class="actions">
+      <button on:click={testConnections} disabled={testing}>
+        {testing ? 'Testing…' : 'Test connection'}
+      </button>
+    </div>
+    {#if health}
+      <ul class="checks">
+        {#each healthRows(health) as row}
+          <li class:err={!row.result.ok}>
+            <!-- Drawn, not typed: a ✓/✗ character pair borrows whatever the system font
+                 draws and belongs to no part of this design. The word beside it carries the
+                 result for anyone the colour and the mark do not reach. -->
+            <svg class="check-mark" viewBox="0 0 16 16" aria-hidden="true">
+              {#if row.result.ok}
+                <path d="M3.5 8.5 6.5 11.5 12.5 4.5" />
+              {:else}
+                <path d="M4.5 4.5 11.5 11.5 M11.5 4.5 4.5 11.5" />
+              {/if}
+            </svg>
+            <span><span class="sr-only">{row.result.ok ? 'Passed:' : 'Failed:'}</span>
+              <strong>{row.name}</strong> — {row.result.message}</span>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+
+    <p class="rule-label">stranded dumps</p>
+    <p class="hint">
+      A Stranded Dump reached the Vault but never became a Note. The app retries the ones it
+      knows about on its own; this asks the <strong>Vault</strong> instead, which is the only
+      thing that knows about Dumps captured on another device or before this check existed.
+      Organizing one makes a real request and <strong>spends LLM credit</strong>. Restoring a
+      deleted document costs nothing — the content was never gone, only marked — and brings
+      back the Note that existed rather than writing a new one. Dismiss writes nothing to the
+      Vault: it only stops this list mentioning the Dump again.
+    </p>
+    {#if strandedRecords.length}
+      <ul class="stranded">
+        {#each strandedRecords as r (r.dump.id)}
+          <li class="err">
+            <!-- The timestamp is the way into the Vault: reading the thought is how you
+                 decide whether you still want it Organized at all. -->
+            <a class="vault-link stranded-when" href={obsidianUrl(settings.vaultName, dumpPath(r.dump, settings))}>
+              {new Date(r.dump.createdAt).toLocaleString()}
+            </a>
+            <span class="stranded-text">{firstLine(r.dump.content)}<br /><span class="detail">{r.lastError}</span></span>
+            <button on:click={() => retryStranded([r.dump.id])}>Retry</button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+    <div class="actions">
+      <button on:click={findStranded} disabled={reconciling}>
+        {reconciling ? 'Reading the Vault…' : 'Find stranded Dumps'}
+      </button>
+      {#if unfiledStranded.length > 1}
+        <button on:click={organizeAllStranded} disabled={!!organizingStranded}>
+          Organize all {unfiledStranded.length}
+        </button>
+      {/if}
+    </div>
+    {#if reconciled}
+      {#if strandedInVault.length}
+        <!-- Which thought, not just how many: "1 Dump couldn't be Organized" is a
+             notification you cannot act on. The link opens the Dump in Obsidian, so the
+             answer to "do I still care about this?" is one tap away. -->
+        <!-- One list, three states. They are one question — which of my thoughts are not
+             in my Vault? — so splitting them would make you look in two places to answer
+             it. Each row says which state it is in and offers only the action that fits:
+             a Dump nobody ever filed wants Organize, a deleted one wants its document
+             back. -->
+        <ul class="stranded">
+          {#each strandedInVault as s (s.dump.id)}
+            <li>
+              {@render strandedRowHead(s)}
+              {#if s.reason === 'unfiled'}
+                <button on:click={() => organizeStranded(s.dump)} disabled={!!organizingStranded}>
+                  {organizingStranded === s.dump.id ? 'Organizing…' : 'Organize'}
+                </button>
+              {:else}
+                <button on:click={() => restoreDeleted(s)} disabled={!!organizingStranded}>
+                  {#if organizingStranded === s.dump.id}
+                    {s.reason === 'note-unreadable' ? 'Repairing…' : 'Restoring…'}
+                  {:else}
+                    {s.reason === 'note-unreadable' ? 'Repair' : 'Restore'}
+                  {/if}
+                </button>
+              {/if}
+              <button on:click={() => dismissStranded(s)} disabled={!!organizingStranded}>Dismiss</button>
+            </li>
+          {/each}
+        </ul>
+      {:else}
+        <p class="hint">Every Dump in the Vault is filed.</p>
+      {/if}
+    {/if}
+
+    <p class="rule-label">dismissed dumps</p>
+    <p class="hint">
+      A Dismissed Dump is a thought you saw in the Stranded list and decided not to file. Dismissing
+      writes nothing to the Vault — the Dump stays exactly where it is, and is held out of the
+      Stranded list rather than removed. Restoring one puts it back on the Stranded band: the Dump
+      was never gone, only silenced.
+    </p>
+    <div class="actions">
+      <button on:click={showDismissed} disabled={loadingDismissed}>
+        {loadingDismissed ? 'Reading the Vault…' : 'Show dismissed Dumps'}
+      </button>
+    </div>
+    {#if dismissedLoaded}
+      {#if dismissedDumps.length}
+        <!-- The same shape as the Stranded list — which thought, and why it stranded — so the
+             user recognizes what restoring would put back. Restore is the mirror of Dismiss: the
+             id leaves the dismissed set and the Dump returns to the Stranded band. -->
+        <ul class="stranded">
+          {#each dismissedDumps as s (s.dump.id)}
+            <li>
+              {@render strandedRowHead(s)}
+              <button on:click={() => restoreDismissed(s)}>Restore</button>
+            </li>
+          {/each}
+        </ul>
+      {:else}
+        <p class="hint">No dismissed Dumps — every thought you set aside is filed or gone.</p>
+      {/if}
+    {/if}
+
+    <p class="rule-label">diagnostics</p>
+    <p class="hint">
+      The last {logEvents.length} events, newest first. In dev these are also appended to
+      <code>logs/brain-dump.jsonl</code> in the project folder.
+    </p>
+    <div class="actions">
+      <button on:click={copyDiagnostics}>Copy diagnostics</button>
+      <button on:click={() => { logStore.clear(); logEvents = []; status = 'Diagnostics cleared'; }}>Clear</button>
+    </div>
+    <ul class="diagnostics">
+      {#each logEvents.slice().reverse() as e}
+        <li class:err={e.level === 'error'}>
+          <code>{new Date(e.at).toLocaleTimeString()}</code>
+          <strong>{e.op}</strong>
+          {e.message}
+          {#if e.detail}<code class="detail">{JSON.stringify(e.detail)}</code>{/if}
+        </li>
+      {/each}
+    </ul>
+        {#if status}<p class="status" aria-live="polite">{status}</p>{/if}
       </div>
     </div>
   </dialog>

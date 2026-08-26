@@ -20,6 +20,7 @@ import {
   adoptInterrupted,
   retryPending,
   findStrandedDumps,
+  findDismissedDumps,
   restoreStranded,
   sourceWikilink,
   parseDumpFile,
@@ -835,5 +836,97 @@ describe('deleted documents', () => {
     expect(await readVaultFiles(db, () => true)).toHaveLength(1);
     // And it survives a restart.
     expect(await createIndexedDbDismissedStore().list()).toEqual([strandedDump.id]);
+  });
+});
+
+// --- Dismissed Dumps (ticket 08: the Settings sheet lists them and can restore them) -------
+// Dismissing is a note to self that writes nothing to the Vault (CONTEXT.md: Dismissed); the
+// Dump stays exactly where it is and is simply held out of the Stranded list by `deriveStranded`'s
+// dismissed-id exclusion. `findDismissedDumps` inverts that exclusion: it lists the Dumps the user
+// dismissed, with the reason each was stranded for, so the Settings sheet can show them and offer
+// Restore. Restoring is the mirror of dismissing — it removes the id from the dismissed set, so the
+// next reconcile no longer excludes it: the Dump returns to the Stranded band.
+describe('dismissed Dumps — listed and restored (ticket 08)', () => {
+  const older: Dump = {
+    id: '7d88b526-c399-422e-8538-60741ccb885a',
+    content: 'semekar adenium di grind 0.4 nyangkut banget',
+    context: '',
+    createdAt: fixedNow,
+    modality: 'text',
+  };
+  const newer: Dump = {
+    id: '22222222-3333-4444-5555-666666666666',
+    content: 'a second thought that also came to nothing',
+    context: '',
+    createdAt: fixedNow + 60_000,
+    modality: 'text',
+  };
+
+  async function writeDumpFile(dump: Dump): Promise<void> {
+    const { writeFile } = await import('../src/lib/livesync');
+    await writeFile(db, dumpPath(dump, settings), dumpFileContent(dump), {
+      ctime: dump.createdAt, mtime: dump.createdAt, hash: sha1Hex, settings,
+    });
+  }
+
+  it('lists the Dumps the user dismissed, with the reason each was stranded for, oldest first', async () => {
+    await writeDumpFile(older);
+    await writeDumpFile(newer);
+    const dismissed = createIndexedDbDismissedStore();
+    await dismissed.dismiss(newer.id);
+    await dismissed.dismiss(older.id);
+
+    const list = await findDismissedDumps({ db, settings, hash: sha1Hex, dismissed });
+
+    // Oldest capture first — the same order the Stranded band uses — and each carries the
+    // reason it would be stranded for, so the user can tell what restoring would return to.
+    expect(list).toHaveLength(2);
+    expect(list.map((s) => s.dump.id)).toEqual([older.id, newer.id]);
+    expect(list[0].reason).toBe('unfiled');
+    expect(list[1].reason).toBe('unfiled');
+  });
+
+  it('keeps a still-stranded Dump the user has not dismissed out of the Dismissed list', async () => {
+    await writeDumpFile(older);
+    const dismissed = createIndexedDbDismissedStore();
+    // Nothing dismissed — older is stranded but not dismissed.
+
+    expect(await findDismissedDumps({ db, settings, hash: sha1Hex, dismissed })).toEqual([]);
+    // The same Dump is, of course, still stranded: the Dismissed list is not the Stranded list.
+    expect(await findStrandedDumps({ db, settings, hash: sha1Hex, dismissed })).toHaveLength(1);
+  });
+
+  it('does not list a Dismissed Dump a live Note has since cited — it was filed after the dismissal', async () => {
+    await writeDumpFile(older);
+    const dismissed = createIndexedDbDismissedStore();
+    await dismissed.dismiss(older.id);
+    // The Dump gets filed after the dismissal — a live Note now cites it.
+    const { writeFile } = await import('../src/lib/livesync');
+    await writeFile(
+      db,
+      'Brain Dump/2026-08-21-filed.md',
+      `---\ntitle: A Note\nsource: ${sourceWikilink(older, settings)}\n---\n\nbody\n`,
+      { ctime: fixedNow, mtime: fixedNow, hash: sha1Hex, settings },
+    );
+
+    // It is no longer stranded-shaped, so it has no place in the Dismissed list even though the
+    // dismissed set still holds a stale id: restoring it would strand nothing.
+    expect(await findDismissedDumps({ db, settings, hash: sha1Hex, dismissed })).toEqual([]);
+  });
+
+  it('restoring a Dismissed Dump returns it to the Stranded band, and takes it off the Dismissed list', async () => {
+    await writeDumpFile(older);
+    const dismissed = createIndexedDbDismissedStore();
+    await dismissed.dismiss(older.id);
+
+    // Dismissed: held out of Stranded, shown as Dismissed.
+    expect(await findStrandedDumps({ db, settings, hash: sha1Hex, dismissed })).toEqual([]);
+    expect(await findDismissedDumps({ db, settings, hash: sha1Hex, dismissed })).toHaveLength(1);
+
+    // Restore — the mirror of dismiss: the id leaves the dismissed set, so the next reconcile
+    // no longer excludes it. The Dump is back on the Stranded band and off the Dismissed list.
+    await dismissed.restore(older.id);
+    expect(await findStrandedDumps({ db, settings, hash: sha1Hex, dismissed })).toHaveLength(1);
+    expect(await findDismissedDumps({ db, settings, hash: sha1Hex, dismissed })).toEqual([]);
   });
 });

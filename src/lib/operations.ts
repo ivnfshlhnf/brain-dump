@@ -1369,15 +1369,15 @@ async function readVaultState(deps: StoreDeps): Promise<VaultState> {
   return buildVaultState(await readReconcileFiles(deps), deps.settings);
 }
 
-/** Every Dump in `state` that no live Note cites — the Stranded thoughts (CONTEXT.md). Pure: the
- *  reason cascade (`dump-deleted` > `unfiled` > `note-deleted` > `note-unreadable`), the
- *  `notePath` spread, the Pending/Dismissed exclusion, and the oldest-first sort. The log stays
- *  with the caller — `findStrandedDumps` for the Settings flow, the grid otherwise — because it
- *  is a property of *running* a reconciliation, not of *deriving* the list. */
+/** Every Dump in `state` that no live Note cites and that `include` admits — the Stranded
+ *  thoughts (CONTEXT.md), or, with the predicate inverted, the Dismissed ones. Pure: the reason
+ *  cascade (`dump-deleted` > `unfiled` > `note-deleted` > `note-unreadable`), the `notePath`
+ *  spread, the membership test, and the oldest-first sort. The log stays with the caller —
+ *  `findStrandedDumps` / `findDismissedDumps` for the Settings flow, the grid otherwise — because
+ *  it is a property of *running* a reconciliation, not of *deriving* the list. */
 function deriveStranded(
   state: VaultState,
-  pendingIds: Set<string>,
-  dismissedIds: Set<string>,
+  include: (dumpId: string) => boolean,
 ): StrandedDump[] {
   const { dumps, referenced, brokenRefs } = state;
   const stranded: StrandedDump[] = [];
@@ -1385,7 +1385,7 @@ function deriveStranded(
     const link = wikilink(path);
     // A live Note cites it: filed, whatever else is true.
     if (referenced.has(link)) continue;
-    if (pendingIds.has(dump.id) || dismissedIds.has(dump.id)) continue;
+    if (!include(dump.id)) continue;
     const broken = brokenRefs.get(link);
     // The Dump's own deletion outranks its Note's: restoring the Note alone would leave
     // the thought itself out of the Vault.
@@ -1401,6 +1401,14 @@ function deriveStranded(
   return stranded.sort(
     (a, b) => a.dump.createdAt - b.dump.createdAt || a.dump.id.localeCompare(b.dump.id),
   );
+}
+
+/** The membership a Stranded list keeps: a Dump that is neither Pending (known — recovery is
+ *  handling it) nor Dismissed (the user set it aside). The mirror of `findDismissedDumps`'s
+ *  `(id) => dismissedIds.has(id)`, named once so the grid pass and the Settings reconcile share one
+ *  shape instead of two inline copies of the same predicate. */
+function notExcluded(pendingIds: Set<string>, dismissedIds: Set<string>): (id: string) => boolean {
+  return (id) => !pendingIds.has(id) && !dismissedIds.has(id);
 }
 
 /** One Vault pass yields the grid's Note cards AND its Stranded Dumps (ADR-0007 / acceptance #2).
@@ -1420,7 +1428,7 @@ export async function readVaultForGrid(
       (f) => f.path.startsWith(`${deps.settings.managedFolder}/`) && !f.deleted,
     ),
   );
-  const stranded = deriveStranded(state, pendingIds, dismissedIds);
+  const stranded = deriveStranded(state, notExcluded(pendingIds, dismissedIds));
   return { cards, stranded };
 }
 
@@ -1445,7 +1453,7 @@ export async function findStrandedDumps(deps: ReconcileDeps): Promise<StrandedDu
   const records = deps.pending ? await deps.pending.list() : [];
   const pendingIds = new Set(records.map((r) => r.dump.id));
   const dismissedIds = new Set(deps.dismissed ? await deps.dismissed.list() : []);
-  const stranded = deriveStranded(state, pendingIds, dismissedIds);
+  const stranded = deriveStranded(state, notExcluded(pendingIds, dismissedIds));
 
   (deps.log ?? noopLog)({
     op: 'reconcile',
@@ -1461,6 +1469,22 @@ export async function findStrandedDumps(deps: ReconcileDeps): Promise<StrandedDu
     },
   });
   return stranded;
+}
+
+/** The Dumps the user has dismissed — the thoughts they saw in the Stranded list and decided not
+ *  to file (CONTEXT.md: Dismissed). This is `deriveStranded` with the membership inverted: where
+ *  `findStrandedDumps` *excludes* dismissed ids, this *includes* only them, so the Settings sheet
+ *  can list the dismissed thoughts and offer Restore. Each carries the reason it was stranded for,
+ *  so the user can tell what restoring would put back.
+ *
+ *  Dismissing writes nothing to the Vault, so a Dump listed here is exactly where it was — still
+ *  unreferenced and still readable. A dismissed Dump a live Note has since cited (filed after the
+ *  dismissal) is not listed: it is no longer stranded-shaped, and restoring it would strand
+ *  nothing. */
+export async function findDismissedDumps(deps: ReconcileDeps): Promise<StrandedDump[]> {
+  const state = await readVaultState(deps);
+  const dismissedIds = new Set(deps.dismissed ? await deps.dismissed.list() : []);
+  return deriveStranded(state, (id) => dismissedIds.has(id));
 }
 
 /** Undo the deletion that stranded a Dump: bring back the Note, and the Dump too when it
