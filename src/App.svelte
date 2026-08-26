@@ -18,6 +18,7 @@
     fileOnGrid,
     readNote,
     reorganizeNote,
+    citedCards,
     type CaptureSession,
     type NoteView,
   } from './lib/operations';
@@ -37,7 +38,6 @@
   import {
     DEFAULT_SETTINGS,
     type Settings,
-    type Citation,
     type Dump,
     type NoteCard,
     type PendingDump,
@@ -107,13 +107,13 @@
   // memory before the Capture press. Cleared the moment a Dump is captured.
   let text = readDraft();
   let status = '';
-  // The grid is the persistent surface and Capture is a sheet over it (ticket 05). Ask and
-  // Settings are still views beside the grid; ticket 10 turns them into sheets too and takes
-  // the nav with them.
-  let view: 'ask' | 'config' | 'grid' = 'grid';
+  // The grid is the persistent surface and Capture, Note and Ask are sheets over it (tickets
+  // 05–07). Settings is still a view beside the grid; ticket 08 turns it into a sheet too and
+  // ticket 10 takes the nav with it.
+  let view: 'config' | 'grid' = 'grid';
   // The one open sheet, or none. Sheets do not nest, so this is a single value and not a
   // stack: a sheet is a place you drop into from the grid and return from.
-  let sheet: 'capture' | 'note' | null = null;
+  let sheet: 'capture' | 'note' | 'ask' | null = null;
   let busy = false;
 
   // The Note sheet (ticket 06): the whole Note a card opens onto, read live from the Vault —
@@ -138,10 +138,12 @@
   // decision is held until the user taps Append — so the autosave no-ops an
   // unconfirmed append rather than silently appending.
   let appendConfirmed = false;
-  // Retrieve: a question over the whole vault, and the answer with its citations.
+  // Retrieve: a question over the whole vault, and the answer with its citations. The citations
+  // are shown as the same cards the grid shows (ticket 07), so the answer's sources are
+  // tappable into the Note sheet — `askCards` is that projection, built once per answer.
   let question = '';
   let answer = '';
-  let citations: Citation[] = [];
+  let askCards: NoteCard[] = [];
   let asking = false;
 
   // The durable record of every Dump that still needs Organizing. A Capture enrols here
@@ -164,6 +166,9 @@
   const cardCache = createIndexedDbCardCache();
   let cards: NoteCard[] = [];
   let cardsLoaded = false;
+  // The Vault is empty once the card cache has settled with nothing in it — the proxy Ask dims
+  // against, since retrieve can't answer from Notes that aren't there. One concept, named once.
+  $: vaultIsEmpty = cardsLoaded && cards.length === 0;
   // The card of the Note just filed. It slots into the grid wearing the `set` ring — the
   // receipt for a commit is the thing itself arriving, not a message about it — and goes
   // quiet again shortly after, leaving nothing behind.
@@ -250,11 +255,11 @@
   let sheetEl: HTMLDialogElement | null = null;
   $: if (sheetEl && sheet && !sheetEl.open) {
     sheetEl.showModal();
-    if (sheet === 'capture') {
-      // showModal() puts focus on the sheet's first focusable control, which is the way out.
-      // The field is the reason the sheet opened, so it takes focus back: on a phone that is
-      // the keyboard rising, and on a desktop it is the first character needing no tap.
-      sheetEl.querySelector<HTMLTextAreaElement>('textarea.dump')?.focus({ preventScroll: true });
+    if (sheet === 'capture' || sheet === 'ask') {
+      // A typing sheet — Capture's Dump, Ask's question — opens to type, so the field takes
+      // focus back from the close control showModal() lands it on. On a phone that is the
+      // keyboard rising; on a desktop it is the first character needing no tap.
+      sheetEl.querySelector<HTMLTextAreaElement>('textarea')?.focus({ preventScroll: true });
     } else {
       // A reading sheet is for reading, not typing, so focus lands on the way out rather than
       // the first link — the close control — the way a modal dialog conventionally does.
@@ -389,6 +394,30 @@
     } finally {
       reorganizing = false;
     }
+  }
+
+  // ── The Ask sheet (ticket 07) ───────────────────────────────────────────────
+  // Retrieve on its own full-screen surface, mirroring Capture — drop in, focus, return. The
+  // question sits at the top, the synthesized answer below it, then the Notes the answer drew on
+  // shown as the same cards the grid shows — tappable into the Note sheet, so checking an answer
+  // against the user's own words is one tap. Sheets do not nest, so tapping a cited card swaps
+  // the Ask sheet for the Note sheet (openNote sets `sheet = 'note'`, which replaces this
+  // dialog); closing the Note returns to the grid, not back here.
+
+  /** Open the Ask sheet, focusing the question the way Capture focuses the Dump. */
+  function openAsk() {
+    sheet = 'ask';
+  }
+
+  /** Ask the sheet to close; `onAskSheetClose` does the work, and it is the one way out. */
+  function closeAsk() {
+    sheetEl?.close();
+  }
+
+  /** The Ask sheet closed, however it was asked to (Esc, the close control, the back gesture).
+   *  Return to the grid; the question and answer stay in state, so reopening drops back in. */
+  function onAskSheetClose() {
+    sheet = null;
   }
 
   onMount(async () => {
@@ -726,7 +755,7 @@
   async function askQuestion() {
     asking = true;
     answer = '';
-    citations = [];
+    askCards = [];
     try {
       const result = await retrieve(question, {
         ...storeDeps(),
@@ -734,7 +763,10 @@
         answerer: createAnswerer(settings, log),
       });
       answer = result.answer;
-      citations = result.citations;
+      // The citations are shown as the same cards the grid shows — projected from the cited
+      // Notes through the same `toCard` — so a source is a recognizable, tappable card, not a
+      // link. A Note deleted between the answer and this read is simply dropped.
+      askCards = await citedCards(result.citations, storeDeps());
     } catch (e) {
       status = `Retrieve failed: ${(e as Error).message}`;
     } finally {
@@ -827,6 +859,46 @@
 <!-- The masthead is a sibling of <main>, not a child of it: a <header> only becomes a `banner`
      landmark when nothing like <main> stands between it and the body, so nesting it cost the
      page its one other landmark. The wrapper div carries the column. -->
+<!-- A Note card is a door: the whole card opens the Note sheet (ticket 06). The title is no
+     longer a link to Obsidian — that door moves into the sheet, where the full Note is — so the
+     card reads as one thing to press, not a label with a link inside. A real <button> cannot
+     hold an <h3>/<p> (flow content), so the card is an article with the button role and full
+     keyboard handling — the accessible clickable-card pattern — rather than an invalid button.
+     Declared at the template root so the grid (inside .page) and the Ask sheet's citations
+     (a sibling of .page) share one snippet — a citation card is the same card the grid shows
+     (ticket 07). -->
+{#snippet noteCard(card: NoteCard)}
+  <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
+  <article
+    class="card card--door"
+    class:card--cat={hueFor(card.category) !== null}
+    class:card--wet={wetPath === card.path}
+    style={hueStyle(card.category)}
+    role="button"
+    tabindex="0"
+    aria-label={`Open ${card.title || 'Untitled'}`}
+    on:click={() => openNote(card.path)}
+    on:keydown={(e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openNote(card.path);
+      }
+    }}>
+    <p class="card__category">{card.category}</p>
+    <h3 class="card__title">{card.title || 'Untitled'}</h3>
+    {#if card.summary}
+      <p class="card__summary">{card.summary}</p>
+    {/if}
+    {#if card.tags.length}
+      <p class="card__tags">
+        {#each card.tags.slice(0, 3) as tag}<span class="card__tag">{tag}</span>{/each}
+        {#if card.tags.length > 3}<span class="card__tag-more">+{card.tags.length - 3} more</span>{/if}
+      </p>
+    {/if}
+    <p class="card__date">{new Date(card.createdAt).toLocaleDateString()}</p>
+  </article>
+{/snippet}
+
 <div class="page" class:wide={view === 'grid'}>
   <header class="masthead">
     <h1 class="wordmark">brain-dump</h1>
@@ -840,9 +912,12 @@
         aria-current={sheet === 'capture' ? 'page' : undefined}
         on:click={() => { view = 'grid'; openCapture(); }}>capture</button>
       <button
-        class:on={view === 'ask'}
-        aria-current={view === 'ask' ? 'page' : undefined}
-        on:click={() => (view = 'ask')}>ask</button>
+        class:on={sheet === 'ask'}
+        class:nav-dimmed={vaultIsEmpty}
+        aria-current={sheet === 'ask' ? 'page' : undefined}
+        disabled={vaultIsEmpty}
+        title={vaultIsEmpty ? 'Ask needs a Note to answer from' : undefined}
+        on:click={() => { view = 'grid'; openAsk(); }}>ask</button>
       <button
         class:on={view === 'config'}
         aria-current={view === 'config' ? 'page' : undefined}
@@ -952,41 +1027,7 @@
     {#if cards.length}
       <div class="grid">
         {#each cards as card (card.path)}
-          <!-- A Note card is a door: the whole card opens the Note sheet (ticket 06). The title
-               is no longer a link to Obsidian — that door moves into the sheet, where the full
-               Note is — so the card reads as one thing to press, not a label with a link inside.
-               A real <button> cannot hold an <h3>/<p> (flow content), so the card is an article
-               with the button role and full keyboard handling — the accessible clickable-card
-               pattern — rather than an invalid button. -->
-          <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
-          <article
-            class="card card--door"
-            class:card--cat={hueFor(card.category) !== null}
-            class:card--wet={wetPath === card.path}
-            style={hueStyle(card.category)}
-            role="button"
-            tabindex="0"
-            aria-label={`Open ${card.title || 'Untitled'}`}
-            on:click={() => openNote(card.path)}
-            on:keydown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                openNote(card.path);
-              }
-            }}>
-            <p class="card__category">{card.category}</p>
-            <h3 class="card__title">{card.title || 'Untitled'}</h3>
-            {#if card.summary}
-              <p class="card__summary">{card.summary}</p>
-            {/if}
-            {#if card.tags.length}
-              <p class="card__tags">
-                {#each card.tags.slice(0, 3) as tag}<span class="card__tag">{tag}</span>{/each}
-                {#if card.tags.length > 3}<span class="card__tag-more">+{card.tags.length - 3} more</span>{/if}
-              </p>
-            {/if}
-            <p class="card__date">{new Date(card.createdAt).toLocaleDateString()}</p>
-          </article>
+          {@render noteCard(card)}
         {/each}
       </div>
     {:else if cardsLoaded && !pendingRecords.length && !strandedInVault.length}
@@ -1001,33 +1042,6 @@
            thoughts, when present, already fill the surface, so the empty frame is only for the
            truly empty case. -->
       <div class="grid"></div>
-    {/if}
-    </section>
-  {:else if view === 'ask'}
-    <section class="surface">
-    <label class="ask">
-      ask your vault
-      <textarea
-        bind:value={question}
-        on:keydown={(e) => commitOnModEnter(e, askQuestion, asking || !question.trim())}
-        placeholder="What did I think about…"
-        disabled={asking}></textarea>
-    </label>
-    <div class="actions">
-      <button class="primary" on:click={askQuestion} disabled={asking || !question.trim()}>
-        {asking ? 'Reading your vault…' : 'Ask'}
-      </button>
-    </div>
-    {#if answer}
-      <section class="answer">
-        <p>{answer}</p>
-        {#if citations.length}
-          <p class="rule-label">sources</p>
-          <ul class="sources">
-            {#each citations as c}<li><a class="vault-link" href={obsidianUrl(settings.vaultName, c.path)}>{c.title}</a></li>{/each}
-          </ul>
-        {/if}
-      </section>
     {/if}
     </section>
   {:else}
@@ -1442,6 +1456,59 @@
             </button>
           {/if}
         </div>
+      </div>
+    </div>
+  </dialog>
+{/if}
+
+{#if sheet === 'ask'}
+  <!-- The Ask sheet. Retrieve on its own surface, mirroring Capture — drop in, focus, return.
+       The question sits at the top, the synthesized answer below it, then the Notes the answer
+       drew on shown as the same cards the grid shows. A cited card taps through into the Note
+       sheet: openNote sets `sheet = 'note', which swaps this dialog for the Note sheet (sheets do
+       not nest), and closing the Note returns to the grid. -->
+  <dialog
+    class="sheet"
+    bind:this={sheetEl}
+    on:close={onAskSheetClose}
+    aria-label="Ask your vault">
+    <div class="sheet__inner">
+      <div class="sheet__bar">
+        <p class="sheet__title">ask</p>
+        <button class="sheet__close" on:click={closeAsk}>close</button>
+      </div>
+
+      <div class="sheet__body">
+        <label class="ask">
+          ask your vault
+          <textarea
+            bind:value={question}
+            on:keydown={(e) => commitOnModEnter(e, askQuestion, asking || !question.trim())}
+            placeholder="What did I think about…"
+            disabled={asking}></textarea>
+        </label>
+        <div class="actions">
+          <button class="primary" on:click={askQuestion} disabled={asking || !question.trim()}>
+            {asking ? 'Reading your vault…' : 'Ask'}
+          </button>
+        </div>
+
+        {#if answer}
+          <section class="answer">
+            <p>{answer}</p>
+            {#if askCards.length}
+              <!-- The Notes the answer drew on, as the same cards the grid shows — a source is a
+                   recognizable, tappable card, not a link, so checking the answer against the
+                   user's own words is one tap into the Note sheet. -->
+              <p class="rule-label">sources</p>
+              <div class="grid">
+                {#each askCards as card (card.path)}
+                  {@render noteCard(card)}
+                {/each}
+              </div>
+            {/if}
+          </section>
+        {/if}
       </div>
     </div>
   </dialog>

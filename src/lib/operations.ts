@@ -7,6 +7,7 @@ import type {
   Modality,
   Note,
   NoteCandidate,
+  Citation,
   Organizer,
   Matcher,
   DismissedStore,
@@ -920,6 +921,32 @@ export interface ReorganizeDeps extends RefreshDeps {}
 export async function reorganizeNote(path: string, deps: ReorganizeDeps): Promise<NoteView | null> {
   await refreshNoteMetadata(path, deps);
   return readNote(path, deps);
+}
+
+// --- The Ask sheet (ticket 07) --------------------------------------------
+// Retrieve answers a question and cites the Notes it drew on; the Ask sheet shows those
+// citations as the same cards the grid shows, tappable into the Note sheet. A citation carries
+// only a path, a title and a wikilink — not the Category, Tags and summary a card needs — so the
+// cited Notes are read and projected through the same `toCard` the grid uses. The projection is
+// identical by construction (`toCard` over the same Note's frontmatter), so a citation card is a
+// grid card, and the only new thing is the order: citations follow the answer, not the grid's
+// newest-first order.
+
+/** Project the Notes a Retrieve answer cited to the grid-identical cards the Ask sheet shows.
+ *
+ *  The cards follow citation order — the user reads the answer top-to-bottom into its sources —
+ *  not the grid's newest-first order. A Note deleted between the answer and this read is dropped
+ *  rather than shown as a dead card: `readVaultFiles` excludes soft-deleted docs by default, so a
+ *  gone citation is simply absent. A single narrowed read fetches only the cited paths. */
+export async function citedCards(
+  citations: Citation[],
+  deps: StoreDeps,
+): Promise<NoteCard[]> {
+  if (!citations.length) return [];
+  const paths = new Set(citations.map((c) => c.path));
+  const files = await readVaultFiles(deps.db, (p) => paths.has(p));
+  const byPath = new Map(files.map((f) => [f.path, f] as const));
+  return citations.map((c) => byPath.get(c.path)).filter((f): f is VaultFile => !!f).map(toCard);
 }
 
 

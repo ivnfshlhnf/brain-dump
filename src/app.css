@@ -368,6 +368,17 @@ nav button.on {
   text-decoration-color: var(--ember);
 }
 
+/* An entry point that leads nowhere yet — Ask with an empty Vault — is dimmed rather than
+ * offered, so the user is not invited to ask a question of nothing. The inactive tab is already
+ * `--dim`, so dimming goes one step further: dropped toward the page and quieted, with no hover
+ * to suggest it can be pressed. */
+nav button.nav-dimmed,
+nav button.nav-dimmed:hover {
+  color: color-mix(in oklab, var(--dim), var(--ground) 50%);
+  text-decoration-color: transparent;
+  cursor: not-allowed;
+}
+
 /* ── Controls ────────────────────────────────────────────────────────── */
 
 button {
