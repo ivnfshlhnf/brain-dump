@@ -15,8 +15,7 @@
     organizeDump,
     dumpPath,
     isStranded,
-    listCards,
-    refreshCards,
+    readGrid,
     type CaptureSession,
   } from './lib/operations';
   import { createIndexedDbPendingStore } from './lib/pending';
@@ -192,28 +191,23 @@
     return { db: createRemoteDb(settings), settings, hash: defaultSha1Hex, log, pending };
   }
 
-  // Card-projection deps: the shared store deps plus the device-local cache. Built per call so
-  // a settings change between opens is picked up, matching storeDeps.
-  function cardDeps() {
-    return { ...storeDeps(), cache: cardCache };
-  }
-
-  /** Open the grid: paint from the cache (or the Vault on a cold cache) without blocking
-   *  capture, then reconcile behind it from the Vault. The Capture control renders regardless
-   *  of how far this has got — capture friction is the one unforgivable failure. */
+  /** Open the grid: one Vault pass yields the Note cards AND the Stranded Dumps (ADR-0007), so
+   *  reconciliation is a property of opening the grid, not a button. The cache paints the cards
+   *  it holds before the pass completes — so the grid shows something at once and stays populated
+   *  even when the Vault is slow or unreachable — and the pass then reconciles both. The Capture
+   *  control renders regardless of how far this has got — capture friction is the one unforgivable
+   *  failure. */
   async function enterGrid() {
     try {
-      const result = await listCards(cardDeps());
+      const result = await readGrid(
+        { ...storeDeps(), cache: cardCache, pending, dismissed },
+        (cached) => {
+          // Paint the cached cards before the Vault read completes.
+          cards = cached;
+        },
+      );
       cards = result.cards;
-      // Reconcile behind the paint only when we painted from a warm cache — a cold cache already
-      // did the one authoritative Vault read inside listCards, so a second pass would re-read it.
-      if (result.fromCache) {
-        try {
-          cards = await refreshCards(cardDeps());
-        } catch {
-          // Keep the painted cards; the cache reconciles on the next online or grid entry.
-        }
-      }
+      strandedInVault = result.stranded;
     } catch {
       // A Vault read failure leaves whatever was painted; the grid stays usable.
     }
@@ -710,6 +704,62 @@
       <button class="primary" on:click={() => (view = 'capture')}>Capture</button>
     </div>
 
+    {#if pendingRecords.length}
+      <!-- Pending Dumps: captured, not yet a Note. Dashed and hue-less — raw scaffolding the app
+           owes the user a Note for — with no actions, because recovery is automatic. -->
+      <div class="grid">
+        {#each pendingRecords as r (r.dump.id)}
+          <article class="card card--open">
+            <p class="card__category">Pending</p>
+            <h3 class="card__title card__title--raw">{firstLine(r.dump.content)}</h3>
+            {#if r.lastError}
+              <p class="card__summary">{r.lastError}</p>
+            {/if}
+            <p class="card__date">{new Date(r.dump.createdAt).toLocaleDateString()}</p>
+          </article>
+        {/each}
+      </div>
+    {/if}
+
+    {#if strandedInVault.length}
+      <!-- Stranded Dumps: a Note was never written, or the one written is gone. Same dashed
+           card, but it carries the reason and the two things the user can do about it — Retry
+           (Organize an unfiled Dump, restore a deleted one) and Dismiss — right where they
+           found it. -->
+      <div class="grid">
+        {#each strandedInVault as s (s.dump.id)}
+          <article class="card card--open">
+            <p class="card__category">Stranded</p>
+            <h3 class="card__title card__title--raw">{firstLine(s.dump.content)}</h3>
+            <p class="card__summary">
+              {#if s.reason === 'unfiled'}
+                never became a Note
+              {:else if s.reason === 'note-deleted'}
+                its Note was deleted — {s.notePath}
+              {:else if s.reason === 'note-unreadable'}
+                its Note exists but Obsidian will not write it — {s.notePath}
+              {:else}
+                the Dump and its Note were both deleted
+              {/if}
+            </p>
+            <div class="card__actions">
+              {#if s.reason === 'unfiled'}
+                <button on:click={() => organizeStranded(s.dump)} disabled={!!organizingStranded}>
+                  {organizingStranded === s.dump.id ? 'Retrying…' : 'Retry'}
+                </button>
+              {:else}
+                <button on:click={() => restoreDeleted(s)} disabled={!!organizingStranded}>
+                  {organizingStranded === s.dump.id ? 'Retrying…' : 'Retry'}
+                </button>
+              {/if}
+              <button on:click={() => dismissStranded(s)} disabled={!!organizingStranded}>Dismiss</button>
+            </div>
+            <p class="card__date">{new Date(s.dump.createdAt).toLocaleDateString()}</p>
+          </article>
+        {/each}
+      </div>
+    {/if}
+
     {#if cards.length}
       <div class="grid">
         {#each cards as card (card.path)}
@@ -731,13 +781,17 @@
           </article>
         {/each}
       </div>
-    {:else if cardsLoaded}
-      <!-- An empty Vault is calm, not broken: show where the first card will land. -->
+    {:else if cardsLoaded && !pendingRecords.length && !strandedInVault.length}
+      <!-- An empty Vault is calm, not broken: show where the first card will land. The placeholder
+           waits only when there are no open thoughts either — a Pending or Stranded card is
+           already something on screen. -->
       <div class="grid">
         <p class="card-placeholder">Your first thought will land here.</p>
       </div>
-    {:else}
-      <!-- A cold or failed cache never blocks capture: no spinner, just the grid frame. -->
+    {:else if !pendingRecords.length && !strandedInVault.length}
+      <!-- A cold or failed cache never blocks capture: no spinner, just the grid frame. Open
+           thoughts, when present, already fill the surface, so the empty frame is only for the
+           truly empty case. -->
       <div class="grid"></div>
     {/if}
     </section>

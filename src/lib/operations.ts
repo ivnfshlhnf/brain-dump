@@ -532,31 +532,13 @@ function toCard(file: VaultFile): NoteCard {
   };
 }
 
-/** Every Note in the Managed folder as a card projection — the home grid's source data.
- *  Dumps and personal notes live in other folders, so the managed-folder filter excludes them;
- *  soft-deleted Notes are excluded by `readVaultFiles`'s default (only reconciliation asks to
- *  see deleted documents). Newest first, so a freshly filed Note lands at the top of the grid. */
-export async function listNotes(deps: StoreDeps): Promise<NoteCard[]> {
-  const files = await readVaultFiles(deps.db, (path) =>
-    path.startsWith(`${deps.settings.managedFolder}/`),
-  );
+/** Project a list of managed-folder files to cards, newest-first. The grid's combined read
+ *  hands `toCards` the live managed files it filters out of a managed+dumps pass; the caller is
+ *  responsible for handing only the files it wants carded. */
+function toCards(files: VaultFile[]): NoteCard[] {
   return files
     .map(toCard)
     .sort((a, b) => b.createdAt - a.createdAt || a.path.localeCompare(b.path));
-}
-
-/** Store deps plus the device-local card cache. The cache is optional: omit it and `listCards`
- *  reads the Vault every time, which is what a test asking only about the projection wants. */
-export interface CardDeps extends StoreDeps {
-  cache?: NoteCardCache;
-}
-
-/** `listCards`'s result: the cards to paint, and whether they came from the cache. `fromCache`
- *  tells the grid whether to reconcile behind the paint — a cold cache already did the one
- *  authoritative Vault read inside `listCards`, so a second pass would only re-read it. */
-export interface CardResult {
-  cards: NoteCard[];
-  fromCache: boolean;
 }
 
 /** Write the projection back to the disposable cache, swallowing a failure: the cache is not the
@@ -571,36 +553,74 @@ async function safeWrite(cache: NoteCardCache | undefined, cards: NoteCard[]): P
   }
 }
 
-/** The grid's projection, cache-first (ADR-0007). Paints from the device-local cache without
- *  waiting on the Vault; when the cache is absent or empty it is rebuilt from the Vault in one
- *  pass and written back for next time. `fromCache` is true when the cards came from the cache,
- *  false when they were read from the Vault on a cold/empty/failed cache.
- *
- *  A cache that fails to read or write is swallowed rather than thrown: the cache is disposable
- *  and the Vault is the source of truth, and the Capture control lives on the grid — a broken
- *  cache must never take the grid (and so capture) down with it. */
-export async function listCards(deps: CardDeps): Promise<CardResult> {
-  if (deps.cache) {
-    try {
-      const cached = await deps.cache.list();
-      if (cached.length) return { cards: cached, fromCache: true };
-    } catch {
-      // A failed read is disposable: fall through to the Vault and rebuild.
-    }
-  }
-  const cards = await listNotes(deps);
-  await safeWrite(deps.cache, cards);
-  return { cards, fromCache: false };
+/** Store deps plus the grid's device-local companions: the card cache (paint before the Vault
+ *  read completes) and the Pending/Dismissed stores (Dumps in either are excluded from the
+ *  Stranded list — they are known, or the user has chosen to stop hearing about them). All
+ *  optional; omit them and the grid reads the Vault alone, reporting every unreferenced Dump. */
+export interface GridDeps extends StoreDeps {
+  cache?: NoteCardCache;
+  pending?: PendingStore;
+  dismissed?: DismissedStore;
 }
 
-/** Re-read the Vault and refresh the cache, regardless of what it holds. The grid paints from
- *  `listCards` and reconciles behind it with this when it painted from a warm cache: a card
- *  filed on another device, or a Note deleted by Obsidian's own sync, reaches the screen without
- *  a manual refresh. */
-export async function refreshCards(deps: CardDeps): Promise<NoteCard[]> {
-  const cards = await listNotes(deps);
-  await safeWrite(deps.cache, cards);
-  return cards;
+/** The grid's reconciled state from one open: the authoritative Note cards and the Stranded
+ *  Dumps, both from the one Vault pass. Cards painted early from a warm cache (via `paint`) are
+ *  superseded by these once the pass completes — or kept as-is if the pass fails. */
+export interface GridResult {
+  cards: NoteCard[];
+  stranded: StrandedDump[];
+}
+
+/** Read the grid's whole state — Note cards and Stranded Dumps — in one Vault pass
+ *  (ADR-0007 / acceptance #2). Cache-first: when the cache holds cards, `paint` is called with
+ *  them *before* the Vault read completes, so the grid shows something the moment it opens and
+ *  stays populated even when the Vault is slow or unreachable. The pass then reconciles to the
+ *  authoritative cards (a Note deleted by Obsidian's own sync disappears; a Stranded Dump
+ *  appears) and refreshes the cache; if the pass fails, the painted cached cards are kept and
+ *  an empty Stranded list is returned rather than throwing — the grid stays usable, and the next
+ *  open retries.
+ *
+ *  A cold or unreadable cache skips the early paint and falls straight through to the pass. The
+ *  cache is disposable — a cache read failure never reaches the caller, because capture must
+ *  never be gated on a cache that can be lost. The Stranded list always comes from the pass,
+ *  since it is not cached. */
+export async function readGrid(
+  deps: GridDeps,
+  paint?: (cards: NoteCard[]) => void,
+): Promise<GridResult> {
+  const pendingIds = new Set(
+    (deps.pending ? await deps.pending.list() : []).map((r) => r.dump.id),
+  );
+  const dismissedIds = new Set(deps.dismissed ? await deps.dismissed.list() : []);
+
+  // Warm cache: paint the cached cards before the Vault read completes, then reconcile. A cache
+  // read failure is disposable — treat it as cold and read the Vault.
+  if (deps.cache) {
+    let cached: NoteCard[] | null = null;
+    try {
+      const listed = await deps.cache.list();
+      if (listed.length) cached = listed;
+    } catch {
+      /* disposable cache — fall through to the Vault read */
+    }
+    if (cached) {
+      paint?.(cached);
+      try {
+        const vault = await readVaultForGrid(deps, pendingIds, dismissedIds);
+        await safeWrite(deps.cache, vault.cards); // keep the cache fresh against the authoritative read
+        return { cards: vault.cards, stranded: vault.stranded };
+      } catch {
+        // The Vault read failed — keep the cards the paint already showed. Stranded is unknown
+        // this open; the grid stays usable and the next open retries.
+        return { cards: cached, stranded: [] };
+      }
+    }
+  }
+
+  // Cold / empty / failed cache: one Vault pass yields both, and fills the cache for next time.
+  const vault = await readVaultForGrid(deps, pendingIds, dismissedIds);
+  await safeWrite(deps.cache, vault.cards);
+  return { cards: vault.cards, stranded: vault.stranded };
 }
 
 /** Match a new Dump's preview against the existing Notes: LLM-assisted, by
@@ -1098,13 +1118,23 @@ interface VaultState {
   brokenRefs: Map<string, { path: string; deleted: boolean }>;
 }
 
-async function readVaultState(deps: StoreDeps): Promise<VaultState> {
+/** Read every managed Note and every Dump — the documents reconciliation and the grid both
+ *  care about — including soft-deleted ones. One read shared by `readVaultState` and the grid's
+ *  `readVaultForGrid`, so the grid's single pass yields both the cards and the Stranded list
+ *  (ADR-0007). */
+async function readReconcileFiles(deps: StoreDeps): Promise<VaultFile[]> {
   const { managedFolder, dumpsFolder } = deps.settings;
-  const files = await readVaultFiles(
+  return readVaultFiles(
     deps.db,
     (path) => path.startsWith(`${managedFolder}/`) || path.startsWith(`${dumpsFolder}/`),
     { includeDeleted: true },
   );
+}
+
+/** Build the reconciliation view of the Vault from already-read files. Pure, so the grid can
+ *  derive its Stranded list from the same files it builds cards from, without a second read. */
+function buildVaultState(files: VaultFile[], settings: Settings): VaultState {
+  const { managedFolder, dumpsFolder } = settings;
 
   const dumps = new Map<string, { dump: Dump; deleted: boolean }>();
   for (const file of files) {
@@ -1124,6 +1154,65 @@ async function readVaultState(deps: StoreDeps): Promise<VaultState> {
   return { dumps, referenced, brokenRefs };
 }
 
+async function readVaultState(deps: StoreDeps): Promise<VaultState> {
+  return buildVaultState(await readReconcileFiles(deps), deps.settings);
+}
+
+/** Every Dump in `state` that no live Note cites — the Stranded thoughts (CONTEXT.md). Pure: the
+ *  reason cascade (`dump-deleted` > `unfiled` > `note-deleted` > `note-unreadable`), the
+ *  `notePath` spread, the Pending/Dismissed exclusion, and the oldest-first sort. The log stays
+ *  with the caller — `findStrandedDumps` for the Settings flow, the grid otherwise — because it
+ *  is a property of *running* a reconciliation, not of *deriving* the list. */
+function deriveStranded(
+  state: VaultState,
+  pendingIds: Set<string>,
+  dismissedIds: Set<string>,
+): StrandedDump[] {
+  const { dumps, referenced, brokenRefs } = state;
+  const stranded: StrandedDump[] = [];
+  for (const [path, { dump, deleted }] of dumps) {
+    const link = wikilink(path);
+    // A live Note cites it: filed, whatever else is true.
+    if (referenced.has(link)) continue;
+    if (pendingIds.has(dump.id) || dismissedIds.has(dump.id)) continue;
+    const broken = brokenRefs.get(link);
+    // The Dump's own deletion outranks its Note's: restoring the Note alone would leave
+    // the thought itself out of the Vault.
+    const reason: StrandedReason = deleted
+      ? 'dump-deleted'
+      : !broken
+        ? 'unfiled'
+        : broken.deleted
+          ? 'note-deleted'
+          : 'note-unreadable';
+    stranded.push({ dump, reason, ...(broken ? { notePath: broken.path } : {}) });
+  }
+  return stranded.sort(
+    (a, b) => a.dump.createdAt - b.dump.createdAt || a.dump.id.localeCompare(b.dump.id),
+  );
+}
+
+/** One Vault pass yields the grid's Note cards AND its Stranded Dumps (ADR-0007 / acceptance #2).
+ *  The cards are the live managed files projected through `toCards` (matching the 02 projection:
+ *  unreadable Notes still carded, soft-deleted ones excluded); the Stranded list is
+ *  `deriveStranded` over the same state. `pendingIds` and `dismissedIds` are passed in already
+ *  resolved, so the grid's caller — which has the device-local stores — decides exclusion. */
+export async function readVaultForGrid(
+  deps: StoreDeps,
+  pendingIds: Set<string>,
+  dismissedIds: Set<string>,
+): Promise<{ cards: NoteCard[]; stranded: StrandedDump[] }> {
+  const files = await readReconcileFiles(deps);
+  const state = buildVaultState(files, deps.settings);
+  const cards = toCards(
+    files.filter(
+      (f) => f.path.startsWith(`${deps.settings.managedFolder}/`) && !f.deleted,
+    ),
+  );
+  const stranded = deriveStranded(state, pendingIds, dismissedIds);
+  return { cards, stranded };
+}
+
 export interface ReconcileDeps extends StoreDeps {
   /** Optional. Dumps already in the Pending store are excluded from the result: they are
    *  known, and recovery is about to deal with them. Omit it and every unreferenced Dump in
@@ -1141,36 +1230,18 @@ export interface ReconcileDeps extends StoreDeps {
  *  Dumps already in the Pending store are excluded: they are known, and recovery is
  *  about to deal with them. Oldest first. */
 export async function findStrandedDumps(deps: ReconcileDeps): Promise<StrandedDump[]> {
-  const { dumps, referenced, brokenRefs } = await readVaultState(deps);
+  const state = await readVaultState(deps);
   const records = deps.pending ? await deps.pending.list() : [];
-  const known = new Set(records.map((r) => r.dump.id));
-  const dismissed = new Set(deps.dismissed ? await deps.dismissed.list() : []);
-
-  const stranded: StrandedDump[] = [];
-  for (const [path, { dump, deleted }] of dumps) {
-    const link = wikilink(path);
-    // A live Note cites it: filed, whatever else is true.
-    if (referenced.has(link)) continue;
-    if (known.has(dump.id) || dismissed.has(dump.id)) continue;
-    const broken = brokenRefs.get(link);
-    // The Dump's own deletion outranks its Note's: restoring the Note alone would leave
-    // the thought itself out of the Vault.
-    const reason: StrandedReason = deleted
-      ? 'dump-deleted'
-      : !broken
-        ? 'unfiled'
-        : broken.deleted
-          ? 'note-deleted'
-          : 'note-unreadable';
-    stranded.push({ dump, reason, ...(broken ? { notePath: broken.path } : {}) });
-  }
+  const pendingIds = new Set(records.map((r) => r.dump.id));
+  const dismissedIds = new Set(deps.dismissed ? await deps.dismissed.list() : []);
+  const stranded = deriveStranded(state, pendingIds, dismissedIds);
 
   (deps.log ?? noopLog)({
     op: 'reconcile',
     message: 'Vault reconciled',
     detail: {
-      dumps: dumps.size,
-      referenced: referenced.size,
+      dumps: state.dumps.size,
+      referenced: state.referenced.size,
       stranded: stranded.length,
       byReason: stranded.reduce<Record<string, number>>(
         (acc, s) => ({ ...acc, [s.reason]: (acc[s.reason] ?? 0) + 1 }),
@@ -1178,9 +1249,7 @@ export async function findStrandedDumps(deps: ReconcileDeps): Promise<StrandedDu
       ),
     },
   });
-  return stranded.sort(
-    (a, b) => a.dump.createdAt - b.dump.createdAt || a.dump.id.localeCompare(b.dump.id),
-  );
+  return stranded;
 }
 
 /** Undo the deletion that stranded a Dump: bring back the Note, and the Dump too when it

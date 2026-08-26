@@ -1039,6 +1039,33 @@ textarea.dump {
   margin-top: auto;
 }
 
+/* An open thought — a Pending or Stranded Dump — is not yet stock resting on the page. It is raw
+ * scaffolding the app owes the user a Note for, so it wears a dashed rule and no fill or shadow:
+ * visually distinct from the solid Note card, which is a finished thought. The grid reads as one
+ * field, but an open card is a promise still to keep, not a thing filed. */
+.card--open {
+  background: transparent;
+  border: 1px dashed var(--rule);
+  box-shadow: none;
+}
+
+/* The raw capture words stay in the mono voice until Organize turns them into a serif thought —
+ * the two-ink rule (serif = thought, mono = scaffolding) read across the grid's two card kinds. */
+.card__title--raw {
+  font-family: var(--mono);
+  font-size: var(--text-base);
+  font-weight: 400;
+  line-height: 1.3;
+}
+
+/* A Stranded card's actions sit at the foot, above the date — the two things the user can do,
+ * where they found the thought. */
+.card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1) var(--s2);
+}
+
 /* An empty Vault shows where the first card will land, rather than an error or a blank screen.
  * A dashed slot the width of the grid — the same inviting border the Capture field uses to say
  * "write here", sized to the grid so it reads as a place a card will occupy. */
