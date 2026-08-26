@@ -45,6 +45,7 @@ import {
   type Matcher,
   type PendingStore,
 } from '../src/lib/types';
+import type { OnStatus } from '../src/lib/status';
 
 PouchDB.plugin(memory);
 
@@ -108,6 +109,7 @@ const captureDeps = (opts: {
   now?: number;
   organizer?: Organizer;
   onPending?: (dump: Dump) => void;
+  onStatus?: OnStatus;
 }) => ({
   db: opts.db ?? db,
   settings,
@@ -119,6 +121,7 @@ const captureDeps = (opts: {
   newId: () => opts.id ?? fixedId,
   hash: sha1Hex,
   onPending: opts.onPending,
+  onStatus: opts.onStatus,
 });
 
 const recoverDeps = (over: Partial<Parameters<typeof recoverPending>[0]> = {}) => ({
@@ -271,6 +274,40 @@ describe('enrolment: every Capture is Pending before anything can fail', () => {
 
     expect(result.ok).toBe(false);
     expect(await pending.list()).toHaveLength(1);
+  });
+});
+
+describe('status line: the strip is fed by the operation layer, not the view', () => {
+  it('announces a capture that landed offline via the onStatus callback', async () => {
+    const seen: { kind: string; message: string }[] = [];
+    const outcome = await captureThought(
+      'I keep forgetting to water the plants',
+      captureDeps({ online: false, onStatus: (m) => seen.push(m) }),
+    );
+    if (outcome.kind !== 'pending') throw new Error('expected pending');
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].kind).toBe('capture-confirmed');
+    expect(seen[0].message).toBe(`Captured — ${OFFLINE_CAPTURE_MESSAGE}.`);
+  });
+
+  it('announces a capture that failed while online, naming the error — not "you are offline"', async () => {
+    const seen: { kind: string; message: string }[] = [];
+    const outcome = await captureThought(
+      'a thought mid-flight',
+      captureDeps({ online: true, db: failingDb, onStatus: (m) => seen.push(m) }),
+    );
+    if (outcome.kind !== 'pending') throw new Error('expected pending');
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].kind).toBe('capture-confirmed');
+    expect(seen[0].message).toBe(`Captured — ${CAPTURE_RETRY_MESSAGE}. Capture failed: network down`);
+  });
+
+  it('does not announce a capture that opened a review session — the Note is the receipt', async () => {
+    const seen: { kind: string; message: string }[] = [];
+    await captureThought('a thought', captureDeps({ online: true, onStatus: (m) => seen.push(m) }));
+    expect(seen).toEqual([]);
   });
 });
 

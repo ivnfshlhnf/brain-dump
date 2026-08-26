@@ -37,6 +37,11 @@
   import { createCachingEmbedder } from './lib/embedding-cache';
   import { validateProviderUrl } from './lib/config';
   import {
+    connectionTransition,
+    configRejectedMessage,
+    type StatusMessage,
+  } from './lib/status';
+  import {
     DEFAULT_SETTINGS,
     type Settings,
     type Dump,
@@ -108,6 +113,13 @@
   // memory before the Capture press. Cleared the moment a Dump is captured.
   let text = readDraft();
   let status = '';
+  // The cross-cutting status strip — the app's single voice for what belongs to no card
+  // (ticket 09): a capture that landed with no Note to show, the connection going or coming
+  // back, a setting the config rules rejected. Grid-only: it never renders inside a sheet.
+  // `status` above is the per-surface local feedback each sheet/section shows for its own
+  // state (Saved Note, retrieve errors, …) — the thing the message is about.
+  let strip: StatusMessage | null = null;
+  let stripTimer: ReturnType<typeof setTimeout> | null = null;
   // The grid is the persistent surface and every other surface — Capture, Note, Ask, Settings
   // — is a sheet over it (tickets 05–08). `view` is vestigial now that Settings is a sheet too:
   // it is only ever 'grid', and ticket 10 deletes it along with the rest of the old view switch.
@@ -225,6 +237,10 @@
   const autosaver = createAutosaver({ save: saveAndFinalize });
   let onBeforeUnload: (() => void) | null = null;
   let onOnline: (() => void) | null = null;
+  let onOffline: (() => void) | null = null;
+  // The connectivity the strip last announced — so `connectionTransition` can tell a real
+  // change from a no-op and the strip never becomes a heartbeat.
+  let wasOnline = true;
 
   // The store + hash deps shared by every operation call. Built per call so a
   // settings change between capture and save is picked up.
@@ -488,6 +504,7 @@
   }
 
   onMount(async () => {
+    wasOnline = navigator.onLine;
     settings = await loadSettings();
     // The grid is the surface the app opens on, so its read starts immediately. It never gates
     // the Capture control, which renders regardless of how far the read has got.
@@ -517,12 +534,21 @@
     // intervention, which is the promise: you do not file anything, the app files
     // everything it took.
     onOnline = () => {
+      // A restored connection resolves a held "connection lost" — `connectionTransition`
+      // emits restored only when it actually changed, so the strip is not a heartbeat.
+      applyConnection(true);
       void recover();
       // A restored connection may have recovered Dumps into Notes on another device — refresh
       // the grid when it is the surface the user is looking at.
       if (view === 'grid') void enterGrid();
     };
     window.addEventListener('online', onOnline);
+    // Going offline is the other half of the cross-cutting connection voice. The message comes
+    // from the operation layer (`connectionTransition`); the browser event only triggers it.
+    onOffline = () => {
+      applyConnection(false);
+    };
+    window.addEventListener('offline', onOffline);
     // Anything still marked in-flight belongs to a session that ended — nothing survived
     // this reload that could still be organizing it. Done once, at start, never on the
     // retry timer, which runs while a capture may genuinely be in flight.
@@ -536,10 +562,48 @@
   onDestroy(() => {
     if (onBeforeUnload) window.removeEventListener('beforeunload', onBeforeUnload);
     if (onOnline) window.removeEventListener('online', onOnline);
+    if (onOffline) window.removeEventListener('offline', onOffline);
     if (wetTimer) clearTimeout(wetTimer);
+    if (stripTimer) clearTimeout(stripTimer);
     stopRetrying();
     if (session && !session.saved) void autosaver.flush();
   });
+
+  // ── The status strip (ticket 09) ─────────────────────────────────────────────
+  // The one cross-cutting voice, fed by the operation layer. A capture that landed with no
+  // Note fades on its own; a lost connection or a rejected setting holds until cleared or
+  // resolved. Every message carries a word — colour is never the sole signal.
+  function setStatus(message: StatusMessage | null) {
+    if (stripTimer) {
+      clearTimeout(stripTimer);
+      stripTimer = null;
+    }
+    if (!message) {
+      strip = null;
+      return;
+    }
+    strip = message;
+    // The capture confirmation is the only kind that fades — the thought is safe, and the
+    // receipt (the Pending card) is already on the grid. The other two hold for a reason.
+    if (message.kind === 'capture-confirmed') {
+      stripTimer = setTimeout(() => {
+        strip = null;
+        stripTimer = null;
+      }, 6000);
+    }
+  }
+  /** Dismiss the strip immediately — including a message the user would rather deal with later. */
+  function clearStrip() {
+    setStatus(null);
+  }
+  /** Announce a connectivity change on the strip and remember it, so `connectionTransition`
+   *  can tell a real change from a no-op (the strip is not a heartbeat). Shared by the
+   *  `online`/`offline` listeners, which add their own side effects after it. */
+  function applyConnection(next: boolean) {
+    const m = connectionTransition(wasOnline, next);
+    if (m) setStatus(m);
+    wasOnline = next;
+  }
 
   async function captureDump() {
     busy = true;
@@ -561,19 +625,16 @@
           clearDraft();
           void refreshPending();
         },
+        // The strip is fed by the operation: captureThought emits `capture-confirmed` itself
+        // when a capture lands with no Note, so the message's source is the operation layer.
+        onStatus: setStatus,
       });
 
-      // Pending with no preview: the Dump is safe and no review session opens. A capture
-      // that failed while online says so — and names the error — rather than claiming the
-      // user is offline.
+      // Pending with no preview: the Dump is safe and no review session opens. The strip was
+      // already set by the operation's `onStatus` (capture-confirmed), and the Pending card is
+      // the receipt — so there is nothing to keep the sheet open for.
       if (outcome.kind === 'pending') {
         await refreshPending();
-        status =
-          outcome.reason === 'offline'
-            ? `Captured — ${outcome.message}.`
-            : `Captured — ${outcome.message}. Capture failed: ${outcome.error?.message}`;
-        // No preview to review, so there is nothing to keep the sheet open for. The grid is
-        // where the Dump now is — as a Pending card — and where the message is read.
         closeCapture();
         return;
       }
@@ -856,8 +917,10 @@
   async function saveConfig() {
     const problem = validateProviderUrl(settings.llmProvider);
     if (problem) {
+      // The rejection shows locally on the Settings form (the thing it is about) AND on the
+      // cross-cutting strip, where it holds until resolved by a good save or cleared.
       status = problem.message;
-      // Both: the code is what a tool matches on, the message is what a human reads.
+      setStatus(configRejectedMessage(problem));
       log({
         level: 'error',
         op: 'config',
@@ -868,6 +931,9 @@
     }
     await saveSettings(settings);
     status = 'Settings saved';
+    // A successful save resolves a held rejection — the setting the strip was complaining
+    // about is now accepted. Other strip kinds (a lost connection) are left alone.
+    if (strip?.kind === 'config-rejected') setStatus(null);
     log({
       op: 'config',
       message: 'settings saved',
@@ -1032,7 +1098,10 @@
          collapsing them into one "waiting" line would restore the ambiguity that caused
          finding 02 — the user could not tell a Dump being worked on from one nothing was
          happening to. Stranded outranks the rest; it is the app admitting it broke its
-         promise. (Ticket 09 replaces this strip with the designed status line.) -->
+         promise. Ticket 09 added the separate cross-cutting `.status-strip` below for the
+         card-less kinds (capture landed, connection, settings rejected); this banner stays
+         the voice for the Pending/Stranded Dumps themselves — recovery state, which belongs
+         to those Dumps and not to the strip. -->
     {#if strandedRecords.length}
       <p class="status err" aria-live="polite">
         {strandedRecords.length === 1
@@ -1138,9 +1207,20 @@
     </section>
   {/if}
 
-  <!-- The status line renders on whichever surface is on top: inside the sheet while one is
-       open, on the page otherwise. One live region at a time, so a message is announced once. -->
-  {#if status && !sheet}<p class="status" aria-live="polite">{status}</p>{/if}
+  <!-- The cross-cutting status strip — grid-only, never inside a sheet (ticket 09). One live
+       region, announced politely, carrying a word and never colour alone. A capture that landed
+       fades on its own; a lost connection or a rejected setting holds, and either can be cleared
+       immediately — including one the user would rather deal with later. -->
+  {#if strip && !sheet}
+    <div
+      class="status-strip"
+      class:status-strip--alert={strip.kind === 'connection-lost' || strip.kind === 'config-rejected'}
+      aria-live="polite"
+    >
+      <span class="status-strip__text">{strip.message}</span>
+      <button class="status-strip__dismiss" on:click={clearStrip} aria-label="Dismiss status">Dismiss</button>
+    </div>
+  {/if}
   </main>
 </div>
 

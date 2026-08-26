@@ -22,6 +22,7 @@ import type {
 import { toCategory, type Category } from './category';
 import { writeFile, modifyFile, readVaultFiles, restoreFile, type VaultFile } from './livesync';
 import { noopLog, type Log } from './logger';
+import { noopStatus, captureConfirmedMessage, type OnStatus } from './status';
 import { findRelated, type RelatedDeps } from './related';
 import { wikilinkTarget } from './obsidian';
 
@@ -1008,6 +1009,11 @@ export interface PendingCaptureDeps extends BeginCaptureDeps {
    *  responsibility, and leaving the text in the box invites the user to press Capture
    *  again, which is exactly how three identical Dumps reached the Vault in finding 02. */
   onPending?: (dump: Dump) => void;
+  /** Feeds the cross-cutting status strip (ticket 09). The operation emits a `capture-confirmed`
+   *  message here when a capture lands with no card to show it — offline, or failed while
+   *  online — so the strip's source is the operation layer, assertable at this seam. A capture
+   *  that opens a review session emits nothing: the Note on screen is the receipt. */
+  onStatus?: OnStatus;
 }
 
 /** Capture a thought whether or not there is a connection.
@@ -1036,6 +1042,7 @@ export async function captureThought(
   };
 
   const log = deps.log ?? noopLog;
+  const onStatus = deps.onStatus ?? noopStatus;
   log({ op: 'capture', message: 'capture started', detail: { dumpId: dump.id, chars: content.length } });
 
   const online = deps.isOnline();
@@ -1049,6 +1056,7 @@ export async function captureThought(
   deps.onPending?.(dump);
 
   if (!online) {
+    onStatus(captureConfirmedMessage('offline', OFFLINE_CAPTURE_MESSAGE));
     return { kind: 'pending', dump, reason: 'offline', message: OFFLINE_CAPTURE_MESSAGE };
   }
 
@@ -1074,6 +1082,7 @@ export async function captureThought(
       message: 'capture failed online — Dump left Pending for retry',
       detail: { dumpId: dump.id, error: (error as Error).message },
     });
+    onStatus(captureConfirmedMessage('capture-failed', CAPTURE_RETRY_MESSAGE, error as Error));
     return {
       kind: 'pending',
       dump,

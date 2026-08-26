@@ -553,6 +553,53 @@ textarea.dump {
   color: var(--alarm);
 }
 
+/* ── The status strip (ticket 09) — grid-only, one cross-cutting voice ─── */
+
+.status-strip {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin: var(--s3) 0 0;
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--hairline);
+  border-left: 3px solid var(--hairline);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.03em;
+  color: var(--dim);
+  background: var(--surface);
+}
+
+/* A subtle accent for the kinds that hold for a reason — lost connection, rejected setting.
+   The word is always the signal; this only gives the eye a place to land. */
+.status-strip--alert {
+  border-left-color: var(--alarm);
+}
+
+.status-strip__text {
+  flex: 1 1 auto;
+}
+
+.status-strip__dismiss {
+  flex: 0 0 auto;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  color: var(--dim);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  background: none;
+}
+
+.status-strip__dismiss:hover,
+.status-strip__dismiss:focus-visible {
+  color: var(--ink);
+}
+
 /* ── Diagnostics and health checks ───────────────────────────────────── */
 
 .diagnostics,
