@@ -57,6 +57,32 @@ export interface NoteCandidate {
   summary: string;
 }
 
+/** A card-sized projection of a Note — what the home grid paints (ADR-0007). Every field is
+ *  already in a Note's frontmatter and already parsed; this is the projection, not new data.
+ *  `path` is the vault-relative path and identifies the Note.
+ *
+ *  `category` is the raw frontmatter string here. Ticket 04 closes it into a fixed set and
+ *  derives a hue; until then the grid is neutral and the string is shown as-is. */
+export interface NoteCard {
+  path: string; // vault-relative — identifies the Note
+  title: string;
+  category: string;
+  summary: string;
+  tags: string[];
+  createdAt: number; // ms epoch — the source Dump's capture time
+}
+
+/** The device-local cache of the grid projection (ADR-0007). Disposable by design: rebuilt
+ *  from the Vault in one pass when absent, and lost without harm when site data is cleared —
+ *  the Vault is the source of truth and the cache only buys a paint-before-the-read. A failed
+ *  read must never gate the Capture control, so callers swallow a throwing `list`. */
+export interface NoteCardCache {
+  /** Replace the whole cache with these cards. */
+  write(cards: NoteCard[]): Promise<void>;
+  /** Every cached card, oldest-first as written; `[]` when the cache is absent or empty. */
+  list(): Promise<NoteCard[]>;
+}
+
 /** The LLM's raw new-vs-append suggestion. `append` carries the candidate `path`;
  *  the operation layer validates the path is still a known candidate before trusting it. */
 export type MatchSuggestion = { kind: 'new' } | { kind: 'append'; path: string };

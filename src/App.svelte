@@ -15,10 +15,13 @@
     organizeDump,
     dumpPath,
     isStranded,
+    listCards,
+    refreshCards,
     type CaptureSession,
   } from './lib/operations';
   import { createIndexedDbPendingStore } from './lib/pending';
   import { createIndexedDbDismissedStore } from './lib/dismissed';
+  import { createIndexedDbCardCache } from './lib/card-cache';
   import { retrieve } from './lib/retrieve';
   import { createOrganizer, createMatcher, createEmbedder, createAnswerer, createRelater } from './lib/llm';
   import { defaultSha1Hex } from './lib/livesync';
@@ -34,6 +37,7 @@
     type Citation,
     type Dump,
     type Note,
+    type NoteCard,
     type PendingDump,
     type StrandedDump,
   } from './lib/types';
@@ -101,7 +105,7 @@
   // memory before the Capture press. Cleared the moment a Dump is captured.
   let text = readDraft();
   let status = '';
-  let view: 'capture' | 'ask' | 'config' = 'capture';
+  let view: 'capture' | 'ask' | 'config' | 'grid' = 'capture';
   let busy = false;
 
   // The in-flight capture review session: holds the captured Dump, the initial
@@ -141,6 +145,12 @@
   let reconciled = false;
   let reconciling = false;
   let organizingStranded = '';
+  // The home grid (ticket 02). The grid is the road to capture, so the card read must never
+  // gate the Capture control: it paints from a device-local cache and reconciles behind it
+  // (ADR-0007). A cold, failed or empty cache shows the Capture control and an empty grid.
+  const cardCache = createIndexedDbCardCache();
+  let cards: NoteCard[] = [];
+  let cardsLoaded = false;
   // While Dumps are Pending, retry on a timer as well as on the `online` event: a
   // capture that failed while `navigator.onLine` was already true (a flaky
   // connection, a captive portal, an LLM outage) never fires `online`, and the spec
@@ -180,6 +190,34 @@
   // settings change between capture and save is picked up.
   function storeDeps() {
     return { db: createRemoteDb(settings), settings, hash: defaultSha1Hex, log, pending };
+  }
+
+  // Card-projection deps: the shared store deps plus the device-local cache. Built per call so
+  // a settings change between opens is picked up, matching storeDeps.
+  function cardDeps() {
+    return { ...storeDeps(), cache: cardCache };
+  }
+
+  /** Open the grid: paint from the cache (or the Vault on a cold cache) without blocking
+   *  capture, then reconcile behind it from the Vault. The Capture control renders regardless
+   *  of how far this has got — capture friction is the one unforgivable failure. */
+  async function enterGrid() {
+    try {
+      const result = await listCards(cardDeps());
+      cards = result.cards;
+      // Reconcile behind the paint only when we painted from a warm cache — a cold cache already
+      // did the one authoritative Vault read inside listCards, so a second pass would re-read it.
+      if (result.fromCache) {
+        try {
+          cards = await refreshCards(cardDeps());
+        } catch {
+          // Keep the painted cards; the cache reconciles on the next online or grid entry.
+        }
+      }
+    } catch {
+      // A Vault read failure leaves whatever was painted; the grid stays usable.
+    }
+    cardsLoaded = true;
   }
 
   // Autofocus the Dump whenever it mounts — on load (so the first character needs no tap to
@@ -235,7 +273,12 @@
     // Reconnect recovers Pending Dumps automatically — they become Notes with no user
     // intervention, which is the promise: you do not file anything, the app files
     // everything it took.
-    onOnline = () => void recover();
+    onOnline = () => {
+      void recover();
+      // A restored connection may have recovered Dumps into Notes on another device — refresh
+      // the grid when it is the surface the user is looking at.
+      if (view === 'grid') void enterGrid();
+    };
     window.addEventListener('online', onOnline);
     // Anything still marked in-flight belongs to a session that ended — nothing survived
     // this reload that could still be organizing it. Done once, at start, never on the
@@ -635,10 +678,14 @@
 <!-- The masthead is a sibling of <main>, not a child of it: a <header> only becomes a `banner`
      landmark when nothing like <main> stands between it and the body, so nesting it cost the
      page its one other landmark. The wrapper div carries the column. -->
-<div class="page">
+<div class="page" class:wide={view === 'grid'}>
   <header class="masthead">
     <h1 class="wordmark">brain-dump</h1>
     <nav>
+      <button
+        class:on={view === 'grid'}
+        aria-current={view === 'grid' ? 'page' : undefined}
+        on:click={() => { view = 'grid'; void enterGrid(); }}>grid</button>
       <button
         class:on={view === 'capture'}
         aria-current={view === 'capture' ? 'page' : undefined}
@@ -655,7 +702,46 @@
   </header>
 
   <main>
-  {#if view === 'capture'}
+  {#if view === 'grid'}
+    <section class="surface grid-surface">
+    <!-- The Capture control lives on the grid and never waits on the card read — the grid is
+         the road to capture, and capture friction is the one unforgivable failure. -->
+    <div class="actions grid-controls">
+      <button class="primary" on:click={() => (view = 'capture')}>Capture</button>
+    </div>
+
+    {#if cards.length}
+      <div class="grid">
+        {#each cards as card (card.path)}
+          <article class="card">
+            <p class="card__category">{card.category || '—'}</p>
+            <h3 class="card__title">
+              <a class="vault-link" href={obsidianUrl(settings.vaultName, card.path)}>{card.title || 'Untitled'}</a>
+            </h3>
+            {#if card.summary}
+              <p class="card__summary">{card.summary}</p>
+            {/if}
+            {#if card.tags.length}
+              <p class="card__tags">
+                {#each card.tags.slice(0, 3) as tag}<span class="card__tag">{tag}</span>{/each}
+                {#if card.tags.length > 3}<span class="card__tag-more">+{card.tags.length - 3} more</span>{/if}
+              </p>
+            {/if}
+            <p class="card__date">{new Date(card.createdAt).toLocaleDateString()}</p>
+          </article>
+        {/each}
+      </div>
+    {:else if cardsLoaded}
+      <!-- An empty Vault is calm, not broken: show where the first card will land. -->
+      <div class="grid">
+        <p class="card-placeholder">Your first thought will land here.</p>
+      </div>
+    {:else}
+      <!-- A cold or failed cache never blocks capture: no spinner, just the grid frame. -->
+      <div class="grid"></div>
+    {/if}
+    </section>
+  {:else if view === 'capture'}
     <section class="surface">
     <!-- Four states, kept distinct on purpose. Collapsing them into one "waiting" line
          would restore the ambiguity that caused finding 02: the user could not tell a

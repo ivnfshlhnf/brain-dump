@@ -10,13 +10,15 @@ import type {
   Organizer,
   Matcher,
   DismissedStore,
+  NoteCard,
+  NoteCardCache,
   PendingDump,
   PendingStore,
   StrandedDump,
   StrandedReason,
   Settings,
 } from './types';
-import { writeFile, modifyFile, readVaultFiles, restoreFile } from './livesync';
+import { writeFile, modifyFile, readVaultFiles, restoreFile, type VaultFile } from './livesync';
 import { noopLog, type Log } from './logger';
 import { findRelated, type RelatedDeps } from './related';
 
@@ -510,6 +512,95 @@ export async function readNoteCandidates(
     const fm = parseFrontmatter(file.content);
     return { path: file.path, title: fm.title, tags: fm.tags, summary: fm.summary };
   });
+}
+
+// --- The home grid's projection (ticket 02; ADR-0007) ---------------------
+// The grid paints a card per Note. Everything a card needs is already in a Note's frontmatter
+// and already parsed above; only the projection is new. Colour arrives with ticket 04, so the
+// card is neutral here — `category` is the raw string, shown as-is.
+
+/** Project one managed-folder file to a card. */
+function toCard(file: VaultFile): NoteCard {
+  const fm = parseFrontmatter(file.content);
+  return {
+    path: file.path,
+    title: fm.title,
+    category: fm.category,
+    summary: fm.summary,
+    tags: fm.tags,
+    createdAt: fm.created,
+  };
+}
+
+/** Every Note in the Managed folder as a card projection — the home grid's source data.
+ *  Dumps and personal notes live in other folders, so the managed-folder filter excludes them;
+ *  soft-deleted Notes are excluded by `readVaultFiles`'s default (only reconciliation asks to
+ *  see deleted documents). Newest first, so a freshly filed Note lands at the top of the grid. */
+export async function listNotes(deps: StoreDeps): Promise<NoteCard[]> {
+  const files = await readVaultFiles(deps.db, (path) =>
+    path.startsWith(`${deps.settings.managedFolder}/`),
+  );
+  return files
+    .map(toCard)
+    .sort((a, b) => b.createdAt - a.createdAt || a.path.localeCompare(b.path));
+}
+
+/** Store deps plus the device-local card cache. The cache is optional: omit it and `listCards`
+ *  reads the Vault every time, which is what a test asking only about the projection wants. */
+export interface CardDeps extends StoreDeps {
+  cache?: NoteCardCache;
+}
+
+/** `listCards`'s result: the cards to paint, and whether they came from the cache. `fromCache`
+ *  tells the grid whether to reconcile behind the paint — a cold cache already did the one
+ *  authoritative Vault read inside `listCards`, so a second pass would only re-read it. */
+export interface CardResult {
+  cards: NoteCard[];
+  fromCache: boolean;
+}
+
+/** Write the projection back to the disposable cache, swallowing a failure: the cache is not the
+ *  source of truth, and a failed write costs only the next paint. Awaited so a resolved call has
+ *  durably stored the cards (a caller that reads the cache straight after sees them). */
+async function safeWrite(cache: NoteCardCache | undefined, cards: NoteCard[]): Promise<void> {
+  if (!cache) return;
+  try {
+    await cache.write(cards);
+  } catch {
+    // A failed write costs only the next paint — the cache is not the source of truth.
+  }
+}
+
+/** The grid's projection, cache-first (ADR-0007). Paints from the device-local cache without
+ *  waiting on the Vault; when the cache is absent or empty it is rebuilt from the Vault in one
+ *  pass and written back for next time. `fromCache` is true when the cards came from the cache,
+ *  false when they were read from the Vault on a cold/empty/failed cache.
+ *
+ *  A cache that fails to read or write is swallowed rather than thrown: the cache is disposable
+ *  and the Vault is the source of truth, and the Capture control lives on the grid — a broken
+ *  cache must never take the grid (and so capture) down with it. */
+export async function listCards(deps: CardDeps): Promise<CardResult> {
+  if (deps.cache) {
+    try {
+      const cached = await deps.cache.list();
+      if (cached.length) return { cards: cached, fromCache: true };
+    } catch {
+      // A failed read is disposable: fall through to the Vault and rebuild.
+    }
+  }
+  const cards = await listNotes(deps);
+  await safeWrite(deps.cache, cards);
+  return { cards, fromCache: false };
+}
+
+/** Re-read the Vault and refresh the cache, regardless of what it holds. The grid paints from
+ *  `listCards` and reconciles behind it with this when it painted from a warm cache: a card
+ *  filed on another device, or a Note deleted by Obsidian's own sync, reaches the screen without
+ *  a manual refresh. */
+export async function refreshCards(deps: CardDeps): Promise<NoteCard[]> {
+  const cards = await listNotes(deps);
+  await safeWrite(deps.cache, cards);
+  return cards;
 }
 
 /** Match a new Dump's preview against the existing Notes: LLM-assisted, by

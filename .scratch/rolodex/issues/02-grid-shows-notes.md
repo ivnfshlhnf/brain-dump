@@ -13,15 +13,15 @@ failure.
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A grid view exists alongside the three existing views, and all three still work
-- [ ] Every Note in the **Managed folder** appears as a card showing its **Category**, title, summary and date
-- [ ] A card shows up to three **Tags** followed by a count of the remainder, so card heights stay uniform
-- [ ] **Dumps**, the user's personal notes, and soft-deleted Notes never appear as cards
-- [ ] The grid uses two columns on a phone and more on a laptop
-- [ ] An empty **Vault** shows where the first card will land, rather than an error or a blank screen
-- [ ] The projection is cached on the device and survives a restart
-- [ ] An absent or unreadable cache is rebuilt from the Vault without user action
-- [ ] A cold, failed or empty cache never blocks or delays the Capture control
-- [ ] Tests at the operation-layer seam cover the projection's contents, the three exclusions, and cache durability across a simulated restart
+- [x] A grid view exists alongside the three existing views, and all three still work
+- [x] Every Note in the **Managed folder** appears as a card showing its **Category**, title, summary and date
+- [x] A card shows up to three **Tags** followed by a count of the remainder, so card heights stay uniform
+- [x] **Dumps**, the user's personal notes, and soft-deleted Notes never appear as cards
+- [x] The grid uses two columns on a phone and more on a laptop
+- [x] An empty **Vault** shows where the first card will land, rather than an error or a blank screen
+- [x] The projection is cached on the device and survives a restart
+- [x] An absent or unreadable cache is rebuilt from the Vault without user action
+- [x] A cold, failed or empty cache never blocks or delays the Capture control
+- [x] Tests at the operation-layer seam cover the projection's contents, the three exclusions, and cache durability across a simulated restart
