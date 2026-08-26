@@ -96,6 +96,10 @@
     --shadow-card: var(--shadow-card-dark);
   }
 
+  /* NOTE: --shadow-card is deliberately absent below. `light-dark()` resolves to a <color>,
+   * so it cannot carry a shadow *list*; wrapping one made the token invalid at every use site
+   * and silently dropped the shadow from every card. The `prefers-color-scheme` switch above
+   * is the right mechanism for a non-colour token. */
   @supports (color: light-dark(white, black)) {
     --ground: light-dark(var(--ground-light), var(--ground-dark));
     --raised: light-dark(var(--raised-light), var(--raised-dark));
@@ -105,7 +109,6 @@
     --ember: light-dark(var(--ember-light), var(--ember-dark));
     --set: light-dark(var(--set-light), var(--set-dark));
     --alarm: light-dark(var(--alarm-light), var(--alarm-dark));
-    --shadow-card: light-dark(var(--shadow-card-light), var(--shadow-card-dark));
   }
 
   /* Category colour (ticket 04; spec.md §Category). A member's hue is its index in CATEGORIES,
