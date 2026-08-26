@@ -21,6 +21,7 @@
   import { createIndexedDbPendingStore } from './lib/pending';
   import { createIndexedDbDismissedStore } from './lib/dismissed';
   import { createIndexedDbCardCache } from './lib/card-cache';
+  import { hueFor, type Category } from './lib/category';
   import { retrieve } from './lib/retrieve';
   import { createOrganizer, createMatcher, createEmbedder, createAnswerer, createRelater } from './lib/llm';
   import { defaultSha1Hex } from './lib/livesync';
@@ -177,6 +178,14 @@
   function firstLine(content: string): string {
     const line = content.trim().split('\n')[0];
     return line.length > 80 ? `${line.slice(0, 79)}…` : line;
+  }
+
+  /** The inline `--cat-hue` custom property for a card, or '' when the Category carries no hue
+   *  (`uncategorized` — the absence of a Category is not a colour). The CSS colours the left edge
+   *  and chip only on `.card--cat`, which the template adds precisely when `hueFor` is non-null. */
+  function hueStyle(category: Category): string {
+    const h = hueFor(category);
+    return h !== null ? `--cat-hue:${h}` : '';
   }
 
   // 5s inactivity → finalize; close → flush. saveAndFinalize always resolves
@@ -763,8 +772,8 @@
     {#if cards.length}
       <div class="grid">
         {#each cards as card (card.path)}
-          <article class="card">
-            <p class="card__category">{card.category || '—'}</p>
+          <article class="card" class:card--cat={hueFor(card.category) !== null} style={hueStyle(card.category)}>
+            <p class="card__category">{card.category}</p>
             <h3 class="card__title">
               <a class="vault-link" href={obsidianUrl(settings.vaultName, card.path)}>{card.title || 'Untitled'}</a>
             </h3>
@@ -874,7 +883,7 @@
             <dt>tags</dt>
             <dd>{shown.tags.join('  ')}</dd>
           {/if}
-          {#if shown.category}
+          {#if shown.category !== 'uncategorized'}
             <dt>category</dt>
             <dd>{shown.category}</dd>
           {/if}

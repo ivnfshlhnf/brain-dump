@@ -108,6 +108,26 @@
     --shadow-card: light-dark(var(--shadow-card-light), var(--shadow-card-dark));
   }
 
+  /* Category colour (ticket 04; spec.md §Category). A member's hue is its index in CATEGORIES,
+   * stepped by the golden angle — it arrives per card as the inline custom property `--cat-hue`.
+   * Only the lightness/chroma are per-scheme; the hue is the one thing that differs card to card.
+   * Unlike the tokens above, these can't use `light-dark()` — its arguments are `<color>` values,
+   * and the hue is per-card, so the per-scheme parts are bare lightness/chroma numbers composed
+   * with the inline hue inside `oklch()`. The `@media (prefers-color-scheme: dark)` block switches
+   * them. `uncategorized` sets no `--cat-hue`, so the neutral fallbacks apply — the absence of a
+   * Category is not a colour. */
+  --cat-edge-l: 52%;
+  --cat-edge-c: 0.13;
+  --cat-chip-bg-l: 94%;
+  --cat-chip-bg-c: 0.05;
+  --cat-chip-text-l: 40%;
+  --cat-chip-text-c: 0.13;
+  @media (prefers-color-scheme: dark) {
+    --cat-edge-l: 72%;
+    --cat-chip-bg-l: 32%;
+    --cat-chip-text-l: 80%;
+  }
+
   /* Native UI — scrollbars, form controls, the canvas — follows the user's system setting. */
   color-scheme: light dark;
   accent-color: var(--ember);
@@ -963,6 +983,10 @@ textarea.dump {
 .card {
   background: var(--raised);
   border: 1px solid var(--rule);
+  /* The left edge carries a Category's hue (ticket 04): 3px, neutral by default, coloured for a
+   * member card via `.card--cat` + the inline `--cat-hue`. The 2px extra over the 1px border is
+   * uniform across member cards, so the grid stays aligned. */
+  border-left: 3px solid var(--rule);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
   padding: var(--s3);
@@ -976,12 +1000,37 @@ textarea.dump {
   min-height: 12rem;
 }
 
+/* A member-Category card: its left edge takes the member's hue. `--cat-hue` is set inline per
+ * card; the lightness/chroma are per scheme. `uncategorized` (and the dashed Pending/Stranded
+ * cards) set no `--cat-hue`, so they keep the neutral `--rule` edge above. */
+.card--cat {
+  border-left-color: oklch(var(--cat-edge-l) var(--cat-edge-c) var(--cat-hue));
+}
+
+/* The Category chip: a fit-content pill, mono uppercase. Neutral by default — the same quiet
+ * treatment a Tag gets — so `uncategorized` and the Pending/Stranded status labels carry no hue
+ * (the absence of a Category is not a colour). A member card colours the chip with its hue. */
 .card__category {
   font-family: var(--mono);
   font-size: var(--text-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--dim);
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.1rem 0.5rem;
+  border-radius: 9999px;
+  background: transparent;
+  margin: 0;
+}
+
+/* A member-Category chip: tinted with the member's hue (`--cat-hue` inline). The background is a
+ * low-chroma wash of the hue; the text is a higher-chroma version — legible in both schemes. */
+.card--cat .card__category {
+  background: oklch(var(--cat-chip-bg-l) var(--cat-chip-bg-c) var(--cat-hue));
+  color: oklch(var(--cat-chip-text-l) var(--cat-chip-text-c) var(--cat-hue));
 }
 
 .card__title {

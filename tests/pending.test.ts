@@ -59,7 +59,7 @@ const settings: Settings = { ...DEFAULT_SETTINGS, dumpsFolder: '_dumps', managed
 const sampleOutput: OrganizeOutput = {
   title: 'Water the plants',
   tags: ['home', 'plants'],
-  category: 'Home',
+  category: 'personal',
   summary: 'A reminder to water the plants.',
   keyPoints: ['Water the plants regularly'],
   related: ['[[plants]]'],

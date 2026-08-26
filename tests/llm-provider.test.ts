@@ -13,6 +13,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Mock } from 'vitest';
 import { createOrganizer, createEmbedder, createAnswerer } from '../src/lib/llm';
+import { CATEGORIES } from '../src/lib/category';
 import { DEFAULT_SETTINGS, type Settings } from '../src/lib/types';
 
 const base = 'https://example.test/v1';
@@ -114,6 +115,9 @@ describe('OpenAI-compatible chat seam (createOrganizer / createAnswerer)', () =>
     expect(out.title).toBe('Water the basil');
     expect(out.tags).toEqual(['home']);
     expect(out.body).toBe('I keep forgetting.');
+    // The model's raw `category: 'Home'` is a non-member — parseOrganizeOutput coerces it to
+    // `uncategorized` at the seam (ticket 04). Lock the coercion here, not just in category.test.ts.
+    expect(out.category).toBe('uncategorized');
   });
 
   it('throws on a non-OK response', async () => {
@@ -138,6 +142,29 @@ describe('OpenAI-compatible chat seam (createOrganizer / createAnswerer)', () =>
     const prompt = (JSON.parse(lastOpts.body as string).messages[0] as { content: string }).content;
     expect(prompt).toContain('ONLY from the Dump');
     expect(prompt).toMatch(/do not add|invent/i);
+  });
+
+  it('enumerates the closed Category set and asks for exactly one (ticket 04 guard)', async () => {
+    // Category is a closed set (ticket 04; spec.md §Category) so colour can mean something: the
+    // model must pick one of the five named members rather than mint a free-form Category. The
+    // prompt must list the members and constrain the reply to exactly one — without it the Vault
+    // re-accumulates one Category per card and colour conveys nothing again. A rephrase is fine;
+    // dropping the enumeration or the "exactly one" constraint is not — assert the load-bearing
+    // intent only. (Coercion in parseOrganizeOutput is the total backstop; this guard locks the
+    // prompt so the model is steered toward a member in the first place.)
+    responseBody = {
+      choices: [{ message: { content: JSON.stringify({
+        title: 'T', tags: [], category: 'C', summary: 'S', keyPoints: [], related: [], body: 'B',
+      }) } }],
+    };
+    await createOrganizer(settings()).organize('a short dump', 'text');
+    const prompt = (JSON.parse(lastOpts.body as string).messages[0] as { content: string }).content;
+    // Iterate CATEGORIES (the source of truth) so the guard stays correct when a member is
+    // appended — the prompt is built from the same list, so a drift fails here.
+    for (const member of CATEGORIES) {
+      expect(prompt).toContain(member);
+    }
+    expect(prompt).toMatch(/exactly one/i);
   });
 });
 

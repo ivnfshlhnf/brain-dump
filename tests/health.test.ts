@@ -8,12 +8,12 @@ import { describe, it, expect, vi } from 'vitest';
 import { checkConnections, PROBE_DATABASE } from '../src/lib/health';
 import type { DatabaseAdmin } from '../src/lib/db';
 import { createLog } from '../src/lib/logger';
-import { DEFAULT_SETTINGS, type DocStore, type Embedder, type Organizer } from '../src/lib/types';
+import { DEFAULT_SETTINGS, type DocStore, type Embedder, type Organizer, type OrganizeOutput } from '../src/lib/types';
 
-const organizeOutput = {
+const organizeOutput: OrganizeOutput = {
   title: 'Basil',
   tags: ['plants'],
-  category: 'home',
+  category: 'personal',
   summary: 'Water the basil.',
   keyPoints: ['water it'],
   related: [],

@@ -83,7 +83,7 @@ const settings: Settings = {
 const sampleOutput: OrganizeOutput = {
   title: 'Water the plants',
   tags: ['home', 'plants'],
-  category: 'Home',
+  category: 'personal',
   summary: 'A reminder to water the plants.',
   keyPoints: ['Water the plants regularly'],
   related: ['[[plants]]'],
@@ -149,7 +149,7 @@ describeSmoke('LiveSync doc-format smoke test (Seam B — ticket 07)', () => {
     // into the stored leaf intact.)
     expect(leaf.data).toContain('title: Water the plants');
     expect(leaf.data).toContain('tags: [home, plants]');
-    expect(leaf.data).toContain('category: Home');
+    expect(leaf.data).toContain('category: personal');
     expect(leaf.data).toContain('## Summary');
     expect(leaf.data).toContain('## Key points');
     expect(leaf.data).toContain('## Related');

@@ -122,7 +122,7 @@ describe('readGrid — the Note projection (cold path, Seam A)', () => {
     await seedNote('Brain Dump/2026-08-21-water-the-plants.md', {
       title: 'Water the plants',
       tags: ['home', 'plants'],
-      category: 'Home',
+      category: 'troubleshooting',
       summary: 'A reminder to water the plants.',
       created: fixedNow,
     });
@@ -133,11 +133,30 @@ describe('readGrid — the Note projection (cold path, Seam A)', () => {
     expect(cards[0]).toEqual<NoteCard>({
       path: 'Brain Dump/2026-08-21-water-the-plants.md',
       title: 'Water the plants',
-      category: 'Home',
+      category: 'troubleshooting',
       summary: 'A reminder to water the plants.',
       tags: ['home', 'plants'],
       createdAt: fixedNow,
     });
+  });
+
+  it('coerces a free-form Category on an existing Note to uncategorized — the file is not rewritten (#8)', async () => {
+    // The Vault holds Notes with free-form Categories such as 'Bug Report' and 'Hardware'. Those
+    // files are left exactly as they are; they read as `uncategorized` and are corrected only on
+    // re-organize. Here a Note seeded with a non-member Category reads back as `uncategorized`.
+    await seedNote('Brain Dump/2026-08-21-legacy.md', {
+      title: 'A legacy Note',
+      category: 'Hardware',
+      created: fixedNow,
+    });
+
+    const { cards } = await readGrid(gridDeps());
+
+    expect(cards).toHaveLength(1);
+    expect(cards[0].category).toBe('uncategorized');
+    // And the file on disk still carries the original free-form Category — it was not rewritten.
+    const files = await readVaultFiles(db, () => true, {});
+    expect(files.find((f) => f.path.endsWith('legacy.md'))?.content).toContain('category: Hardware');
   });
 
   it('excludes Dumps, personal notes, and soft-deleted Notes from the cards', async () => {
@@ -213,7 +232,7 @@ describe('readGrid — cache-first, one pass reconciles cards and Stranded (ADR-
     // Seed a phantom card the Vault does not hold — the early paint shows it, then the reconcile
     // replaces it with the authoritative cards.
     await cache.write([
-      { path: 'Brain Dump/phantom.md', title: 'Phantom', category: 'x', summary: '', tags: [], createdAt: fixedNow },
+      { path: 'Brain Dump/phantom.md', title: 'Phantom', category: 'uncategorized', summary: '', tags: [], createdAt: fixedNow },
     ]);
     const painted: NoteCard[][] = [];
 
@@ -231,7 +250,7 @@ describe('readGrid — cache-first, one pass reconciles cards and Stranded (ADR-
   it('warm cache + Vault read failure: keeps the painted cached cards, returns no Stranded, does not throw', async () => {
     const cache = createIndexedDbCardCache();
     await cache.write([
-      { path: 'Brain Dump/cached.md', title: 'Cached', category: 'x', summary: '', tags: [], createdAt: fixedNow },
+      { path: 'Brain Dump/cached.md', title: 'Cached', category: 'uncategorized', summary: '', tags: [], createdAt: fixedNow },
     ]);
     const unreachable: DocStore = {
       put: async () => { throw new Error('Vault unreachable'); },

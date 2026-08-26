@@ -18,6 +18,7 @@ import type {
   StrandedReason,
   Settings,
 } from './types';
+import { toCategory, type Category } from './category';
 import { writeFile, modifyFile, readVaultFiles, restoreFile, type VaultFile } from './livesync';
 import { noopLog, type Log } from './logger';
 import { findRelated, type RelatedDeps } from './related';
@@ -453,7 +454,7 @@ export interface ParsedFrontmatter {
   title: string;
   tags: string[];
   summary: string;
-  category: string;
+  category: Category;
   created: number;
   modality: Modality;
   source: string;
@@ -491,7 +492,10 @@ export function parseFrontmatter(content: string): ParsedFrontmatter {
     title: fields.title ?? '',
     tags,
     summary: fields.summary ?? '',
-    category: fields.category ?? '',
+    // Coerce the raw frontmatter string into the closed set. A free-form Category on an existing
+    // Note (the Vault holds 'Bug Report', 'Hardware', …) reads as `uncategorized` here — the file
+    // is never rewritten, only corrected when the user re-organizes (ticket 04; spec.md §Category).
+    category: toCategory(fields.category ?? ''),
     created: Number(fields.created ?? 0),
     modality: fields.modality === 'voice' ? 'voice' : 'text',
     source: fields.source ?? '',
@@ -516,8 +520,9 @@ export async function readNoteCandidates(
 
 // --- The home grid's projection (ticket 02; ADR-0007) ---------------------
 // The grid paints a card per Note. Everything a card needs is already in a Note's frontmatter
-// and already parsed above; only the projection is new. Colour arrives with ticket 04, so the
-// card is neutral here — `category` is the raw string, shown as-is.
+// and already parsed above; only the projection is new. `category` is the closed-set Category
+// coerced in `parseFrontmatter` — the grid derives a hue from it (ticket 04); `uncategorized`
+// carries no hue.
 
 /** Project one managed-folder file to a card. */
 function toCard(file: VaultFile): NoteCard {

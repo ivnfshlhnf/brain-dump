@@ -1,5 +1,7 @@
 // Domain types — see CONTEXT.md for the glossary these names come from.
 
+import type { Category } from './category';
+
 export type Modality = 'text' | 'voice';
 
 /** A raw record of a single brain-dump. During the capture session the user may
@@ -22,7 +24,7 @@ export interface Note {
   createdAt: number; // ms epoch — the source Dump's capture time
   modality: Modality;
   source: string; // Obsidian wikilink to the source Dump
-  category: string;
+  category: Category;
   summary: string;
   body: string; // cleaned/organized content
   keyPoints: string[];
@@ -33,7 +35,7 @@ export interface Note {
 export interface OrganizeOutput {
   title: string;
   tags: string[];
-  category: string;
+  category: Category;
   summary: string;
   keyPoints: string[];
   related: string[];
@@ -61,12 +63,13 @@ export interface NoteCandidate {
  *  already in a Note's frontmatter and already parsed; this is the projection, not new data.
  *  `path` is the vault-relative path and identifies the Note.
  *
- *  `category` is the raw frontmatter string here. Ticket 04 closes it into a fixed set and
- *  derives a hue; until then the grid is neutral and the string is shown as-is. */
+ *  `category` is a closed-set Category (ticket 04): the frontmatter string is coerced on read,
+ *  so a free-form Category on an existing Note reads as `uncategorized`. The grid derives a hue
+ *  from the member's position — `uncategorized` carries none. */
 export interface NoteCard {
   path: string; // vault-relative — identifies the Note
   title: string;
-  category: string;
+  category: Category;
   summary: string;
   tags: string[];
   createdAt: number; // ms epoch — the source Dump's capture time

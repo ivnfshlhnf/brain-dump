@@ -48,7 +48,7 @@ beforeEach(() => {
 const sampleOutput: OrganizeOutput = {
   title: 'Water the plants',
   tags: ['home', 'plants'],
-  category: 'Home',
+  category: 'personal',
   summary: 'A reminder to water the plants.',
   keyPoints: ['Water the plants regularly'],
   related: ['[[plants]]'],
@@ -62,7 +62,7 @@ function makeNote(over: Partial<Note> = {}): Note {
     createdAt: fixedNow,
     modality: 'text' as Modality,
     source: '[[_dumps/20260821-203045-aaaaaa]]',
-    category: 'Home',
+    category: 'personal',
     summary: 'A reminder to water the plants.',
     body: 'I keep forgetting to water the plants.',
     keyPoints: ['Water the plants regularly'],
@@ -387,11 +387,11 @@ describe('capture composition (Seam A — ticket 04)', () => {
 describe('refreshNoteMetadata (Seam A — ticket 04)', () => {
   it('re-derives frontmatter from the body while preserving the body byte-for-byte', async () => {
     const path = await seedNote(
-      makeNote({ title: 'Old Title', tags: ['old'], category: 'Old', summary: 'Old summary.', body: 'The body the user may have edited.' }),
+      makeNote({ title: 'Old Title', tags: ['old'], category: 'uncategorized', summary: 'Old summary.', body: 'The body the user may have edited.' }),
     );
 
     const refreshOrganizer: Organizer = {
-      organize: async () => ({ ...sampleOutput, title: 'New Title', tags: ['new'], category: 'New', summary: 'New summary.' }),
+      organize: async () => ({ ...sampleOutput, title: 'New Title', tags: ['new'], category: 'personal', summary: 'New summary.' }),
     };
 
     await refreshNoteMetadata(path, {
@@ -406,7 +406,7 @@ describe('refreshNoteMetadata (Seam A — ticket 04)', () => {
     // Frontmatter re-derived…
     expect(content).toContain('title: New Title');
     expect(content).toContain('tags: [new]');
-    expect(content).toContain('category: New');
+    expect(content).toContain('category: personal');
     expect(content).toContain('summary: New summary.');
     expect(content).not.toContain('title: Old Title');
     // …but the body is preserved (the user's edits are never overwritten by a refresh).
@@ -421,7 +421,7 @@ describe('refreshNoteMetadata (Seam A — ticket 04)', () => {
     const countingOrganizer: Organizer = {
       organize: async () => {
         organizeCalls += 1;
-        return { ...sampleOutput, title: 'New Title', tags: ['new'], category: 'New', summary: 'New summary.' };
+        return { ...sampleOutput, title: 'New Title', tags: ['new'], category: 'personal', summary: 'New summary.' };
       },
     };
 
