@@ -9,7 +9,7 @@ The act of capturing a thought in the moment, before it is organized.
 _Avoid_: entry, log
 
 **Dump**:
-The raw record of a single brain-dump — a voice transcript or typed text, captured verbatim. During the capture session the user may add Context, which edits the Dump while preserving the verbatim original inside it. Once the Note is saved (or the session ends) the Dump is frozen and never changes again.
+The raw record of a single brain-dump — a voice transcript or typed text, captured verbatim. During the capture session the user may add Context, which edits the Dump while preserving the verbatim original inside it. Once the Note is saved (or the session ends) the Dump is frozen and never changes again. Every Dump is in exactly one of four states — filed into a Note, Pending, Stranded, or Dismissed.
 _Avoid_: raw note, transcript, entry
 
 **Context**:
@@ -24,6 +24,14 @@ _Avoid_: document, file, entry
 The additive enrichment of a Dump into or onto a Note — a title, tags, summary, key points, related links, and category — without altering the source Dump. Every part of this is derived from the Dump alone except the related links, which describe the Note's connections to *other* Notes and so cannot be known from the Dump by itself.
 _Avoid_: process, format, clean up, rewrite
 
+**Category**:
+The single coarse subject a Note belongs to, drawn from a fixed set the app defines. Every Note has exactly one; a Note the Organize could not place takes `uncategorized`, which is an ordinary member and not a failure.
+_Avoid_: type, kind, folder
+
+**Tag**:
+A fine-grained keyword Organize derives from a Dump. A Note has many, drawn from no fixed set — the open counterpart to the one closed Category.
+_Avoid_: label, keyword, topic
+
 **Capture**:
 Creating a Dump from a voice or text input.
 _Avoid_: record, save, log
@@ -37,7 +45,7 @@ A Pending Dump the app has stopped working on — the Organize failed repeatedly
 _Avoid_: orphaned, lost, failed, abandoned
 
 **Dismissed**:
-A Stranded Dump the user has decided not to file. Dismissing is a note to self and nothing more: the Dump stays exactly where it is in the Vault, unchanged and still readable. It means "stop telling me about this", never "destroy this thought" — removing a thought is something only the user does, in their own editor.
+A Stranded Dump the user has decided not to file. Dismissing is a note to self and nothing more: the Dump stays exactly where it is in the Vault, unchanged and still readable. It means "stop telling me about this", never "destroy this thought" — removing a thought is something only the user does, in their own editor. Only a Stranded Dump can be Dismissed: a sheet the user shuts is *closed*, and a message they wave away is *cleared*.
 _Avoid_: ignored, archived, deleted, skipped
 
 **Append**:

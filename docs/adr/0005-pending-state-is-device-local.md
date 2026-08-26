@@ -41,6 +41,13 @@ recovery work across devices for free.
   happens on its own; the Dump is found by **Find stranded Dumps** in Config, which is manual.
   That is deliberate: an automatic Vault scan would, on its first run, spend LLM calls Organizing
   thoughts the user may have abandoned weeks ago.
+
+  **Amended by ADR-0007.** Finding the stranded Dumps is now automatic: the grid reads the Vault
+  in order to paint, and the same pass reports them. The objection above is preserved rather
+  than overridden — it is about *Organizing* abandoned thoughts, not about finding them, and
+  Organize on a stranded Dump remains an explicit user action. What changed is that the read is
+  now being paid for anyway. The decision this ADR actually records — Pending state is
+  device-local, the Vault is the cross-device reconciler — is unchanged.
 - Clearing site data on a device discards its Pending records. The thoughts are not lost — they
   are in the Vault — but they become findable only by reconciliation.
 - Recovery must be idempotent against a Note that already exists, because two devices can now

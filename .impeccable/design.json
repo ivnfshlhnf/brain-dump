@@ -1,389 +1,533 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-23T16:12:04.915779+00:00",
-  "title": "Design System: Brain-dump",
+  "generatedAt": "2026-08-26T00:00:00Z",
+  "title": "Design System: brain·dump — Rolodex",
   "extensions": {
     "colorMeta": {
-      "wet-ink": {
-        "role": "primary",
-        "displayName": "Wet Ink",
-        "canonical": "oklch(58% 0.16 55)",
-        "tonalRamp": [
-          "oklch(15% 0.16 55.0)",
-          "oklch(26% 0.16 55.0)",
-          "oklch(37% 0.16 55.0)",
-          "oklch(48% 0.16 55.0)",
-          "oklch(59% 0.16 55.0)",
-          "oklch(70% 0.16 55.0)",
-          "oklch(82% 0.16 55.0)",
-          "oklch(95% 0.16 55.0)"
-        ]
-      },
-      "wet-ink-dark": {
-        "role": "primary",
-        "displayName": "Wet Ink (dark scheme)",
-        "canonical": "oklch(75% 0.15 65)",
-        "tonalRamp": [
-          "oklch(15% 0.15 65.0)",
-          "oklch(26% 0.15 65.0)",
-          "oklch(37% 0.15 65.0)",
-          "oklch(48% 0.15 65.0)",
-          "oklch(59% 0.15 65.0)",
-          "oklch(70% 0.15 65.0)",
-          "oklch(82% 0.15 65.0)",
-          "oklch(95% 0.15 65.0)"
-        ]
-      },
-      "dry-ink": {
-        "role": "secondary",
-        "displayName": "Dry Ink",
-        "canonical": "oklch(52% 0.09 195)",
-        "tonalRamp": [
-          "oklch(15% 0.09 195.0)",
-          "oklch(26% 0.09 195.0)",
-          "oklch(37% 0.09 195.0)",
-          "oklch(48% 0.09 195.0)",
-          "oklch(59% 0.09 195.0)",
-          "oklch(70% 0.09 195.0)",
-          "oklch(82% 0.09 195.0)",
-          "oklch(95% 0.09 195.0)"
-        ]
-      },
-      "dry-ink-dark": {
-        "role": "secondary",
-        "displayName": "Dry Ink (dark scheme)",
-        "canonical": "oklch(72% 0.09 195)",
-        "tonalRamp": [
-          "oklch(15% 0.09 195.0)",
-          "oklch(26% 0.09 195.0)",
-          "oklch(37% 0.09 195.0)",
-          "oklch(48% 0.09 195.0)",
-          "oklch(59% 0.09 195.0)",
-          "oklch(70% 0.09 195.0)",
-          "oklch(82% 0.09 195.0)",
-          "oklch(95% 0.09 195.0)"
-        ]
-      },
-      "alarm": {
-        "role": "tertiary",
-        "displayName": "Alarm",
-        "canonical": "oklch(52% 0.19 25)",
-        "tonalRamp": [
-          "oklch(15% 0.19 25.0)",
-          "oklch(26% 0.19 25.0)",
-          "oklch(37% 0.19 25.0)",
-          "oklch(48% 0.19 25.0)",
-          "oklch(59% 0.19 25.0)",
-          "oklch(70% 0.19 25.0)",
-          "oklch(82% 0.19 25.0)",
-          "oklch(95% 0.19 25.0)"
-        ]
-      },
-      "alarm-dark": {
-        "role": "tertiary",
-        "displayName": "Alarm (dark scheme)",
-        "canonical": "oklch(74% 0.16 25)",
-        "tonalRamp": [
-          "oklch(15% 0.16 25.0)",
-          "oklch(26% 0.16 25.0)",
-          "oklch(37% 0.16 25.0)",
-          "oklch(48% 0.16 25.0)",
-          "oklch(59% 0.16 25.0)",
-          "oklch(70% 0.16 25.0)",
-          "oklch(82% 0.16 25.0)",
-          "oklch(95% 0.16 25.0)"
-        ]
-      },
-      "page": {
+      "background": {
         "role": "neutral",
-        "displayName": "Page",
-        "canonical": "oklch(97% 0.008 240)",
+        "displayName": "Background",
+        "canonical": "oklch(0.201 0.010 276.5)",
         "tonalRamp": [
-          "oklch(15% 0.008 240.0)",
-          "oklch(26% 0.008 240.0)",
-          "oklch(37% 0.008 240.0)",
-          "oklch(48% 0.008 240.0)",
-          "oklch(59% 0.008 240.0)",
-          "oklch(70% 0.008 240.0)",
-          "oklch(82% 0.008 240.0)",
-          "oklch(95% 0.008 240.0)"
+          "oklch(0.150 0.010 276.5)",
+          "oklch(0.264 0.010 276.5)",
+          "oklch(0.379 0.010 276.5)",
+          "oklch(0.493 0.010 276.5)",
+          "oklch(0.607 0.010 276.5)",
+          "oklch(0.721 0.010 276.5)",
+          "oklch(0.836 0.010 276.5)",
+          "oklch(0.950 0.010 276.5)"
         ]
       },
-      "page-dark": {
+      "surface": {
         "role": "neutral",
-        "displayName": "Page (dark scheme)",
-        "canonical": "oklch(21% 0.028 235)",
+        "displayName": "Surface",
+        "canonical": "oklch(0.244 0.012 270.9)",
         "tonalRamp": [
-          "oklch(15% 0.028 235.0)",
-          "oklch(26% 0.028 235.0)",
-          "oklch(37% 0.028 235.0)",
-          "oklch(48% 0.028 235.0)",
-          "oklch(59% 0.028 235.0)",
-          "oklch(70% 0.028 235.0)",
-          "oklch(82% 0.028 235.0)",
-          "oklch(95% 0.028 235.0)"
+          "oklch(0.150 0.012 270.9)",
+          "oklch(0.264 0.012 270.9)",
+          "oklch(0.379 0.012 270.9)",
+          "oklch(0.493 0.012 270.9)",
+          "oklch(0.607 0.012 270.9)",
+          "oklch(0.721 0.012 270.9)",
+          "oklch(0.836 0.012 270.9)",
+          "oklch(0.950 0.012 270.9)"
         ]
       },
-      "card": {
+      "surface-2": {
         "role": "neutral",
-        "displayName": "Card",
-        "canonical": "oklch(100% 0 0)",
+        "displayName": "Surface-2",
+        "canonical": "oklch(0.209 0.010 268.2)",
         "tonalRamp": [
-          "oklch(15% 0.0 0.0)",
-          "oklch(26% 0.0 0.0)",
-          "oklch(37% 0.0 0.0)",
-          "oklch(48% 0.0 0.0)",
-          "oklch(59% 0.0 0.0)",
-          "oklch(70% 0.0 0.0)",
-          "oklch(82% 0.0 0.0)",
-          "oklch(95% 0.0 0.0)"
+          "oklch(0.150 0.010 268.2)",
+          "oklch(0.264 0.010 268.2)",
+          "oklch(0.379 0.010 268.2)",
+          "oklch(0.493 0.010 268.2)",
+          "oklch(0.607 0.010 268.2)",
+          "oklch(0.721 0.010 268.2)",
+          "oklch(0.836 0.010 268.2)",
+          "oklch(0.950 0.010 268.2)"
         ]
       },
-      "card-dark": {
+      "sheet": {
         "role": "neutral",
-        "displayName": "Card (dark scheme)",
-        "canonical": "oklch(25% 0.03 235)",
+        "displayName": "Sheet",
+        "canonical": "oklch(0.179 0.010 276.4)",
         "tonalRamp": [
-          "oklch(15% 0.03 235.0)",
-          "oklch(26% 0.03 235.0)",
-          "oklch(37% 0.03 235.0)",
-          "oklch(48% 0.03 235.0)",
-          "oklch(59% 0.03 235.0)",
-          "oklch(70% 0.03 235.0)",
-          "oklch(82% 0.03 235.0)",
-          "oklch(95% 0.03 235.0)"
-        ]
-      },
-      "graphite": {
-        "role": "neutral",
-        "displayName": "Graphite",
-        "canonical": "oklch(28% 0.02 240)",
-        "tonalRamp": [
-          "oklch(15% 0.02 240.0)",
-          "oklch(26% 0.02 240.0)",
-          "oklch(37% 0.02 240.0)",
-          "oklch(48% 0.02 240.0)",
-          "oklch(59% 0.02 240.0)",
-          "oklch(70% 0.02 240.0)",
-          "oklch(82% 0.02 240.0)",
-          "oklch(95% 0.02 240.0)"
-        ]
-      },
-      "graphite-dark": {
-        "role": "neutral",
-        "displayName": "Graphite (dark scheme)",
-        "canonical": "oklch(92% 0.012 230)",
-        "tonalRamp": [
-          "oklch(15% 0.012 230.0)",
-          "oklch(26% 0.012 230.0)",
-          "oklch(37% 0.012 230.0)",
-          "oklch(48% 0.012 230.0)",
-          "oklch(59% 0.012 230.0)",
-          "oklch(70% 0.012 230.0)",
-          "oklch(82% 0.012 230.0)",
-          "oklch(95% 0.012 230.0)"
-        ]
-      },
-      "pencil": {
-        "role": "neutral",
-        "displayName": "Pencil",
-        "canonical": "oklch(52% 0.02 240)",
-        "tonalRamp": [
-          "oklch(15% 0.02 240.0)",
-          "oklch(26% 0.02 240.0)",
-          "oklch(37% 0.02 240.0)",
-          "oklch(48% 0.02 240.0)",
-          "oklch(59% 0.02 240.0)",
-          "oklch(70% 0.02 240.0)",
-          "oklch(82% 0.02 240.0)",
-          "oklch(95% 0.02 240.0)"
-        ]
-      },
-      "pencil-dark": {
-        "role": "neutral",
-        "displayName": "Pencil (dark scheme)",
-        "canonical": "oklch(70% 0.018 230)",
-        "tonalRamp": [
-          "oklch(15% 0.018 230.0)",
-          "oklch(26% 0.018 230.0)",
-          "oklch(37% 0.018 230.0)",
-          "oklch(48% 0.018 230.0)",
-          "oklch(59% 0.018 230.0)",
-          "oklch(70% 0.018 230.0)",
-          "oklch(82% 0.018 230.0)",
-          "oklch(95% 0.018 230.0)"
+          "oklch(0.150 0.010 276.4)",
+          "oklch(0.264 0.010 276.4)",
+          "oklch(0.379 0.010 276.4)",
+          "oklch(0.493 0.010 276.4)",
+          "oklch(0.607 0.010 276.4)",
+          "oklch(0.721 0.010 276.4)",
+          "oklch(0.836 0.010 276.4)",
+          "oklch(0.950 0.010 276.4)"
         ]
       },
       "rule": {
         "role": "neutral",
         "displayName": "Rule",
-        "canonical": "oklch(88% 0.012 240)",
+        "canonical": "oklch(0.266 0.015 274.3)",
         "tonalRamp": [
-          "oklch(15% 0.012 240.0)",
-          "oklch(26% 0.012 240.0)",
-          "oklch(37% 0.012 240.0)",
-          "oklch(48% 0.012 240.0)",
-          "oklch(59% 0.012 240.0)",
-          "oklch(70% 0.012 240.0)",
-          "oklch(82% 0.012 240.0)",
-          "oklch(95% 0.012 240.0)"
+          "oklch(0.150 0.015 274.3)",
+          "oklch(0.264 0.015 274.3)",
+          "oklch(0.379 0.015 274.3)",
+          "oklch(0.493 0.015 274.3)",
+          "oklch(0.607 0.015 274.3)",
+          "oklch(0.721 0.015 274.3)",
+          "oklch(0.836 0.015 274.3)",
+          "oklch(0.950 0.015 274.3)"
         ]
       },
-      "rule-dark": {
+      "rule-soft": {
         "role": "neutral",
-        "displayName": "Rule (dark scheme)",
-        "canonical": "oklch(32% 0.02 235)",
+        "displayName": "Rule-Soft",
+        "canonical": "oklch(0.298 0.017 270.8)",
         "tonalRamp": [
-          "oklch(15% 0.02 235.0)",
-          "oklch(26% 0.02 235.0)",
-          "oklch(37% 0.02 235.0)",
-          "oklch(48% 0.02 235.0)",
-          "oklch(59% 0.02 235.0)",
-          "oklch(70% 0.02 235.0)",
-          "oklch(82% 0.02 235.0)",
-          "oklch(95% 0.02 235.0)"
+          "oklch(0.150 0.017 270.8)",
+          "oklch(0.264 0.017 270.8)",
+          "oklch(0.379 0.017 270.8)",
+          "oklch(0.493 0.017 270.8)",
+          "oklch(0.607 0.017 270.8)",
+          "oklch(0.721 0.017 270.8)",
+          "oklch(0.836 0.017 270.8)",
+          "oklch(0.950 0.017 270.8)"
+        ]
+      },
+      "dashed": {
+        "role": "neutral",
+        "displayName": "Dashed",
+        "canonical": "oklch(0.357 0.018 272.3)",
+        "tonalRamp": [
+          "oklch(0.150 0.018 272.3)",
+          "oklch(0.264 0.018 272.3)",
+          "oklch(0.379 0.018 272.3)",
+          "oklch(0.493 0.018 272.3)",
+          "oklch(0.607 0.018 272.3)",
+          "oklch(0.721 0.018 272.3)",
+          "oklch(0.836 0.018 272.3)",
+          "oklch(0.950 0.018 272.3)"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Text",
+        "canonical": "oklch(0.920 0.005 286.3)",
+        "tonalRamp": [
+          "oklch(0.150 0.005 286.3)",
+          "oklch(0.264 0.005 286.3)",
+          "oklch(0.379 0.005 286.3)",
+          "oklch(0.493 0.005 286.3)",
+          "oklch(0.607 0.005 286.3)",
+          "oklch(0.721 0.005 286.3)",
+          "oklch(0.836 0.005 286.3)",
+          "oklch(0.950 0.005 286.3)"
+        ]
+      },
+      "text-mid": {
+        "role": "neutral",
+        "displayName": "Text-Mid",
+        "canonical": "oklch(0.689 0.014 286.0)",
+        "tonalRamp": [
+          "oklch(0.150 0.014 286.0)",
+          "oklch(0.264 0.014 286.0)",
+          "oklch(0.379 0.014 286.0)",
+          "oklch(0.493 0.014 286.0)",
+          "oklch(0.607 0.014 286.0)",
+          "oklch(0.721 0.014 286.0)",
+          "oklch(0.836 0.014 286.0)",
+          "oklch(0.950 0.014 286.0)"
+        ]
+      },
+      "text-dim": {
+        "role": "neutral",
+        "displayName": "Text-Dim",
+        "canonical": "oklch(0.635 0.014 276.0)",
+        "tonalRamp": [
+          "oklch(0.150 0.014 276.0)",
+          "oklch(0.264 0.014 276.0)",
+          "oklch(0.379 0.014 276.0)",
+          "oklch(0.493 0.014 276.0)",
+          "oklch(0.607 0.014 276.0)",
+          "oklch(0.721 0.014 276.0)",
+          "oklch(0.836 0.014 276.0)",
+          "oklch(0.950 0.014 276.0)"
+        ]
+      },
+      "text-faint": {
+        "role": "neutral",
+        "displayName": "Text-Faint",
+        "canonical": "oklch(0.477 0.016 276.8)",
+        "tonalRamp": [
+          "oklch(0.150 0.016 276.8)",
+          "oklch(0.264 0.016 276.8)",
+          "oklch(0.379 0.016 276.8)",
+          "oklch(0.493 0.016 276.8)",
+          "oklch(0.607 0.016 276.8)",
+          "oklch(0.721 0.016 276.8)",
+          "oklch(0.836 0.016 276.8)",
+          "oklch(0.950 0.016 276.8)"
+        ]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Accent",
+        "canonical": "oklch(0.710 0.093 244.6)",
+        "tonalRamp": [
+          "oklch(0.150 0.093 244.6)",
+          "oklch(0.264 0.093 244.6)",
+          "oklch(0.379 0.093 244.6)",
+          "oklch(0.493 0.093 244.6)",
+          "oklch(0.607 0.093 244.6)",
+          "oklch(0.721 0.093 244.6)",
+          "oklch(0.836 0.093 244.6)",
+          "oklch(0.950 0.093 244.6)"
+        ]
+      },
+      "accent-ink": {
+        "role": "primary",
+        "displayName": "Accent-Ink",
+        "canonical": "oklch(0.159 0.007 271.0)",
+        "tonalRamp": [
+          "oklch(0.150 0.007 271.0)",
+          "oklch(0.264 0.007 271.0)",
+          "oklch(0.379 0.007 271.0)",
+          "oklch(0.493 0.007 271.0)",
+          "oklch(0.607 0.007 271.0)",
+          "oklch(0.721 0.007 271.0)",
+          "oklch(0.836 0.007 271.0)",
+          "oklch(0.950 0.007 271.0)"
+        ]
+      },
+      "filed": {
+        "role": "secondary",
+        "displayName": "Filed",
+        "canonical": "oklch(0.673 0.089 172.2)",
+        "tonalRamp": [
+          "oklch(0.150 0.089 172.2)",
+          "oklch(0.264 0.089 172.2)",
+          "oklch(0.379 0.089 172.2)",
+          "oklch(0.493 0.089 172.2)",
+          "oklch(0.607 0.089 172.2)",
+          "oklch(0.721 0.089 172.2)",
+          "oklch(0.836 0.089 172.2)",
+          "oklch(0.950 0.089 172.2)"
+        ]
+      },
+      "stranded": {
+        "role": "secondary",
+        "displayName": "Stranded",
+        "canonical": "oklch(0.623 0.160 29.7)",
+        "tonalRamp": [
+          "oklch(0.150 0.160 29.7)",
+          "oklch(0.264 0.160 29.7)",
+          "oklch(0.379 0.160 29.7)",
+          "oklch(0.493 0.160 29.7)",
+          "oklch(0.607 0.160 29.7)",
+          "oklch(0.721 0.160 29.7)",
+          "oklch(0.836 0.160 29.7)",
+          "oklch(0.950 0.160 29.7)"
+        ]
+      },
+      "pending": {
+        "role": "secondary",
+        "displayName": "Pending",
+        "canonical": "oklch(0.509 0.013 280.3)",
+        "tonalRamp": [
+          "oklch(0.150 0.013 280.3)",
+          "oklch(0.264 0.013 280.3)",
+          "oklch(0.379 0.013 280.3)",
+          "oklch(0.493 0.013 280.3)",
+          "oklch(0.607 0.013 280.3)",
+          "oklch(0.721 0.013 280.3)",
+          "oklch(0.836 0.013 280.3)",
+          "oklch(0.950 0.013 280.3)"
+        ]
+      },
+      "cat-0": {
+        "role": "tertiary",
+        "displayName": "Category 0 — troubleshooting",
+        "canonical": "oklch(0.660 0.120 30)",
+        "tonalRamp": [
+          "oklch(0.150 0.120 30)",
+          "oklch(0.264 0.120 30)",
+          "oklch(0.379 0.120 30)",
+          "oklch(0.493 0.120 30)",
+          "oklch(0.607 0.120 30)",
+          "oklch(0.721 0.120 30)",
+          "oklch(0.836 0.120 30)",
+          "oklch(0.950 0.120 30)"
+        ]
+      },
+      "cat-1": {
+        "role": "tertiary",
+        "displayName": "Category 1 — productivity",
+        "canonical": "oklch(0.660 0.120 167.5)",
+        "tonalRamp": [
+          "oklch(0.150 0.120 167.5)",
+          "oklch(0.264 0.120 167.5)",
+          "oklch(0.379 0.120 167.5)",
+          "oklch(0.493 0.120 167.5)",
+          "oklch(0.607 0.120 167.5)",
+          "oklch(0.721 0.120 167.5)",
+          "oklch(0.836 0.120 167.5)",
+          "oklch(0.950 0.120 167.5)"
+        ]
+      },
+      "cat-2": {
+        "role": "tertiary",
+        "displayName": "Category 2 — tools",
+        "canonical": "oklch(0.660 0.120 305)",
+        "tonalRamp": [
+          "oklch(0.150 0.120 305)",
+          "oklch(0.264 0.120 305)",
+          "oklch(0.379 0.120 305)",
+          "oklch(0.493 0.120 305)",
+          "oklch(0.607 0.120 305)",
+          "oklch(0.721 0.120 305)",
+          "oklch(0.836 0.120 305)",
+          "oklch(0.950 0.120 305)"
+        ]
+      },
+      "cat-3": {
+        "role": "tertiary",
+        "displayName": "Category 3 — coffee",
+        "canonical": "oklch(0.660 0.120 82.5)",
+        "tonalRamp": [
+          "oklch(0.150 0.120 82.5)",
+          "oklch(0.264 0.120 82.5)",
+          "oklch(0.379 0.120 82.5)",
+          "oklch(0.493 0.120 82.5)",
+          "oklch(0.607 0.120 82.5)",
+          "oklch(0.721 0.120 82.5)",
+          "oklch(0.836 0.120 82.5)",
+          "oklch(0.950 0.120 82.5)"
+        ]
+      },
+      "cat-4": {
+        "role": "tertiary",
+        "displayName": "Category 4 — personal",
+        "canonical": "oklch(0.660 0.120 220)",
+        "tonalRamp": [
+          "oklch(0.150 0.120 220)",
+          "oklch(0.264 0.120 220)",
+          "oklch(0.379 0.120 220)",
+          "oklch(0.493 0.120 220)",
+          "oklch(0.607 0.120 220)",
+          "oklch(0.721 0.120 220)",
+          "oklch(0.836 0.120 220)",
+          "oklch(0.950 0.120 220)"
         ]
       }
     },
     "typographyMeta": {
       "display": {
         "displayName": "Display",
-        "purpose": "The capture field only. The thought being typed, set at reading size in the reading face."
+        "purpose": "Note titles — the opened Note and the preview card."
       },
-      "title": {
-        "displayName": "Title",
-        "purpose": "A Note's title. The only place type gets large."
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Sheet section headings (h2)."
+      },
+      "capture": {
+        "displayName": "Capture",
+        "purpose": "The capture field — the full-screen serif input where a thought lands."
       },
       "body": {
         "displayName": "Body",
-        "purpose": "Note bodies, summaries, key points, Ask answers. Capped at a 34rem measure."
+        "purpose": "Note bodies, summaries, answers. Words you read."
       },
       "label": {
         "displayName": "Label",
-        "purpose": "Uppercase mono markings: field labels, eyebrows, section rules."
-      },
-      "meta": {
-        "displayName": "Meta",
-        "purpose": "Tags, paths, wikilinks, tab names, status, diagnostics. Anything the machine states as fact."
+        "purpose": "Section labels, chips, tags, dates, buttons, status, wordmark. Metadata you scan; uppercase Plex Mono."
       }
     },
-    "shadows": [],
-    "motion": [
+    "shadows": [
       {
-        "name": "burn-down",
-        "value": "scaleX(1) → scaleX(0) over 5s linear forwards",
-        "purpose": "The Note card's top edge consuming the autosave window. The only motion in the application."
+        "name": "resting",
+        "value": "0 1px 3px rgba(0,0,0,0.4)",
+        "purpose": "Default on cards and the note panel. Barely there; lifts the card off the ground. Light theme uses rgba(0,0,0,0.08)."
+      },
+      {
+        "name": "hover-lift",
+        "value": "0 4px 12px rgba(0,0,0,0.25)",
+        "purpose": "Interactive card hover, paired with translateY(-2px). Light theme uses 0.12 alpha. The only diffuse shadow."
+      },
+      {
+        "name": "wet-inset",
+        "value": "0 0 0 2px #6ea8d8 inset",
+        "purpose": "The just-filed/highlighted card. A ring, not a drop shadow."
       }
     ],
-    "breakpoints": []
+    "motion": [
+      {
+        "name": "sheet-up",
+        "value": "cubic-bezier(0.2, 0.7, 0.2, 1)",
+        "purpose": "Sheets slide up over the grid (transform translateY 100%→0, 0.28s)."
+      },
+      {
+        "name": "slotin",
+        "value": "cubic-bezier(0.2, 0.7, 0.2, 1)",
+        "purpose": "Just-filed card entrance: translateY(-8px) scale(0.985) → none, 0.42s."
+      },
+      {
+        "name": "burn",
+        "value": "linear",
+        "purpose": "The countdown edge drains width 100%→0 over 5s. The one authored moment; carries time-to-commit."
+      },
+      {
+        "name": "state",
+        "value": "0.15s",
+        "purpose": "Hover/focus color + border transitions on controls."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "mobile",
+        "value": "560px",
+        "purpose": "Grid collapses from auto-fill minmax(180px,1fr) to two equal columns at 0.5rem gap."
+      }
+    ]
   },
   "components": [
     {
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "The committing action on a surface — Capture, Ask, Save settings.",
-      "html": "<button class=\"ds-btn-primary\">Capture</button>",
-      "css": ".ds-btn-primary { font-family: var(--mono); font-size: 0.8125rem; letter-spacing: 0.02em; font-weight: 500; padding: 0.5rem 1rem; color: var(--ground); background: var(--ember); border: 1px solid var(--ember); border-radius: 3px; cursor: pointer; } .ds-btn-primary:hover { border-color: var(--dim); } .ds-btn-primary:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; } .ds-btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }"
+      "description": "The only saturated control. One per footer: SAVE / APPEND / RETRY. Accent fill, mono caps, serif italic sub-label.",
+      "html": "<button class=\"ds-btn-primary\">SAVE AS NEW NOTE<span class=\"sub\">commit now</span></button>",
+      "css": ".ds-btn-primary{background:#6ea8d8;color:#0c0d10;border:none;border-radius:9px;padding:0.75rem;width:100%;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:0.72rem;font-weight:600;letter-spacing:0.02em;text-transform:uppercase;cursor:pointer;transition:background .15s,transform .15s}.ds-btn-primary .sub{display:block;font-family:Georgia,serif;font-style:italic;font-size:0.72rem;font-weight:400;text-transform:none;opacity:0.7;margin-top:0.06rem}.ds-btn-primary:hover{background:#5a96c6}.ds-btn-primary:active{transform:translateY(1px)}.ds-btn-primary:focus-visible{outline:2px solid #6ea8d8;outline-offset:2px}"
     },
     {
-      "name": "Default Button",
+      "name": "Secondary Button",
       "kind": "button",
-      "refersTo": "button-default",
-      "description": "Every non-committing action: Save now, New capture, Test connection.",
-      "html": "<button class=\"ds-btn-default\">New capture</button>",
-      "css": ".ds-btn-default { font-family: var(--mono); font-size: 0.8125rem; letter-spacing: 0.02em; padding: 0.5rem 1rem; color: var(--text); background: var(--raised); border: 1px solid var(--rule); border-radius: 3px; cursor: pointer; } .ds-btn-default:hover { border-color: var(--dim); } .ds-btn-default:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }"
+      "refersTo": "button-secondary",
+      "description": "Transparent with a hairline border; the alternate footer action (hold, save-as-new-instead).",
+      "html": "<button class=\"ds-btn-secondary\">⏸ hold — stop countdown</button>",
+      "css": ".ds-btn-secondary{background:transparent;color:#9a9aa4;border:1px solid #2a2d36;border-radius:8px;padding:0.6rem;width:100%;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:0.7rem;cursor:pointer;transition:color .15s,border-color .15s}.ds-btn-secondary:hover{color:#e4e4e8;border-color:#888a93}.ds-btn-secondary:focus-visible{outline:2px solid #6ea8d8;outline-offset:2px}"
     },
     {
-      "name": "Navigation Tab",
-      "kind": "nav",
-      "refersTo": "nav-tab",
-      "description": "One of three lowercase tabs in the masthead. Active carries a Wet Ink underline.",
-      "html": "<nav class=\"ds-nav\"><button class=\"ds-nav-tab ds-nav-tab--on\">capture</button><button class=\"ds-nav-tab\">ask</button><button class=\"ds-nav-tab\">config</button></nav>",
-      "css": ".ds-nav { display: flex; gap: 0.75rem; } .ds-nav-tab { font-family: var(--mono); font-size: 0.8125rem; letter-spacing: 0.04em; background: none; border: 0; border-bottom: 2px solid transparent; padding: 0.25rem 0; color: var(--dim); cursor: pointer; } .ds-nav-tab:hover { color: var(--text); } .ds-nav-tab--on { color: var(--text); border-bottom-color: var(--ember); } .ds-nav-tab:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }"
+      "name": "Icon Button",
+      "kind": "button",
+      "refersTo": "icon-button",
+      "description": "30px square masthead control (theme toggle, settings gear). Low-contrast at rest, accent on hover.",
+      "html": "<button class=\"ds-icon-btn\" aria-label=\"Settings\"><svg viewBox=\"0 0 24 24\" width=\"15\" height=\"15\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\"><circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z\"/></svg></button>",
+      "css": ".ds-icon-btn{width:30px;height:30px;border-radius:8px;border:1px solid #23252d;background:#1e2026;color:#9a9aa4;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:border-color .15s,color .15s}.ds-icon-btn:hover{color:#6ea8d8;border-color:#6ea8d8}.ds-icon-btn:focus-visible{outline:2px solid #6ea8d8;outline-offset:2px}"
     },
     {
-      "name": "Capture Field",
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "A Note in the grid. Category-colored 1px left border + one chip, title, 2-line summary, date pinned bottom. Uniform height. Amber category shown.",
+      "html": "<div class=\"ds-card\"><span class=\"ds-chip ds-chip-cat-0\">troubleshooting</span><div class=\"ds-ctitle\">Dad's birthday soup recipe</div><div class=\"ds-csum\">Mom made a soup for Dad's birthday — lemongrass, the big pot, serve with the crusty bread.</div><div class=\"ds-cdate\">AUG 24 · 09:41</div></div>",
+      "css": ".ds-card{background:#1e2026;border-radius:11px;padding:0.7rem 0.78rem 0.78rem;box-shadow:0 1px 3px rgba(0,0,0,0.4);border-left:1px solid #d98a3a;display:flex;flex-direction:column;gap:0.3rem;width:220px;cursor:pointer;transition:transform .12s,box-shadow .12s}.ds-card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.25)}.ds-card:focus-visible{outline:2px solid #6ea8d8;outline-offset:2px}.ds-ctitle{font-family:Georgia,serif;font-weight:600;font-size:0.86rem;color:#e4e4e8;line-height:1.2}.ds-csum{font-family:Georgia,serif;font-size:0.74rem;color:#9a9aa4;line-height:1.38;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.ds-cdate{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:0.7rem;color:#888a93;margin-top:auto}.ds-chip{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:0.7rem;border-radius:3px;padding:0.1rem 0.42rem;letter-spacing:0.02em;display:inline-block}.ds-chip-cat-0{background:oklch(0.66 0.12 30 / 0.18);color:oklch(0.78 0.11 30)}.ds-chip-cat-1{background:oklch(0.66 0.12 167.5 / 0.18);color:oklch(0.78 0.11 167.5)}.ds-chip-cat-2{background:oklch(0.66 0.12 305 / 0.18);color:oklch(0.78 0.11 305)}.ds-chip-cat-3{background:oklch(0.66 0.12 82.5 / 0.18);color:oklch(0.78 0.11 82.5)}.ds-chip-cat-4{background:oklch(0.66 0.12 220 / 0.18);color:oklch(0.78 0.11 220)}"
+    },
+    {
+      "name": "Category Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "One per card, colored by the Category's position in the closed set. Translucent hue tint + lighter hue text. Five named Categories plus uncategorized, which takes the neutral Tag treatment and no hue.",
+      "html": "<div style=\"display:flex;gap:0.3rem;flex-wrap:wrap\"><span class=\"ds-chip ds-chip-cat-0\">troubleshooting</span><span class=\"ds-chip ds-chip-cat-1\">productivity</span><span class=\"ds-chip ds-chip-cat-2\">tools</span><span class=\"ds-chip ds-chip-cat-3\">coffee</span><span class=\"ds-chip ds-chip-cat-4\">personal</span></div>",
+      "css": ".ds-chip{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:0.7rem;border-radius:3px;padding:0.1rem 0.42rem;letter-spacing:0.02em;display:inline-block}.ds-chip-cat-0{background:oklch(0.66 0.12 30 / 0.18);color:oklch(0.78 0.11 30)}.ds-chip-cat-1{background:oklch(0.66 0.12 167.5 / 0.18);color:oklch(0.78 0.11 167.5)}.ds-chip-cat-2{background:oklch(0.66 0.12 305 / 0.18);color:oklch(0.78 0.11 305)}.ds-chip-cat-3{background:oklch(0.66 0.12 82.5 / 0.18);color:oklch(0.78 0.11 82.5)}.ds-chip-cat-4{background:oklch(0.66 0.12 220 / 0.18);color:oklch(0.78 0.11 220)}"
+    },
+    {
+      "name": "Tag",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Neutral mono tag — many and fine, never colored. Up to three on a card, then +N more.",
+      "html": "<div style=\"display:flex;gap:0.26rem;flex-wrap:wrap\"><span class=\"ds-tag\">#recipes</span><span class=\"ds-tag\">#new</span><span class=\"ds-tag\">#todo</span></div>",
+      "css": ".ds-tag{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:0.7rem;border-radius:3px;padding:0.06rem 0.32rem;background:#26282f;color:#9698a2;display:inline-block}"
+    },
+    {
+      "name": "Ask Input",
       "kind": "input",
-      "refersTo": "input-dump",
-      "description": "The one field set in the reading face. The thought is the product, not a form value.",
-      "html": "<textarea class=\"ds-input-dump\" placeholder=\"What are you thinking?\"></textarea>",
-      "css": ".ds-input-dump { font-family: var(--serif); font-size: clamp(1.15rem, 1rem + 0.9vw, 1.4rem); line-height: 1.5; width: 100%; min-height: 9rem; padding: 0.75rem; color: var(--text); background: var(--raised); border: 1px solid var(--rule); border-radius: 3px; box-sizing: border-box; resize: vertical; } .ds-input-dump:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }"
+      "refersTo": "input",
+      "description": "The Ask field — surface-2 fill, hairline border, serif. Quiet until focused, then border shifts to accent.",
+      "html": "<textarea class=\"ds-input\" placeholder=\"ask your notes in plain language…\">what did I think about soup?</textarea>",
+      "css": ".ds-input{width:100%;background:#16181d;border:1px solid #23252d;border-radius:11px;padding:0.8rem 0.9rem;color:#e4e4e8;font-family:Georgia,serif;font-size:1.05rem;line-height:1.45;resize:none;min-height:64px}.ds-input::placeholder{color:#5a5c66;font-style:italic}.ds-input:focus{outline:none;border-color:#6ea8d8}.ds-input:focus-visible{outline:none;border-color:#6ea8d8;box-shadow:0 0 0 2px rgba(110,168,216,0.25)}"
     },
     {
-      "name": "Text Field",
-      "kind": "input",
-      "refersTo": "input-field",
-      "description": "Ordinary configuration input, mono, with its uppercase label above.",
-      "html": "<label class=\"ds-label\">Managed folder<input class=\"ds-input-field\" value=\"Brain Dump\" /></label>",
-      "css": ".ds-label { display: flex; flex-direction: column; gap: 0.25rem; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dim); } .ds-input-field { font-family: var(--mono); font-size: 0.8125rem; padding: 0.5rem; color: var(--text); background: var(--raised); border: 1px solid var(--rule); border-radius: 3px; box-sizing: border-box; width: 100%; } .ds-input-field:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }"
-    },
-    {
-      "name": "Note Card",
+      "name": "Status Line",
       "kind": "custom",
-      "refersTo": "note-card",
-      "description": "The signature component. Shows the whole Note before it is committed, and carries the autosave countdown on its own top edge.",
-      "html": "<article class=\"ds-note\"><div class=\"ds-note-burn\"></div><p class=\"ds-note-eyebrow\">new Note</p><h2 class=\"ds-note-title\">vorssaint-utils GitHub repo</h2><dl class=\"ds-note-meta\"><dt>tags</dt><dd>github  utilities  mac</dd></dl><div class=\"ds-note-body\">Found from a YouTube video. Might replace some of my MacBook apps.</div><p class=\"ds-note-rule\">summary</p></article>",
-      "css": ".ds-note { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 0.75rem; padding: 1.5rem 1rem 1rem; background: var(--raised); border: 1px solid var(--rule); border-radius: 3px; } .ds-note-burn { position: absolute; inset: 0 0 auto; height: 2px; background: var(--ember); transform-origin: left center; animation: ds-burn 5s linear forwards; } @keyframes ds-burn { from { transform: scaleX(1); } to { transform: scaleX(0); } } .ds-note-eyebrow { margin: 0; font-family: var(--mono); font-size: 0.6875rem; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ember); } .ds-note-title { margin: 0; font-family: var(--serif); font-weight: 400; font-size: clamp(1.4rem, 1.1rem + 1.4vw, 1.9rem); line-height: 1.15; } .ds-note-meta { display: grid; grid-template-columns: auto 1fr; gap: 0.25rem 0.75rem; margin: 0; font-family: var(--mono); font-size: 0.6875rem; } .ds-note-meta dt { color: var(--dim); text-transform: uppercase; letter-spacing: 0.1em; } .ds-note-meta dd { margin: 0; } .ds-note-body { font-family: var(--serif); font-size: 1rem; white-space: pre-wrap; } .ds-note-rule { display: flex; align-items: center; gap: 0.75rem; margin: 0; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); } .ds-note-rule::after { content: ''; flex: 1; height: 1px; background: var(--rule); }"
+      "refersTo": "status",
+      "description": "The app's one global voice, aria-live polite. 7px dot + message + undo + dismiss ×. Wet (solid accent) and ok (filed tint) states shown.",
+      "html": "<div class=\"ds-status ds-status-wet\"><span class=\"ds-dot\"></span><span class=\"ds-msg\">saved · organizing your thought…</span><button class=\"ds-x\" aria-label=\"dismiss\">×</button></div><div class=\"ds-status ds-status-ok\"><span class=\"ds-dot\"></span><span class=\"ds-msg\">filed to obsidian · Dad's birthday soup recipe</span><button class=\"ds-act\">undo</button><button class=\"ds-x\" aria-label=\"dismiss\">×</button></div>",
+      "css": ".ds-status{display:flex;align-items:center;gap:0.5rem;border-radius:9px;padding:0.5rem 0.7rem;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:0.72rem;letter-spacing:0.02em;min-height:2.1rem;margin-bottom:0.4rem}.ds-dot{width:7px;height:7px;border-radius:50%;flex:none}.ds-msg{flex:1;line-height:1.35}.ds-act{background:none;border:1px solid transparent;color:inherit;font:inherit;font-size:0.72rem;padding:0.1rem 0.35rem;border-radius:5px;text-decoration:underline;text-underline-offset:2px;cursor:pointer}.ds-x{background:none;border:none;color:inherit;opacity:0.55;font-size:0.8rem;padding:0 0.2rem;cursor:pointer}.ds-x:hover{opacity:1}.ds-status-wet{background:#6ea8d8;color:#0c0d10}.ds-status-wet .ds-dot{background:#0c0d10}.ds-status-ok{background:rgba(86,168,144,0.1);color:#56a890;border:1px solid rgba(86,168,144,0.25)}.ds-status-ok .ds-dot{background:#56a890}"
+    },
+    {
+      "name": "Note with Burn Edge",
+      "kind": "custom",
+      "refersTo": "card",
+      "description": "Signature component: the new-note preview. A 3px accent edge drains left-to-right over 5s — a literal countdown to auto-save. Pause by editing or holding.",
+      "html": "<div class=\"ds-note\"><div class=\"ds-edge\"><div class=\"ds-fill\"></div></div><div class=\"ds-eyebrow\">NEW NOTE</div><div class=\"ds-ntitle\">Fix the leaky kitchen faucet</div><div class=\"ds-crow\"><span class=\"ds-chip ds-chip-cat-0\">tools</span><span class=\"ds-tag\">#house</span><span class=\"ds-tag\">#new</span></div></div>",
+      "css": ".ds-note{background:#16181d;border-radius:11px;padding:0.2rem 1rem 0.85rem;box-shadow:0 1px 3px rgba(0,0,0,0.4);position:relative;overflow:hidden;width:320px}.ds-edge{position:absolute;top:0;left:0;right:0;height:3px;background:#23252d}.ds-fill{position:absolute;top:0;left:0;height:3px;background:#6ea8d8;width:100%;animation:ds-burn 5s linear forwards}@keyframes ds-burn{from{width:100%}to{width:0%}}.ds-eyebrow{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;color:#6ea8d8;margin-top:0.85rem}.ds-ntitle{font-family:Georgia,serif;font-size:1.3rem;line-height:1.15;font-weight:600;color:#e4e4e8;margin-top:0.3rem}.ds-crow{display:flex;align-items:center;gap:0.34rem;flex-wrap:wrap;margin-top:0.5rem}.ds-chip{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:0.7rem;border-radius:3px;padding:0.08rem 0.4rem;letter-spacing:0.02em}.ds-chip-cat-0{background:rgba(217,138,58,0.18);color:#e0a866}.ds-tag{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:0.7rem;border-radius:3px;padding:0.06rem 0.32rem;background:#26282f;color:#9698a2}.ds-chip{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:0.7rem;border-radius:3px;padding:0.1rem 0.42rem;letter-spacing:0.02em;display:inline-block}.ds-chip-cat-0{background:oklch(0.66 0.12 30 / 0.18);color:oklch(0.78 0.11 30)}.ds-chip-cat-1{background:oklch(0.66 0.12 167.5 / 0.18);color:oklch(0.78 0.11 167.5)}.ds-chip-cat-2{background:oklch(0.66 0.12 305 / 0.18);color:oklch(0.78 0.11 305)}.ds-chip-cat-3{background:oklch(0.66 0.12 82.5 / 0.18);color:oklch(0.78 0.11 82.5)}.ds-chip-cat-4{background:oklch(0.66 0.12 220 / 0.18);color:oklch(0.78 0.11 220)}"
     }
   ],
   "narrative": {
-    "northStar": "The Field Notebook",
-    "overview": "Brain-dump is the pocket notebook you already carry, except it files itself. Someone stops walking, catches a thought before it goes, and puts it down — and by the time they look again it has a title, a summary and links to what it belongs with. The world is that notebook: everyday, portable, personal, made to be written in rather than admired.\n\nA notebook is a physical object, and this system treats it as one. Pages and cards have weight and sit on each other; a control that can be pressed looks pressable and behaves that way; a state change is something you watch happen rather than something you find has happened. The one drama in the whole app is ink drying: a thought goes down wet — still yours, still editable, five seconds from permanent — and then it is dry, in the Vault.\n\nPhysical does not mean soft. This is a well-made notebook, not a scrapbook: crisp, precise, exactly aligned, the kind of object whose ruling is dead straight and whose corners are true.",
+    "northStar": "The Self-Sorting Rolodex",
+    "overview": [
+      "The surface is a self-sorting index of cards — one card per Note — that the app files on the user's behalf. The grid is home; everything else is a full-screen sheet you drop into and return from. The person this is for is lazy, forgetful, and in and out in seconds, so the interface is built to be glanced at, recognized, and left. Capture friction is the only unforgivable failure; every other decision bends to it.",
+      "Spartan and nocturnal. Dark by default, surfaces nearly monochrome at rest — the ground, the cards, and the rules are all close in value, so the page reads as a quiet field until something moves. Two things move: the category hues (one per card, the only place color spends freely) and the single blue accent (the wet/organizing state, the Ask entry point, and the Ask answer). Everything else — dates, paths, tags, labels, buttons — stays neutral monospaced metadata. Restraint is the default; color is spent deliberately, never decoratively.",
+      "The trade that defines the direction: the source project's strict two-accent discipline is exchanged for category recognition. Color encodes category, not state; state collapses to one blue. This is a real, deliberate loss of restraint, bought for scanability — a category is recognizable at a glance across the grid. Tags are many and fine, but they stay neutral mono, so forty tags never become forty hues. One color per card, capped to the category set."
+    ],
     "keyCharacteristics": [
-      "Two inks, two states: wet means yours, dry means filed. No third accent.",
-      "The machine writes in mono; the person writes in serif.",
-      "Real material — paper, card, stacking, pressing — with instrument-grade precision on top.",
-      "One column, always. This is a book, not a workspace.",
-      "The whole Note is shown before it is committed. Never a summary of itself."
+      "Dark-first, near-monochrome at rest; category hue + blue accent are the only motion.",
+      "Serif (Newsreader) for the words you read; monospace (IBM Plex Mono) for the metadata you scan.",
+      "The grid is the constant; four focused sheets (Capture, Ask, Note, Settings) drop over it and return.",
+      "Color is category (8 stable hues, deterministic per category); blue is the one state color.",
+      "Tactile, confident affordances: dashed inviting capture, crisp focus rings, definite hover.",
+      "Cards uniform in height; the new card slotting into the grid is the filed receipt."
     ],
     "rules": [
       {
-        "name": "The Two Inks Rule",
-        "section": "colors",
-        "body": "Wet Ink and Dry Ink are states, not decoration. If a colour appears somewhere it does not mean \"not yet saved\" or \"in the Vault\", the system is broken. Adding a third brand accent breaks it too — the vocabulary only reads because it is exactly two."
+        "name": "The One Voice Rule",
+        "body": "The blue accent is the only state color and is used on ≤10% of any screen. Its rarity is the point; spreading it thin is failure.",
+        "section": "colors"
       },
       {
-        "name": "The Both Schemes Rule",
-        "section": "colors",
-        "body": "Every colour resolves through light-dark() with a prefers-color-scheme fallback. A value that only works in one scheme is not finished."
+        "name": "The Category-Not-Decoration Rule",
+        "body": "Hue is spent only on category — a card's 1px left border and its single chip. Tags, buttons, and body text stay neutral mono. Forty tags never become forty hues.",
+        "section": "colors"
       },
       {
-        "name": "The Two Hands Rule",
-        "section": "typography",
-        "body": "The machine writes in mono; the person writes in serif. There is no third face and no case where a person's words are set in the machine's hand."
+        "name": "The Word-With-Color Rule",
+        "body": "State color always rides a word (the status message, the FILED stamp, the dot + label). Never color alone — the status line is aria-live and every state is legible without hue.",
+        "section": "colors"
       },
       {
-        "name": "The Reading Measure Rule",
-        "section": "typography",
-        "body": "Body text never exceeds 34rem of measure, on any viewport. A Note is read, not scanned."
+        "name": "The Two Voices Rule",
+        "body": "Serif is for words you read; mono is for metadata you scan. If a string is read for meaning it is Newsreader; if it is scanned and dismissed it is Plex Mono. No third family, no display sans.",
+        "section": "typography"
       },
       {
-        "name": "The Nothing Moves Silently Rule",
-        "section": "elevation",
-        "body": "Any element a person can act on acknowledges the action visibly — hover, focus and press are all distinct. An interface where pressing a control produces no visible change reads as broken, not as restrained."
+        "name": "The Small Scale Rule",
+        "body": "The scale is deliberately tight (0.7rem→1.3rem). The surface is an index, not a book; large display type would reward lingering, which the user does not do.",
+        "section": "typography"
       },
       {
-        "name": "The Reduced Motion Rule",
-        "section": "elevation",
-        "body": "Every motion respects prefers-reduced-motion. Where motion carries information — the countdown especially — the reduced variant states the same fact in words or a static mark rather than dropping it."
+        "name": "The State-Only Lift Rule",
+        "body": "Shadows respond to state (hover, wet), never decorate a resting surface. Tonal layering separates planes; shadows confirm interaction.",
+        "section": "elevation"
       }
     ],
     "dos": [
-      "Do show the whole Note before it is committed — body included. The preview is the Note, not a description of it.",
-      "Do keep Wet Ink and Dry Ink tied to their two states, and add no third accent.",
-      "Do set the person's words in the serif and the machine's words in the mono.",
-      "Do give every interactive element a visible hover, focus and pressed state.",
-      "Do resolve every colour through light-dark() and verify both schemes before shipping.",
-      "Do respect prefers-reduced-motion, and restate in words anything motion was carrying.",
-      "Do cap the reading measure at 34rem."
+      "Do spend color only on category (card border + chip) and the one blue accent (state). Everything else is neutral mono.",
+      "Do assign category hues deterministically (the Category's position in the closed set); the same category is always the same hue, and the user never picks a color.",
+      "Do keep the grid the constant and every focused moment a full-screen sheet that returns to it — one thing on screen at a time.",
+      "Do let the new card slot into the grid be the filed receipt; the ok status fades and leaves nothing behind.",
+      "Do pair every state color with a word (the status message, the FILED stamp); the status line is aria-live and must read without hue.",
+      "Do lift cards only on state (hover −2px + diffuse shadow; wet = accent inset ring); rest flat with the hairline shadow.",
+      "Do trap focus in sheets (inert on the grid/controls/mast and non-open sheets) and restore it on close; leave the status line live so capture reassurance still announces.",
+      "Do use Plex Mono for metadata you scan and Newsreader for words you read — and nothing else."
     ],
     "donts": [
-      "Don't fade a disabled control to a flat opacity: 0.45 and call it a state.",
-      "Don't let the capture field look like a form field. It is a page to write on.",
-      "Don't add a second column, a sidebar, or a docked panel. This is a book.",
-      "Don't use Wet Ink or Dry Ink decoratively — on a border, a divider, or a heading that carries no state.",
-      "Don't fetch a font, an icon, or any asset from a CDN. Everything ships self-hosted; the offline path is the one that matters most."
+      "Don't use category hue on buttons, tags, or body text. Tags stay neutral mono; buttons stay accent or neutral.",
+      "Don't add a colored border-left above 1px on a filed card (a Pending card's 2px is dashed neutral, a different signal). The 1px Category edge is the card's whole identity.",
+      "Don't spread the blue accent thin — it is the only state color and the wet/Ask signal; using it decoratively destroys its meaning.",
+      "Don't use a third type family, or a display sans for headings. Serif reads, mono scans.",
+      "Don't let a state color stand alone without a word, or a status hold the user hostage — every message, even a failure, carries a dismiss ×.",
+      "Don't animate at rest. The one authored motion is the burn-edge countdown, which carries information; entrance motion (slotin) is reserved for the just-filed card. Respect prefers-reduced-motion (collapse to instant).",
+      "Don't lose the capture. The capture field is borderless and full-screen; capture friction is the only unforgivable failure, and every visual decision defers to it."
     ]
   }
 }
