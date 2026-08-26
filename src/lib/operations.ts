@@ -22,6 +22,7 @@ import { toCategory, type Category } from './category';
 import { writeFile, modifyFile, readVaultFiles, restoreFile, type VaultFile } from './livesync';
 import { noopLog, type Log } from './logger';
 import { findRelated, type RelatedDeps } from './related';
+import { wikilinkTarget } from './obsidian';
 
 /** The `## Context` block appended after the verbatim original, when Context exists. */
 function contextBlock(ctx: string): string {
@@ -502,6 +503,70 @@ export function parseFrontmatter(content: string): ParsedFrontmatter {
   };
 }
 
+/** Split the post-frontmatter body into the cleaned content and the three trailing
+ *  sections `noteFileContent` appends — Summary, Key points, Related.
+ *
+ *  The sections are searched from the end, so a `##` heading the organized body
+ *  happens to use cannot steal the section boundary: the genuine sections are the
+ *  last ones, written in order by `noteFileContent`. A missing section simply yields
+ *  an empty list (the body grows to absorb it), so a Note missing its `## Related`
+ *  block still reads — Related is empty, the rest is body. */
+function splitNoteBody(raw: string): { body: string; keyPoints: string[]; related: string[] } {
+  const relIdx = raw.lastIndexOf('\n## Related\n');
+  const kpIdx = relIdx >= 0 ? raw.lastIndexOf('\n## Key points\n', relIdx) : raw.lastIndexOf('\n## Key points\n');
+  const sumEnd = kpIdx >= 0 ? kpIdx : relIdx >= 0 ? relIdx : raw.length;
+  const sumIdx = raw.lastIndexOf('\n## Summary\n', sumEnd);
+
+  // Everything before the first trailing section is the cleaned body. When no section
+  // is present (a hand-edited Note, a personal note read by mistake) the whole raw body
+  // is the body — nothing is lost.
+  const bodyEnd = sumIdx >= 0 ? sumIdx : kpIdx >= 0 ? kpIdx : relIdx >= 0 ? relIdx : raw.length;
+  // `splitFrontmatter` leaves the frontmatter separator's trailing newline at the head of
+  // the body; strip leading newlines so the organized content is what the sheet shows, not
+  // the blank line that separated it from the frontmatter.
+  const body = raw.slice(0, bodyEnd).replace(/^\n+/, '').trimEnd();
+
+  /** The content of a trailing section: everything after its header line, list bullets
+   *  stripped, blank lines dropped. */
+  const sectionList = (from: number, to: number, header: string): string[] =>
+    raw
+      .slice(from, to)
+      .slice(raw.indexOf(header, from) - from + header.length)
+      .split('\n')
+      .map((line) => line.replace(/^\s*-\s?/, '').trim())
+      .filter(Boolean);
+
+  const keyPoints = kpIdx >= 0 ? sectionList(kpIdx, relIdx >= 0 ? relIdx : raw.length, '## Key points') : [];
+  const related = relIdx >= 0 ? sectionList(relIdx, raw.length, '## Related') : [];
+  return { body, keyPoints, related };
+}
+
+/** Reconstruct the full Note a file holds — the inverse of `noteFileContent`. The
+ *  frontmatter yields title/tags/category/summary/created/modality/source; the body is
+ *  split back into the cleaned content, the key points and the Related links. This is
+ *  what the Note sheet shows: the dry twin of the pre-commit preview, at full length.
+ *
+ *  Tolerant, like `parseFrontmatter`: a file with no frontmatter still reads (every
+ *  field defaults), so a hand-edited Note or a personal note read by mistake degrades
+ *  to its body rather than throwing. */
+export function parseNote(content: string): Note {
+  const fm = parseFrontmatter(content);
+  const { body: raw } = splitFrontmatter(content);
+  const { body, keyPoints, related } = splitNoteBody(raw);
+  return {
+    title: fm.title,
+    tags: fm.tags,
+    createdAt: fm.created,
+    modality: fm.modality,
+    source: fm.source,
+    category: fm.category,
+    summary: fm.summary,
+    body,
+    keyPoints,
+    related,
+  };
+}
+
 /** Read the existing Notes in the managed folder as match candidates — a projection
  *  (path/title/tags/summary) enough to judge tags/topic overlap. The `path`
  *  (original-case, from the metadata doc) identifies the Note for the append.
@@ -776,7 +841,11 @@ export async function refreshNoteMetadata(
     async (current) => {
       if (frontmatter === null) {
         const fm = parseFrontmatter(current);
-        const { body } = splitFrontmatter(current);
+        // The organizer re-derives metadata against the *current body* — the user's content,
+        // not the trailing `## Summary` / `## Key points` / `## Related` sections this file
+        // itself appends. Strip them so a refresh isn't coloured by its own stale metadata.
+        const { body: raw } = splitFrontmatter(current);
+        const { body } = splitNoteBody(raw);
         const out = await deps.organizer.organize(body, fm.modality);
         frontmatter = noteFrontmatter({
           title: out.title,
@@ -795,6 +864,62 @@ export async function refreshNoteMetadata(
     { mtime: deps.now(), hash: deps.hash, settings: deps.settings },
   );
   return { path: notePath, metadataId, chunkId };
+}
+
+// --- The Note sheet (ticket 06) ------------------------------------------
+// The grid's card is a door, not a dead end: tapping it opens the whole Note — the dry
+// twin of the pre-commit preview, at full length. Everything the card truncated (Tags,
+// the body, the Related links) is shown here untruncated, plus the one thing the card never
+// held: the verbatim Dump the Note was organized from, kept as provenance the user can reach
+// but not the headline.
+
+/** The full Note as the Note sheet shows it: the reconstructed Note, where it is filed in the
+ *  Vault, and the verbatim source Dump (the user's original words, plus any Context they added).
+ *  `dump` is null when the source Dump is gone — the Note still reads, provenance and all that
+ *  survived. */
+export interface NoteView {
+  note: Note;
+  path: string;
+  dump: Dump | null;
+}
+
+/** Read one Note out of the Vault as the Note sheet needs it: the full reconstructed Note, its
+ *  filed path, and the verbatim source Dump. The Note is read live (a deleted Note is gone, not
+ *  shown), and the source Dump is fetched by following the Note's `source` wikilink back to the
+ *  Dumps folder — `null` when that Dump no longer exists.
+ *
+ *  A single-file read: `readVaultFiles` filters by path before any chunk is fetched, so this is
+ *  one metadata scan plus the one Note's chunk, not a full-Vault pass. */
+export async function readNote(path: string, deps: StoreDeps): Promise<NoteView | null> {
+  const files = await readVaultFiles(deps.db, (p) => p === path);
+  const file = files.find((f) => f.path === path);
+  if (!file) return null; // the Note is gone — deleted, or never at that path
+  const note = parseNote(file.content);
+  const dump = note.source ? await readSourceDump(note.source, deps) : null;
+  return { note, path, dump };
+}
+
+/** Read the verbatim Dump a Note's `source` wikilink points at. The wikilink drops the `.md`
+ *  extension, so both the bare target and the `.md` path are matched. Returns null when the
+ *  Dump is gone or not a Dump (a personal note linked by hand, say). */
+async function readSourceDump(source: string, deps: StoreDeps): Promise<Dump | null> {
+  const target = wikilinkTarget(source);
+  const files = await readVaultFiles(deps.db, (p) => p === target || p === `${target}.md`);
+  const file = files.find((f) => !f.deleted);
+  if (!file) return null;
+  return parseDumpFile(file.content);
+}
+
+/** Re-organize an existing Note: re-derive the frontmatter (title/tags/category/summary) from
+ *  the current body, preserving the body byte-for-byte, then read the refreshed Note back. The
+ *  sheet's re-organize action is the one place this surfaces (ticket 05 left it with no surface);
+ *  the operation is `refreshNoteMetadata` plus a re-read, so the sheet can paint the new metadata
+ *  without a second call. */
+export interface ReorganizeDeps extends RefreshDeps {}
+
+export async function reorganizeNote(path: string, deps: ReorganizeDeps): Promise<NoteView | null> {
+  await refreshNoteMetadata(path, deps);
+  return readNote(path, deps);
 }
 
 

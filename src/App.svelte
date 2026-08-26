@@ -16,7 +16,10 @@
     isStranded,
     readGrid,
     fileOnGrid,
+    readNote,
+    reorganizeNote,
     type CaptureSession,
+    type NoteView,
   } from './lib/operations';
   import { createIndexedDbPendingStore } from './lib/pending';
   import { createIndexedDbDismissedStore } from './lib/dismissed';
@@ -110,8 +113,14 @@
   let view: 'ask' | 'config' | 'grid' = 'grid';
   // The one open sheet, or none. Sheets do not nest, so this is a single value and not a
   // stack: a sheet is a place you drop into from the grid and return from.
-  let sheet: 'capture' | null = null;
+  let sheet: 'capture' | 'note' | null = null;
   let busy = false;
+
+  // The Note sheet (ticket 06): the whole Note a card opens onto, read live from the Vault —
+  // the dry twin of the pre-commit preview, at full length — plus the verbatim source Dump.
+  let noteView: NoteView | null = null;
+  let noteLoading = false;
+  let reorganizing = false;
 
   // The in-flight capture review session: holds the captured Dump, the initial
   // Organize preview (held while Context is added), and the new-vs-append match.
@@ -241,10 +250,16 @@
   let sheetEl: HTMLDialogElement | null = null;
   $: if (sheetEl && sheet && !sheetEl.open) {
     sheetEl.showModal();
-    // showModal() puts focus on the sheet's first focusable control, which is the way out.
-    // The field is the reason the sheet opened, so it takes focus back: on a phone that is
-    // the keyboard rising, and on a desktop it is the first character needing no tap.
-    sheetEl.querySelector<HTMLTextAreaElement>('textarea.dump')?.focus({ preventScroll: true });
+    if (sheet === 'capture') {
+      // showModal() puts focus on the sheet's first focusable control, which is the way out.
+      // The field is the reason the sheet opened, so it takes focus back: on a phone that is
+      // the keyboard rising, and on a desktop it is the first character needing no tap.
+      sheetEl.querySelector<HTMLTextAreaElement>('textarea.dump')?.focus({ preventScroll: true });
+    } else {
+      // A reading sheet is for reading, not typing, so focus lands on the way out rather than
+      // the first link — the close control — the way a modal dialog conventionally does.
+      sheetEl.querySelector<HTMLButtonElement>('.sheet__close')?.focus({ preventScroll: true });
+    }
   }
 
   /** Open the Capture sheet. A session left unsaved by a failed commit reopens exactly where
@@ -314,6 +329,65 @@
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
       if (!disabled) run();
+    }
+  }
+
+  // ── The Note sheet (ticket 06) ──────────────────────────────────────────────
+  // The card was a door, so nothing the card truncated may stay truncated here: tapping a
+  // card opens the whole Note at full length, every Tag shown, the Related links followed,
+  // and the verbatim Dump kept as provenance. It is reached from the grid and returns to it.
+
+  /** Open the Note a card points at, reading it live from the Vault. The card is a door; the
+   *  sheet is the room behind it. A Note deleted between the tap and the read shows as gone
+   *  rather than throwing — the grid will reconcile it away on the next open. */
+  async function openNote(path: string) {
+    sheet = 'note';
+    status = '';
+    noteView = null;
+    noteLoading = true;
+    try {
+      noteView = await readNote(path, storeDeps());
+    } catch (e) {
+      status = `Could not read the Note: ${(e as Error).message}`;
+    } finally {
+      noteLoading = false;
+    }
+  }
+
+  /** Ask the sheet to close; `onNoteSheetClose` does the work, and it is the one way out. */
+  function closeNote() {
+    sheetEl?.close();
+  }
+
+  /** The Note sheet closed, however it was asked to (Esc, the close control, the back
+   *  gesture). Return to the grid and drop the Note view — the next open reads it fresh. */
+  function onNoteSheetClose() {
+    sheet = null;
+    noteView = null;
+  }
+
+  /** Re-organize the Note on screen: re-derive its title, Tags, summary and Category from the
+   *  current body (the user may have edited it in Obsidian), preserving the body, and paint
+   *  the refreshed Note back into the sheet. The card on the grid is now stale, so the grid is
+   *  refreshed too — this is where re-organize finally lives (ticket 05 left it with no surface). */
+  async function reorganizeCurrentNote() {
+    if (!noteView) return;
+    reorganizing = true;
+    try {
+      const view = await reorganizeNote(noteView.path, {
+        ...storeDeps(),
+        organizer: createOrganizer(settings, log),
+        now: () => Date.now(),
+      });
+      if (view) {
+        noteView = view;
+        status = `Re-organized: ${view.note.title}`;
+        void enterGrid();
+      }
+    } catch (e) {
+      status = `Could not re-organize: ${(e as Error).message}`;
+    } finally {
+      reorganizing = false;
     }
   }
 
@@ -878,15 +952,30 @@
     {#if cards.length}
       <div class="grid">
         {#each cards as card (card.path)}
+          <!-- A Note card is a door: the whole card opens the Note sheet (ticket 06). The title
+               is no longer a link to Obsidian — that door moves into the sheet, where the full
+               Note is — so the card reads as one thing to press, not a label with a link inside.
+               A real <button> cannot hold an <h3>/<p> (flow content), so the card is an article
+               with the button role and full keyboard handling — the accessible clickable-card
+               pattern — rather than an invalid button. -->
+          <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
           <article
-            class="card"
+            class="card card--door"
             class:card--cat={hueFor(card.category) !== null}
             class:card--wet={wetPath === card.path}
-            style={hueStyle(card.category)}>
+            style={hueStyle(card.category)}
+            role="button"
+            tabindex="0"
+            aria-label={`Open ${card.title || 'Untitled'}`}
+            on:click={() => openNote(card.path)}
+            on:keydown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                openNote(card.path);
+              }
+            }}>
             <p class="card__category">{card.category}</p>
-            <h3 class="card__title">
-              <a class="vault-link" href={obsidianUrl(settings.vaultName, card.path)}>{card.title || 'Untitled'}</a>
-            </h3>
+            <h3 class="card__title">{card.title || 'Untitled'}</h3>
             {#if card.summary}
               <p class="card__summary">{card.summary}</p>
             {/if}
@@ -1248,6 +1337,109 @@
             {#if !held}
               <button on:click={holdCapture}>Hold</button>
             {/if}
+          {/if}
+        </div>
+      </div>
+    </div>
+  </dialog>
+{/if}
+
+{#if sheet === 'note'}
+  <!-- The Note sheet. The dry twin of the pre-commit preview, at full length: the card was a
+       door, so nothing it truncated stays truncated here. Every Tag wraps rather than hiding
+       behind `+N more`; the body, the key points and the Related links are shown in full; the
+       verbatim Dump is the user's original words, kept as provenance behind the organized
+       thought; and the eyebrow is the filing stamp plus the door back into the Vault. -->
+  <dialog
+    class="sheet"
+    bind:this={sheetEl}
+    on:close={onNoteSheetClose}
+    aria-label="Read the Note">
+    <div class="sheet__inner">
+      <div class="sheet__bar">
+        <p class="sheet__title">the note</p>
+        <button class="sheet__close" on:click={closeNote}>close</button>
+      </div>
+
+      <div class="sheet__body">
+        {#if noteLoading}
+          <p class="pending">Reading the Note…</p>
+        {:else if noteView}
+          <article class="note committed">
+            <!-- The filing stamp and the door back into the Vault: the path is an obsidian://
+                 link, so "open it where editing happens" is one tap. -->
+            <p class="eyebrow">
+              <span class="filed-mark">Filed</span>
+              <a class="vault-link" href={obsidianUrl(settings.vaultName, noteView.path)}>{noteView.path}</a>
+            </p>
+
+            <h2>{noteView.note.title || 'Untitled'}</h2>
+
+            <dl class="meta">
+              {#if noteView.note.tags.length}
+                <!-- All the Tags, wrapping — the card showed three and a count; the sheet shows
+                     every one. -->
+                <dt>tags</dt>
+                <dd>{noteView.note.tags.join('  ')}</dd>
+              {/if}
+              {#if noteView.note.category !== 'uncategorized'}
+                <dt>category</dt>
+                <dd>{noteView.note.category}</dd>
+              {/if}
+            </dl>
+
+            {#if noteView.note.body}
+              <div class="note-body">{noteView.note.body}</div>
+            {/if}
+
+            {#if noteView.note.summary}
+              <p class="rule-label">summary</p>
+              <p>{noteView.note.summary}</p>
+            {/if}
+
+            {#if noteView.note.keyPoints.length}
+              <p class="rule-label">key points</p>
+              <ul>{#each noteView.note.keyPoints as point}<li>{point}</li>{/each}</ul>
+            {/if}
+
+            <p class="rule-label">related</p>
+            {#if noteView.note.related.length}
+              <ul class="links">
+                {#each noteView.note.related as link}
+                  <li><a class="vault-link" href={linkHref(settings.vaultName, link)}>{linkText(link)}</a></li>
+                {/each}
+              </ul>
+            {:else}
+              <p class="pending">No related documents.</p>
+            {/if}
+
+            {#if noteView.dump}
+              <!-- The verbatim Dump: the user's original words, kept and reachable but not the
+                   headline. Context, if the capture added any, follows it. -->
+              <p class="rule-label">your original</p>
+              <div class="verbatim">{noteView.dump.content}</div>
+              {#if noteView.dump.context}
+                <p class="rule-label">context</p>
+                <div class="verbatim">{noteView.dump.context}</div>
+              {/if}
+            {/if}
+          </article>
+        {:else}
+          <!-- The Note was deleted between the tap and the read (Obsidian's own sync can do it).
+               The grid reconciles it away on the next open; here it simply is gone. -->
+          <p class="pending">This Note is no longer in your Vault.</p>
+        {/if}
+      </div>
+
+      <div class="sheet__foot">
+        {#if status}<p class="status" aria-live="polite">{status}</p>{/if}
+        <div class="actions">
+          {#if noteView}
+            <!-- Re-organize re-derives the metadata from the current body — the user may have
+                 edited the Note in Obsidian — and is the one place that action surfaces. -->
+            <button on:click={reorganizeCurrentNote} disabled={reorganizing}>
+              {reorganizing ? 'Re-organizing…' : 'Re-organize'}
+            </button>
           {/if}
         </div>
       </div>

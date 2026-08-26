@@ -849,6 +849,17 @@ textarea.dump {
   color: var(--dim);
 }
 
+/* The verbatim Dump — the user's original words, kept as provenance behind the organized
+ * thought. Mono and dim: it is the record, not a second version of the headline above it, and
+ * pre-wrap keeps the capture's own line breaks rather than reflowing them. */
+.note .verbatim {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--dim);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
 .context-field {
   display: flex;
   flex-direction: column;
@@ -1001,6 +1012,17 @@ textarea.dump {
    * the last row has no taller sibling to stretch to, so floor it at a full card's height
    * (category + two-line title + two-line summary + tags + date) to keep the grid uniform. */
   min-height: 12rem;
+}
+
+/* A Note card is a door into the full Note (ticket 06): the whole card opens the sheet, so it
+ * reads as something to press, and the keyboard gets a focus ring the way a control does. The
+ * dashed `.card--open` cards (Pending, Stranded) are not doors — their own action buttons are. */
+.card--door {
+  cursor: pointer;
+}
+.card--door:focus-visible {
+  outline: 2px solid var(--set);
+  outline-offset: 2px;
 }
 
 /* A member-Category card: its left edge takes the member's hue. `--cat-hue` is set inline per
