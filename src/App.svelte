@@ -1,12 +1,11 @@
 <script lang="ts">
-  import { onMount, onDestroy, tick } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { loadSettings, saveSettings } from './lib/settings';
   import { createRemoteDb, createDatabaseAdmin, createEmbeddingsDb } from './lib/db';
   import {
     captureThought,
     addContext,
     finalizeCapture,
-    refreshNoteMetadata,
     recoverPending,
     adoptInterrupted,
     retryPending,
@@ -16,6 +15,7 @@
     dumpPath,
     isStranded,
     readGrid,
+    fileOnGrid,
     type CaptureSession,
   } from './lib/operations';
   import { createIndexedDbPendingStore } from './lib/pending';
@@ -36,7 +36,6 @@
     type Settings,
     type Citation,
     type Dump,
-    type Note,
     type NoteCard,
     type PendingDump,
     type StrandedDump,
@@ -105,20 +104,25 @@
   // memory before the Capture press. Cleared the moment a Dump is captured.
   let text = readDraft();
   let status = '';
-  let view: 'capture' | 'ask' | 'config' | 'grid' = 'capture';
+  // The grid is the persistent surface and Capture is a sheet over it (ticket 05). Ask and
+  // Settings are still views beside the grid; ticket 10 turns them into sheets too and takes
+  // the nav with them.
+  let view: 'ask' | 'config' | 'grid' = 'grid';
+  // The one open sheet, or none. Sheets do not nest, so this is a single value and not a
+  // stack: a sheet is a place you drop into from the grid and return from.
+  let sheet: 'capture' | null = null;
   let busy = false;
 
   // The in-flight capture review session: holds the captured Dump, the initial
   // Organize preview (held while Context is added), and the new-vs-append match.
   let session: CaptureSession | null = null;
   let context = '';
-  // The vault path of the last saved Note — used by the explicit Re-organize Note action.
-  let savedNotePath: string | null = null;
-  // The Note as it was actually written. The card shows this once it exists, so what you
-  // look at after the save is the document in the Vault — Related links included — and not
-  // the preview that preceded it.
-  let savedNote: Note | null = null;
+  // Hold: the user pressed a button specifically to stop the clock, so nothing may start it
+  // again behind them. It is the autosaver's existing `cancel` plus this flag — the autosave
+  // module gains no interface for it — and the only exit is the user explicitly filing.
+  let held = false;
   // Bumped on every Context edit to restart the countdown animation, which is keyed on it.
+  // Never bumped while Held: restarting the animation would draw a clock that is not running.
   let contextRevision = 0;
   // Append requires explicit user confirmation (spec: "the user confirms … with one
   // action"). The 5s autosave may finalize a 'new' decision on its own, but an 'append'
@@ -151,6 +155,12 @@
   const cardCache = createIndexedDbCardCache();
   let cards: NoteCard[] = [];
   let cardsLoaded = false;
+  // The card of the Note just filed. It slots into the grid wearing the `set` ring — the
+  // receipt for a commit is the thing itself arriving, not a message about it — and goes
+  // quiet again shortly after, leaving nothing behind.
+  const WET_MS = 3000;
+  let wetPath: string | null = null;
+  let wetTimer: ReturnType<typeof setTimeout> | null = null;
   // While Dumps are Pending, retry on a timer as well as on the `online` event: a
   // capture that failed while `navigator.onLine` was already true (a flaky
   // connection, a captive portal, an LLM outage) never fires `online`, and the spec
@@ -223,11 +233,79 @@
     cardsLoaded = true;
   }
 
-  // Autofocus the Dump whenever it mounts — on load (so the first character needs no tap to
-  // reach the field) and again after a New capture (so the next thought is one keystroke away).
-  // preventScroll keeps desktop from jumping; on mobile the keyboard rising is the point.
-  function focusOnMount(node: HTMLElement) {
-    node.focus({ preventScroll: true });
+  // A sheet is a native modal <dialog> opened with showModal(), so the platform supplies what
+  // a sheet has to have and this component does not hand-roll: the grid behind it goes inert
+  // (top layer), focus is trapped inside, and every platform close request — Esc, the phone's
+  // back gesture, an assistive-technology dismiss — reaches it. All of them arrive as one
+  // `close` event, so the sheet has exactly one way out and it is `onSheetClose`.
+  let sheetEl: HTMLDialogElement | null = null;
+  $: if (sheetEl && sheet && !sheetEl.open) {
+    sheetEl.showModal();
+    // showModal() puts focus on the sheet's first focusable control, which is the way out.
+    // The field is the reason the sheet opened, so it takes focus back: on a phone that is
+    // the keyboard rising, and on a desktop it is the first character needing no tap.
+    sheetEl.querySelector<HTMLTextAreaElement>('textarea.dump')?.focus({ preventScroll: true });
+  }
+
+  /** Open the Capture sheet. A session left unsaved by a failed commit reopens exactly where
+   *  it was: the preview is still a decision the user has to make, and the Dump is still
+   *  Pending behind it. */
+  function openCapture() {
+    sheet = 'capture';
+  }
+
+  /** Ask the sheet to close; the work happens in `onSheetClose`, which every other way out
+   *  (Esc, the back gesture) also arrives through. */
+  function closeCapture() {
+    sheetEl?.close();
+  }
+
+  /** The sheet closed, however it was asked to. Return to the grid, and settle the session.
+   *
+   *  Closing with the countdown running is the same as walking away from it: the clock was on
+   *  screen promising a save, so it is honoured now rather than leaving the thought in limbo.
+   *
+   *  Closing while Held — or with an Append the user has not confirmed — files nothing, because
+   *  both states exist precisely to say "not on your own". The Dump is already Pending, so it
+   *  appears on the grid as a Pending card and is re-surfaced on the next open. */
+  function onSheetClose() {
+    sheet = null;
+    if (!session || session.saved) return;
+    if (held || (session.match.kind === 'append' && !appendConfirmed)) {
+      autosaver.cancel();
+      endSession();
+      void refreshPending();
+      return;
+    }
+    void autosaver.flush();
+  }
+
+  /** Stop the countdown. Not a pause: the timer is cancelled, and the only thing that files
+   *  the Note afterwards is the user pressing Save. */
+  function holdCapture() {
+    if (!session || session.saved) return;
+    autosaver.cancel();
+    held = true;
+  }
+
+  /** Clear the review session's state back to a blank Capture sheet. */
+  function endSession() {
+    session = null;
+    context = '';
+    held = false;
+    appendConfirmed = false;
+    contextRevision = 0;
+  }
+
+  /** Mark a card as just filed. The ring and the slot-in are the receipt; they clear
+   *  themselves, so nothing accumulates on the grid. */
+  function markWet(path: string) {
+    wetPath = path;
+    if (wetTimer) clearTimeout(wetTimer);
+    wetTimer = setTimeout(() => {
+      wetTimer = null;
+      wetPath = null;
+    }, WET_MS);
   }
 
   // Cmd/Ctrl+Enter commits the surface you're typing in. The product's thesis is speed at
@@ -239,20 +317,12 @@
     }
   }
 
-  // On save the commit is promoted onto the card itself (the teal edge plus the "Filed to
-  // Obsidian" line). Bring the card to the top of the viewport so the peak-end frame is the
-  // filed Note, not the bottom-of-page status line that just scrolled past. Smooth, unless the
-  // user has asked motion to stop.
-  function scrollToNote() {
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    document.querySelector('.note')?.scrollIntoView({
-      behavior: reduce ? 'auto' : 'smooth',
-      block: 'start',
-    });
-  }
-
   onMount(async () => {
     settings = await loadSettings();
+    // The grid is the surface the app opens on, so its read starts immediately. It never gates
+    // the Capture control, which renders regardless of how far the read has got.
+    void enterGrid();
+
     // beforeunload can't await promises, so flush is best-effort: the Dump was
     // already persisted at capture, so if the close-time save doesn't land the
     // Note is generated from the surviving Dump later (the save-failure path).
@@ -296,6 +366,7 @@
   onDestroy(() => {
     if (onBeforeUnload) window.removeEventListener('beforeunload', onBeforeUnload);
     if (onOnline) window.removeEventListener('online', onOnline);
+    if (wetTimer) clearTimeout(wetTimer);
     stopRetrying();
     if (session && !session.saved) void autosaver.flush();
   });
@@ -331,13 +402,15 @@
           outcome.reason === 'offline'
             ? `Captured — ${outcome.message}.`
             : `Captured — ${outcome.message}. Capture failed: ${outcome.error?.message}`;
+        // No preview to review, so there is nothing to keep the sheet open for. The grid is
+        // where the Dump now is — as a Pending card — and where the message is read.
+        closeCapture();
         return;
       }
 
       session = outcome.session;
       context = '';
-      savedNotePath = null;
-      savedNote = null;
+      held = false;
       contextRevision = 0;
       appendConfirmed = false;
       // Arm the 5s inactivity timer at capture, so a Dump with no added Context
@@ -359,8 +432,12 @@
     if (!session || session.saved) return;
     try {
       session = await addContext(session, context, storeDeps());
-      autosaver.schedule();
-      contextRevision += 1;
+      // Held means the clock is stopped and stays stopped: typing must not start it again
+      // behind the user, which is the whole point of the button they pressed.
+      if (!held) {
+        autosaver.schedule();
+        contextRevision += 1;
+      }
     } catch (e) {
       status = `Error: ${(e as Error).message}`;
     }
@@ -381,21 +458,35 @@
         relater: createRelater(settings, log),
         now: () => Date.now(),
       });
+      const appended = session.match.kind === 'append';
+      const appendedTo = session.match.suggestion?.title;
       session = result.session;
       await refreshPending();
       if (result.ok) {
-        savedNotePath = result.written.path;
-        savedNote = result.note;
-        status =
-          session.match.kind === 'append'
-            ? `Appended to: ${session.match.suggestion?.title ?? result.note.title}`
-            : `Saved Note: ${result.note.title}`;
-        // The commit now lives on the card (teal edge + "Filed to Obsidian" line); bring it
-        // into view so the last frame is the filed Note, not the status line that scrolled past.
-        await tick();
-        scrollToNote();
+        // Back to the grid, with the card the commit produced already on it. The card comes
+        // from the Note in hand rather than a second Vault read: the receipt must not cost
+        // the capture path a full-Vault round trip.
+        cards = await fileOnGrid(
+          cards,
+          { note: result.note, path: result.written.path, appended },
+          cardCache,
+        );
+        cardsLoaded = true;
+        markWet(result.written.path);
+        status = appended
+          ? `Appended to: ${appendedTo ?? result.note.title}`
+          : `Saved Note: ${result.note.title}`;
+        // Closed through the dialog, so the browser tears the sheet out of the top layer and
+        // hands focus back to the grid itself. `onSheetClose` returns without touching the
+        // session — it is saved — so the session is settled here.
+        closeCapture();
+        endSession();
       } else {
-        // The Dump persists; the Note will be generated from it later.
+        // The Dump persists; the Note will be generated from it later. Whether the save came
+        // from the timer firing or from a flush, no timer is armed afterwards — so the
+        // countdown really has stopped, and the sheet says Held rather than redrawing an edge
+        // that is draining towards nothing.
+        held = true;
         status = `Save failed — Dump kept: ${result.error.message}`;
       }
     } catch (e) {
@@ -413,36 +504,17 @@
   // Override the match decision to 'new' — the user declines the append suggestion
   // and chooses to found a fresh Note instead. Reschedules the autosave and restarts the
   // countdown edge, which was held while the append waited: now that a save will actually
-  // happen on its own, the clock runs honestly from full.
+  // happen on its own, the clock runs honestly from full. Unless the user pressed Hold — a
+  // stopped clock stays stopped whatever else they decide.
   function chooseNewNote() {
     if (!session || session.saved) return;
     session = { ...session, match: { kind: 'new' } };
     appendConfirmed = false;
-    contextRevision += 1;
-    autosaver.schedule();
-    status = 'Will save as a new Note.';
-  }
-
-  // Explicit, user-triggered re-organize — re-runs Organize on the saved Note's body to
-  // re-derive its title/tags/summary/category. Never automatic; the append itself never
-  // refreshes. (The button reads "Re-organize Note"; "metadata" is the internal name only.)
-  async function refreshMetadata() {
-    if (!savedNotePath) return;
-    busy = true;
-    try {
-      await refreshNoteMetadata(savedNotePath, {
-        db: createRemoteDb(settings),
-        settings,
-        organizer: createOrganizer(settings, log),
-        hash: defaultSha1Hex,
-        now: () => Date.now(),
-      });
-      status = `Re-organized: ${savedNotePath}`;
-    } catch (e) {
-      status = `Re-organize failed: ${(e as Error).message}`;
-    } finally {
-      busy = false;
+    if (!held) {
+      contextRevision += 1;
+      autosaver.schedule();
     }
+    status = held ? 'Will save as a new Note when you file it.' : 'Will save as a new Note.';
   }
 
   // Read the Pending records and arm or disarm the retry timer to match them. A failure
@@ -690,9 +762,9 @@
         aria-current={view === 'grid' ? 'page' : undefined}
         on:click={() => { view = 'grid'; void enterGrid(); }}>grid</button>
       <button
-        class:on={view === 'capture'}
-        aria-current={view === 'capture' ? 'page' : undefined}
-        on:click={() => (view = 'capture')}>capture</button>
+        class:on={sheet === 'capture'}
+        aria-current={sheet === 'capture' ? 'page' : undefined}
+        on:click={() => { view = 'grid'; openCapture(); }}>capture</button>
       <button
         class:on={view === 'ask'}
         aria-current={view === 'ask' ? 'page' : undefined}
@@ -710,8 +782,42 @@
     <!-- The Capture control lives on the grid and never waits on the card read — the grid is
          the road to capture, and capture friction is the one unforgivable failure. -->
     <div class="actions grid-controls">
-      <button class="primary" on:click={() => (view = 'capture')}>Capture</button>
+      <button class="primary" on:click={openCapture}>Capture</button>
     </div>
+
+    <!-- The recovery banner. It used to live on the capture surface; a Capture sheet has room
+         for the field and nothing else, and this speaks for the whole app rather than for the
+         thought being typed, so it belongs out here. Four states, kept distinct on purpose:
+         collapsing them into one "waiting" line would restore the ambiguity that caused
+         finding 02 — the user could not tell a Dump being worked on from one nothing was
+         happening to. Stranded outranks the rest; it is the app admitting it broke its
+         promise. (Ticket 09 replaces this strip with the designed status line.) -->
+    {#if strandedRecords.length}
+      <p class="status err" aria-live="polite">
+        {strandedRecords.length === 1
+          ? "1 Dump couldn't be Organized"
+          : `${strandedRecords.length} Dumps couldn't be Organized`}: {strandedRecords[0].lastError}
+      </p>
+      <div class="actions"><button on:click={() => retryStranded()}>Retry</button></div>
+    {:else if recoveringCount}
+      <p class="status" aria-live="polite">
+        Organizing {recoveringCount === 1 ? '1 Dump' : `${recoveringCount} Dumps`} left from your last session…
+      </p>
+    {:else if retryingCount}
+      <p class="status" aria-live="polite">
+        {retryingCount === 1 ? "1 Dump couldn't be Organized" : `${retryingCount} Dumps couldn't be Organized`} —
+        trying again shortly.
+      </p>
+    {:else if offlineCount}
+      <p class="status" aria-live="polite">
+        {offlineCount === 1
+          ? '1 Dump saved — it will be Organized'
+          : `${offlineCount} Dumps saved — they will be Organized`} when you're back online.
+      </p>
+    {:else if inFlightCount}
+      <p class="status" aria-live="polite">Organizing your Dump…</p>
+    {/if}
+    {#if pendingError}<p class="status err" aria-live="polite">{pendingError}</p>{/if}
 
     {#if pendingRecords.length}
       <!-- Pending Dumps: captured, not yet a Note. Dashed and hue-less — raw scaffolding the app
@@ -772,7 +878,11 @@
     {#if cards.length}
       <div class="grid">
         {#each cards as card (card.path)}
-          <article class="card" class:card--cat={hueFor(card.category) !== null} style={hueStyle(card.category)}>
+          <article
+            class="card"
+            class:card--cat={hueFor(card.category) !== null}
+            class:card--wet={wetPath === card.path}
+            style={hueStyle(card.category)}>
             <p class="card__category">{card.category}</p>
             <h3 class="card__title">
               <a class="vault-link" href={obsidianUrl(settings.vaultName, card.path)}>{card.title || 'Untitled'}</a>
@@ -802,163 +912,6 @@
            thoughts, when present, already fill the surface, so the empty frame is only for the
            truly empty case. -->
       <div class="grid"></div>
-    {/if}
-    </section>
-  {:else if view === 'capture'}
-    <section class="surface">
-    <!-- Four states, kept distinct on purpose. Collapsing them into one "waiting" line
-         would restore the ambiguity that caused finding 02: the user could not tell a
-         Dump being worked on from one nothing was happening to. Stranded outranks the
-         rest — it is the app admitting it broke its promise. -->
-    {#if strandedRecords.length}
-      <p class="status err" aria-live="polite">
-        {strandedRecords.length === 1
-          ? "1 Dump couldn't be Organized"
-          : `${strandedRecords.length} Dumps couldn't be Organized`}: {strandedRecords[0].lastError}
-      </p>
-      <div class="actions"><button on:click={() => retryStranded()}>Retry</button></div>
-    {:else if recoveringCount}
-      <p class="status" aria-live="polite">
-        Organizing {recoveringCount === 1 ? '1 Dump' : `${recoveringCount} Dumps`} left from your last session…
-      </p>
-    {:else if retryingCount}
-      <p class="status" aria-live="polite">
-        {retryingCount === 1 ? "1 Dump couldn't be Organized" : `${retryingCount} Dumps couldn't be Organized`} —
-        trying again shortly.
-      </p>
-    {:else if offlineCount}
-      <p class="status" aria-live="polite">
-        {offlineCount === 1
-          ? '1 Dump saved — it will be Organized'
-          : `${offlineCount} Dumps saved — they will be Organized`} when you're back online.
-      </p>
-    {:else if inFlightCount}
-      <p class="status" aria-live="polite">Organizing your Dump…</p>
-    {/if}
-    {#if pendingError}<p class="status err" aria-live="polite">{pendingError}</p>{/if}
-
-    {#if !session}
-      <!-- The Dump is the product, not a form field: set in the content face, at content size,
-           and named for assistive tech without a visible label — a label above it would make
-           it a form control, which is the one thing it must not look like. Every other field
-           in the app carries its label on screen; this one carries it in the name. -->
-      <textarea
-        class="dump"
-        use:focusOnMount
-        bind:value={text}
-        on:input={persistDraft}
-        on:keydown={(e) => commitOnModEnter(e, captureDump, busy || !text.trim())}
-        aria-label="Dump — what are you thinking?"
-        placeholder="What are you thinking?"
-        disabled={busy}></textarea>
-      <div class="actions">
-        <button class="primary" on:click={captureDump} disabled={busy || !text.trim()}>
-          {busy ? 'Capturing…' : 'Capture'}
-        </button>
-      </div>
-    {:else}
-      {@const shown = savedNote ?? session.preview}
-      <!-- The whole Note, not a summary of it. Before the save this is the preview; after it
-           this is the document in the Vault. You are approving a Note, so you are shown one. -->
-      <article class="note" class:committed={session.saved}>
-        {#key contextRevision}
-          <div class="burn" class:burn--held={session.match.kind === 'append' && !appendConfirmed}></div>
-        {/key}
-
-        <p class="eyebrow">
-          {#if session.saved && savedNotePath}
-            <span class="filed-mark">Filed to Obsidian</span><br>
-            <a class="vault-link" href={obsidianUrl(settings.vaultName, savedNotePath)}>{savedNotePath}</a>
-          {:else if session.match.kind === 'new'}
-            New Note
-          {:else}
-            Append to <span class="keep-case">&ldquo;{session.match.suggestion?.title ?? 'an existing Note'}&rdquo;</span>
-          {/if}
-        </p>
-
-        <h2>{shown.title}</h2>
-
-        <dl class="meta">
-          {#if shown.tags.length}
-            <dt>tags</dt>
-            <dd>{shown.tags.join('  ')}</dd>
-          {/if}
-          {#if shown.category !== 'uncategorized'}
-            <dt>category</dt>
-            <dd>{shown.category}</dd>
-          {/if}
-        </dl>
-
-        {#if shown.body}
-          <div class="note-body">{shown.body}</div>
-        {/if}
-
-        {#if shown.summary}
-          <p class="rule-label">summary</p>
-          <p>{shown.summary}</p>
-        {/if}
-
-        {#if shown.keyPoints.length}
-          <p class="rule-label">key points</p>
-          <ul>{#each shown.keyPoints as point}<li>{point}</li>{/each}</ul>
-        {/if}
-
-        <p class="rule-label">related</p>
-        {#if shown.related.length}
-          <ul class="links">{#each shown.related as link}<li><a class="vault-link" href={linkHref(settings.vaultName, link)}>{linkText(link)}</a></li>{/each}</ul>
-        {:else if session.saved}
-          <p class="pending">No Note in the Vault was close enough to link.</p>
-        {:else}
-          <p class="pending">Links are found when the Note is saved.</p>
-        {/if}
-      </article>
-
-      {#if session.match.kind === 'append' && !session.saved}
-        <!-- Confirm new-vs-append with one action: keep the append, or override to a new Note -->
-        <div class="actions">
-          <button class="primary" on:click={confirmAppend}>Append</button>
-          <button on:click={chooseNewNote}>Save as new Note</button>
-        </div>
-      {/if}
-
-      <label class="context-field">
-        add context
-        <textarea
-          bind:value={context}
-          on:input={onContextInput}
-          on:keydown={(e) => commitOnModEnter(
-            e,
-            () => autosaver.flush(),
-            // The context field only renders with a session; the !session guard is for the
-            // type checker, not the runtime — it makes an absent session a no-op rather than
-            // a null deref. Matches the "Save now" visibility rule from the harden pass.
-            !session || session.saved || (session.match.kind === 'append' && !appendConfirmed),
-          )}
-          disabled={session.saved}></textarea>
-      </label>
-      <p class="hint">
-        {#if session.saved}
-          Dump frozen. Your verbatim original is kept inside it.
-        {:else if session.match.kind === 'append' && !appendConfirmed}
-          Append waits for your confirmation — it won’t save on its own. Your verbatim original is kept.
-        {:else}
-          Saves 5 seconds after you stop typing. Your verbatim original is kept.
-        {/if}
-      </p>
-
-      <div class="actions">
-        {#if session.match.kind !== 'append' || appendConfirmed}
-          <!-- "Save now" forces the autosave. It is only honest where a save will actually
-               happen — an unconfirmed append no-ops, so on that path the decision buttons
-               above (Append / Save as new Note) are the save, and this one is absent. -->
-          <button on:click={() => autosaver.flush()} disabled={session.saved}>Save now</button>
-        {/if}
-        {#if session.saved && savedNotePath}
-          <!-- Explicit re-organize — never automatic -->
-          <button on:click={refreshMetadata} disabled={busy}>Re-organize Note</button>
-        {/if}
-        <button on:click={() => { session = null; savedNote = null; autosaver.cancel(); }}>New capture</button>
-      </div>
     {/if}
     </section>
   {:else if view === 'ask'}
@@ -1160,6 +1113,144 @@
     </section>
   {/if}
 
-  {#if status}<p class="status" aria-live="polite">{status}</p>{/if}
+  <!-- The status line renders on whichever surface is on top: inside the sheet while one is
+       open, on the page otherwise. One live region at a time, so a message is announced once. -->
+  {#if status && !sheet}<p class="status" aria-live="polite">{status}</p>{/if}
   </main>
 </div>
+
+{#if sheet === 'capture'}
+  <!-- The Capture sheet. A full-screen surface over the grid, and the whole of it: one field
+       and nothing competing with it while the thought comes out. Once Organize has run the
+       field yields to the whole Note — not a summary standing in for it — with the countdown
+       riding its top edge, and committing drops the user back on the grid with the card. -->
+  <dialog
+    class="sheet"
+    bind:this={sheetEl}
+    on:close={onSheetClose}
+    aria-label={session ? 'Review the Note before it files' : 'Capture a thought'}>
+    <div class="sheet__inner">
+      <div class="sheet__bar">
+        <p class="sheet__title">{session ? 'before it files' : 'catch a thought'}</p>
+        <button class="sheet__close" on:click={closeCapture}>close</button>
+      </div>
+
+      <div class="sheet__body">
+        {#if !session}
+          <!-- The Dump is the product, not a form field: set in the content face, at content
+               size, and named for assistive tech without a visible label — a label above it
+               would make it a form control, which is the one thing it must not look like.
+               Every other field in the app carries its label on screen; this one carries it
+               in the name. -->
+          <textarea
+            class="dump"
+            bind:value={text}
+            on:input={persistDraft}
+            on:keydown={(e) => commitOnModEnter(e, captureDump, busy || !text.trim())}
+            aria-label="Dump — what are you thinking?"
+            placeholder="What are you thinking?"
+            disabled={busy}></textarea>
+        {:else}
+          <!-- The whole Note, before it is committed. You are approving a Note, so you are
+               shown one — every field of it, at full length. -->
+          <article class="note">
+            {#key contextRevision}
+              <div class="burn" class:burn--held={held || (session.match.kind === 'append' && !appendConfirmed)}></div>
+            {/key}
+
+            <p class="eyebrow">
+              {#if session.match.kind === 'new'}
+                New Note
+              {:else}
+                Append to <span class="keep-case">&ldquo;{session.match.suggestion?.title ?? 'an existing Note'}&rdquo;</span>
+              {/if}
+            </p>
+
+            <h2>{session.preview.title}</h2>
+
+            <dl class="meta">
+              {#if session.preview.tags.length}
+                <dt>tags</dt>
+                <dd>{session.preview.tags.join('  ')}</dd>
+              {/if}
+              {#if session.preview.category !== 'uncategorized'}
+                <dt>category</dt>
+                <dd>{session.preview.category}</dd>
+              {/if}
+            </dl>
+
+            {#if session.preview.body}
+              <div class="note-body">{session.preview.body}</div>
+            {/if}
+
+            {#if session.preview.summary}
+              <p class="rule-label">summary</p>
+              <p>{session.preview.summary}</p>
+            {/if}
+
+            {#if session.preview.keyPoints.length}
+              <p class="rule-label">key points</p>
+              <ul>{#each session.preview.keyPoints as point}<li>{point}</li>{/each}</ul>
+            {/if}
+
+            <p class="rule-label">related</p>
+            {#if session.preview.related.length}
+              <ul class="links">{#each session.preview.related as link}<li><a class="vault-link" href={linkHref(settings.vaultName, link)}>{linkText(link)}</a></li>{/each}</ul>
+            {:else}
+              <p class="pending">Links are found when the Note is saved.</p>
+            {/if}
+          </article>
+
+          <label class="context-field">
+            add context
+            <textarea
+              bind:value={context}
+              on:input={onContextInput}
+              on:keydown={(e) => commitOnModEnter(
+                e,
+                () => autosaver.flush(),
+                // The context field only renders with a session; the !session guard is for the
+                // type checker, not the runtime — it makes an absent session a no-op rather
+                // than a null deref. Matches the "Save now" visibility rule below.
+                !session || (session.match.kind === 'append' && !appendConfirmed),
+              )}></textarea>
+          </label>
+          <p class="hint">
+            {#if session.match.kind === 'append' && !appendConfirmed}
+              Append waits for your confirmation — it won’t save on its own. Your verbatim original is kept.
+            {:else if held}
+              Held — the countdown is stopped and won’t restart. It saves when you say so.
+            {:else}
+              Saves 5 seconds after you stop typing. Your verbatim original is kept.
+            {/if}
+          </p>
+        {/if}
+      </div>
+
+      <div class="sheet__foot">
+        {#if status}<p class="status" aria-live="polite">{status}</p>{/if}
+        <div class="actions">
+          {#if !session}
+            <button class="primary" on:click={captureDump} disabled={busy || !text.trim()}>
+              {busy ? 'Capturing…' : 'Capture'}
+            </button>
+          {:else if session.match.kind === 'append' && !appendConfirmed}
+            <!-- The app files and the user signs once: the suggested Append is the primary
+                 action, and founding a new Note stays available as the quiet override. Nothing
+                 files until one of them is pressed. -->
+            <button class="primary" on:click={confirmAppend}>Append</button>
+            <button on:click={chooseNewNote}>Save as new Note</button>
+          {:else}
+            <!-- "Save now" forces the autosave, and after a Hold it is the only thing that
+                 files the Note. It is only shown where a save will actually happen — an
+                 unconfirmed append no-ops, so on that path the two buttons above are the save. -->
+            <button class="primary" on:click={() => autosaver.flush()}>Save now</button>
+            {#if !held}
+              <button on:click={holdCapture}>Hold</button>
+            {/if}
+          {/if}
+        </div>
+      </div>
+    </div>
+  </dialog>
+{/if}

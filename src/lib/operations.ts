@@ -628,6 +628,60 @@ export async function readGrid(
   return { cards: vault.cards, stranded: vault.stranded };
 }
 
+/** A Note the user has just committed, as the grid needs to know it: the Note the commit
+ *  produced, where it landed in the Vault, and whether it Appended to an existing Note or
+ *  founded a new one. */
+export interface FiledNote {
+  note: Note;
+  path: string;
+  appended: boolean;
+}
+
+/** The grid's cards with a just-committed Note folded in, without reading the Vault again.
+ *
+ *  Committing returns the user to the grid with the new card at the top, and the card comes
+ *  from the Note the commit already produced: the grid is the road to capture, so the capture
+ *  path must not pay for a full-Vault round trip to show its own receipt. That shortcut is only
+ *  safe because the projection here is the projection `toCard` derives from the same Note's
+ *  frontmatter — asserted in tests/cards.test.ts against a real Vault read.
+ *
+ *  A new Note is prepended rather than sorted in. The card is a receipt, so it goes where the
+ *  user will look for it; a Dump captured days ago and filed today would sort further down, and
+ *  the next home read restores strict newest-first order anyway.
+ *
+ *  An Append writes a dated section into an existing Note and leaves its frontmatter untouched,
+ *  so that Note's card is unchanged and stays exactly where it already is — folding the appended
+ *  content in would overwrite the card of the Note that received it with the card of the fragment
+ *  it received.
+ *
+ *  The cache is refreshed to match, so the fold survives a restart and the grid does not paint
+ *  a stale set of cards before the next Vault read reconciles. A failed cache write costs only
+ *  the next paint. */
+export async function fileOnGrid(
+  cards: NoteCard[],
+  filed: FiledNote,
+  cache?: NoteCardCache,
+): Promise<NoteCard[]> {
+  const next = filed.appended
+    ? cards
+    : [cardForNote(filed.note, filed.path), ...cards.filter((c) => c.path !== filed.path)];
+  await safeWrite(cache, next);
+  return next;
+}
+
+/** Project a Note the app just wrote to its grid card. The counterpart of `toCard`, which
+ *  projects the same Note read back out of the Vault — the two must agree field for field. */
+function cardForNote(note: Note, path: string): NoteCard {
+  return {
+    path,
+    title: note.title,
+    category: note.category,
+    summary: note.summary,
+    tags: note.tags,
+    createdAt: note.createdAt,
+  };
+}
+
 /** Match a new Dump's preview against the existing Notes: LLM-assisted, by
  *  tags/topic. With no existing Notes the decision is 'new' (no matcher call).
  *  A suggestion whose path is no longer a known candidate falls back to 'new'. */

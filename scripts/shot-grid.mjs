@@ -10,7 +10,13 @@ import { resolve } from 'node:path';
 const argv = process.argv.slice(2);
 const url = argv.find((a) => !a.startsWith('--')) ?? 'http://localhost:5176';
 const empty = argv.includes('--empty');
-const outDir = resolve(process.cwd(), empty ? '.scratch/shots/grid-empty' : '.scratch/shots/grid');
+// The grid a commit returns to (ticket 05): the just-filed Note's card wears the `set` ring
+// and slots in — the receipt for a commit is the card arriving, not a message about it.
+const wet = argv.includes('--wet');
+const outDir = resolve(
+  process.cwd(),
+  empty ? '.scratch/shots/grid-empty' : wet ? '.scratch/shots/grid-wet' : '.scratch/shots/grid',
+);
 
 // Six Note cards that exercise the Category colour (ticket 04): one per named member so every hue
 // is visible, plus an `uncategorized` Note that carries no hue (neutral edge + neutral chip, the
@@ -42,9 +48,9 @@ const stranded = [
 // NOTE: this markup mirrors the `.card` / `.card--open` structure in src/App.svelte so the
 // screenshot exercises the real app.css card rules. If the card structure in App.svelte changes,
 // update this to match or the screenshot will silently drift from the real grid.
-function noteHtml(c) {
+function noteHtml(c, isWet = false) {
   const hue = hueFor(c.category);
-  const catClass = hue !== null ? ' card card--cat' : ' card';
+  const catClass = `${hue !== null ? ' card card--cat' : ' card'}${isWet ? ' card--wet' : ''}`;
   const catStyle = hue !== null ? ` style="--cat-hue:${hue}"` : '';
   const tags = c.tags.slice(0, 3).map((t) => `<span class="card__tag">${t}</span>`).join('');
   const more = c.tags.length > 3 ? `<span class="card__tag-more">+${c.tags.length - 3} more</span>` : '';
@@ -90,7 +96,7 @@ function bandsHtml() {
   return [
     pending.length ? `<div class="grid">${pending.map(pendingHtml).join('')}</div>` : '',
     stranded.length ? `<div class="grid">${stranded.map(strandedHtml).join('')}</div>` : '',
-    `<div class="grid">${notes.map(noteHtml).join('')}</div>`,
+    `<div class="grid">${notes.map((c, i) => noteHtml(c, wet && i === 0)).join('')}</div>`,
   ].join('');
 }
 
@@ -125,12 +131,16 @@ for (const scheme of SCHEMES) {
     const metrics = await page.evaluate(() => {
       const arts = [...document.querySelectorAll('.card')];
       const open = [...document.querySelectorAll('.card--open')];
+      const justFiled = document.querySelector('.card--wet');
       const grids = [...document.querySelectorAll('.grid')];
       return {
         vw: document.documentElement.clientWidth,
         cols: grids[0] ? getComputedStyle(grids[0]).gridTemplateColumns : null,
         bands: grids.length,
         openHeights: open.map((a) => Math.round(a.getBoundingClientRect().height)),
+        wet: justFiled
+          ? { shadow: getComputedStyle(justFiled).boxShadow, animation: getComputedStyle(justFiled).animationName }
+          : null,
         noteHeights: arts.filter((a) => !a.classList.contains('card--open')).map((a) => Math.round(a.getBoundingClientRect().height)),
         tops: arts.map((a) => Math.round(a.getBoundingClientRect().top)),
       };

@@ -1129,3 +1129,176 @@ textarea.dump {
   font-size: var(--text-sm);
   color: var(--dim);
 }
+
+/* ── Sheets ──────────────────────────────────────────────────────────────
+ *
+ * The grid is the constant; every focused moment is a full-screen sheet you drop into and
+ * return from. A sheet is a native modal <dialog> opened with showModal(), so the platform
+ * supplies what a sheet has to have: it sits in the top layer over the grid, the grid behind
+ * it is inert, focus is trapped inside, and Esc — or a phone's back gesture — closes it.
+ *
+ * It rises rather than fades. The gesture is the meaning: the grid stays where it is and the
+ * sheet comes up over it, so returning is a way back down to something that never moved.
+ */
+
+dialog.sheet {
+  /* Reset the UA dialog: centred auto margins, a fit-content box, a border and a padding all
+   * belong to a dialog that interrupts. A sheet does not interrupt; it takes the screen. */
+  position: fixed;
+  inset: 0;
+  max-width: none;
+  max-height: none;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: var(--ground);
+  color: var(--text);
+  overflow: hidden; /* the body scrolls, not the sheet — the bar and the footer stay put */
+  overscroll-behavior: contain;
+  animation: sheet-up 280ms var(--ease);
+}
+
+/* The grid is opaque behind an opaque sheet, so the backdrop is only ever seen during the
+ * rise. A wash of the page's own ink keeps that moment from flashing white. */
+dialog.sheet::backdrop {
+  background: oklch(0% 0 0 / 0.4);
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+/* The rise is the whole idea, so without motion the sheet simply is there — no substitute
+ * animation, and nothing that moves. */
+@media (prefers-reduced-motion: reduce) {
+  dialog.sheet {
+    animation: none;
+  }
+}
+
+/* The sheet's own column: the same reading measure and the same safe-area margins the page
+ * uses, so a thought is set to the same width whether it is being typed or read. */
+.sheet__inner {
+  box-sizing: border-box;
+  height: 100%;
+  max-width: calc(var(--measure) + var(--s4) * 2);
+  margin: 0 auto;
+  padding:
+    max(var(--s5), env(safe-area-inset-top))
+    max(var(--s4), env(safe-area-inset-right))
+    max(var(--s7), env(safe-area-inset-bottom))
+    max(var(--s4), env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+/* The bar carries the sheet's name and the way out, and nothing else — it is the masthead's
+ * rule read again one level down. */
+.sheet__bar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s4);
+  padding-bottom: var(--s3);
+  border-bottom: 1px solid var(--rule);
+}
+
+.sheet__title {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+  margin: 0;
+}
+
+/* The way out is text, like the nav tabs, not a boxed control: leaving is not a commitment. */
+.sheet__close {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: var(--s2);
+  margin: calc(var(--s2) * -1);
+  font-size: var(--text-sm);
+  letter-spacing: 0.04em;
+  color: var(--dim);
+  cursor: pointer;
+  transition: color var(--speed) var(--ease);
+}
+
+.sheet__close:hover {
+  color: var(--text);
+}
+
+/* The body takes the height the bar and the footer leave, so the Dump fills the sheet rather
+ * than sitting in a short box with dead space beneath it. */
+.sheet__body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  min-height: 0;
+  overflow-y: auto;
+  /* A scroll container clips anything drawn outside its content box, and a focus ring is
+   * drawn outside (`outline-offset: 2px`) — so without this the Dump's ring is shaved off on
+   * every edge. The padding gives the ring its 2px back and the negative margin gives the
+   * space back to the layout, so the body's contents still line up with the bar's rule. */
+  padding: 3px;
+  margin: -3px;
+}
+
+/* One field and nothing else: in the sheet the Dump grows to take everything the bar and the
+ * footer do not, so the page really is the input. The 60vh ceiling every textarea carries is
+ * lifted here — it exists so a growing field cannot push the commit button off a scrolling
+ * page, and the sheet pins its footer instead, so the cap would only leave dead space. */
+.sheet__body > textarea.dump {
+  flex: 1 1 auto;
+  max-height: none;
+}
+
+/* The footer holds the sheet's own status line above its actions, so a message about what
+ * just happened sits with the control that caused it and never behind the sheet. */
+.sheet__foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+/* The card of the Note just filed. It slots in wearing the `set` ring — the receipt for a
+ * commit is the thing itself arriving on the grid, not a message about it — and the ring
+ * clears itself a moment later, so nothing accumulates. */
+.card--wet {
+  /* A ring, not a drop shadow: the filed card is not lifted off the page, it is marked as
+   * having reached the Vault, so it takes the `set` accent on its own edge. Written as a
+   * standalone box-shadow rather than composed with `var(--shadow-card)` — that token is
+   * currently invalid (a shadow list wrapped in `light-dark()`, which only takes colours), and
+   * composing with it would make this whole declaration invalid too. */
+  box-shadow: 0 0 0 2px var(--set) inset;
+  animation: slot-in 420ms var(--ease);
+}
+
+@keyframes slot-in {
+  from {
+    transform: translateY(-8px) scale(0.985);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* Without motion the ring alone says it: the card is there, and it is the filed one. */
+@media (prefers-reduced-motion: reduce) {
+  .card--wet {
+    animation: none;
+  }
+}

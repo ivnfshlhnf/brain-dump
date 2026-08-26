@@ -14,7 +14,10 @@ import memory from 'pouchdb-adapter-memory';
 import {
   readVaultForGrid,
   readGrid,
+  fileOnGrid,
   findStrandedDumps,
+  beginCapture,
+  finalizeCapture,
   dumpPath,
   dumpFileContent,
   sourceWikilink,
@@ -26,7 +29,11 @@ import {
   type Settings,
   type DocStore,
   type Dump,
+  type Note,
   type NoteCard,
+  type Organizer,
+  type OrganizeOutput,
+  type Matcher,
   type NoteCardCache,
   type PendingStore,
   type DismissedStore,
@@ -348,5 +355,97 @@ describe('readGrid — cache-first, one pass reconciles cards and Stranded (ADR-
     expect(result.stranded).toHaveLength(1);
     expect(result.stranded[0].reason).toBe('note-deleted');
     expect(result.stranded[0].notePath).toBe('Brain Dump/2026-08-21-gone.md');
+  });
+});
+// --- Filing a just-committed Note onto the grid (ticket 05) ----------------
+// Committing a capture returns the user to the grid with the new card at the top. The card
+// comes from the Note the commit produced, not from a second Vault read: the grid is the
+// road to capture and a full-Vault round trip is exactly the cost the capture path must not
+// pay. What makes that safe is the assertion below — the projection of a committed Note is
+// the projection a Vault read of that same Note produces.
+
+const capturedOutput: OrganizeOutput = {
+  title: 'Water the plants',
+  tags: ['home', 'plants'],
+  category: 'personal',
+  summary: 'A reminder to water the plants.',
+  keyPoints: ['Water the plants regularly'],
+  related: [],
+  body: 'I keep forgetting to water the plants.',
+};
+
+const organizer: Organizer = { organize: async () => capturedOutput };
+const newOnlyMatcher: Matcher = { match: async () => ({ kind: 'new' }) };
+
+/** Run a whole capture through the operation layer and return what the commit produced. */
+async function commitCapture(): Promise<{ note: Note; path: string }> {
+  const session = await beginCapture('I keep forgetting to water the plants', {
+    db, settings, hash: sha1Hex, organizer, matcher: newOnlyMatcher,
+    now: () => fixedNow, newId: () => 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+  });
+  const result = await finalizeCapture(session, {
+    db, settings, hash: sha1Hex, organizer, now: () => fixedNow,
+  });
+  if (!result.ok) throw result.error;
+  return { note: result.note, path: result.written.path };
+}
+
+describe('fileOnGrid — a committed Note lands on the grid (ticket 05)', () => {
+  it('projects the committed Note to the card a Vault read of it produces, at the top', async () => {
+    await seedNote('Brain Dump/2026-08-20-older.md', { title: 'An older Note', created: fixedNow - 86_400_000 });
+    const before = await readGrid(gridDeps());
+    expect(before.cards.map((c) => c.title)).toEqual(['An older Note']);
+
+    const filed = await commitCapture();
+    const cards = await fileOnGrid(before.cards, { note: filed.note, path: filed.path, appended: false });
+
+    // The independent source of truth: what the Vault itself says this Note's card is.
+    const fromVault = await readGrid(gridDeps());
+    const vaultCard = fromVault.cards.find((c) => c.path === filed.path);
+
+    expect(cards[0]).toEqual(vaultCard);
+    expect(cards.map((c) => c.title)).toEqual(['Water the plants', 'An older Note']);
+  });
+
+  it('caches the fold, so a restart paints the committed card before the next Vault read', async () => {
+    const cache = createIndexedDbCardCache();
+    const before = await readGrid(gridDeps(cache));
+
+    const filed = await commitCapture();
+    await fileOnGrid(before.cards, { note: filed.note, path: filed.path, appended: false }, cache);
+
+    // A reloaded tab opens a fresh handle over the same IndexedDB and paints from it first.
+    const painted: NoteCard[][] = [];
+    const reopened = createIndexedDbCardCache();
+    await readGrid(gridDeps(reopened), (cached) => painted.push(cached));
+
+    expect(painted).toHaveLength(1);
+    expect(painted[0].map((c) => c.title)).toEqual(['Water the plants']);
+  });
+
+  it('leaves the Note an Append landed on exactly as it was, and adds no second card', async () => {
+    // An Append writes a dated section into an existing Note and never touches its
+    // frontmatter, so the card the grid already shows for it is still the right card.
+    await seedNote('Brain Dump/2026-08-20-plants.md', {
+      title: 'The plants', tags: ['home'], category: 'personal',
+      summary: 'Everything about the plants.', created: fixedNow - 86_400_000,
+    });
+    const before = await readGrid(gridDeps());
+
+    const session = await beginCapture('the basil is wilting again', {
+      db, settings, hash: sha1Hex, organizer,
+      matcher: { match: async () => ({ kind: 'append', path: 'Brain Dump/2026-08-20-plants.md' }) },
+      now: () => fixedNow, newId: () => 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    });
+    expect(session.match.kind).toBe('append');
+    const result = await finalizeCapture(session, { db, settings, hash: sha1Hex, organizer, now: () => fixedNow });
+    if (!result.ok) throw result.error;
+
+    const cards = await fileOnGrid(before.cards, {
+      note: result.note, path: result.written.path, appended: true,
+    });
+
+    expect(cards).toEqual(before.cards);
+    expect(cards.map((c) => c.title)).toEqual(['The plants']);
   });
 });
