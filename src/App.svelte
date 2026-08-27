@@ -120,10 +120,8 @@
   // state (Saved Note, retrieve errors, …) — the thing the message is about.
   let strip: StatusMessage | null = null;
   let stripTimer: ReturnType<typeof setTimeout> | null = null;
-  // The grid is the persistent surface and every other surface — Capture, Note, Ask, Settings
-  // — is a sheet over it (tickets 05–08). `view` is vestigial now that Settings is a sheet too:
-  // it is only ever 'grid', and ticket 10 deletes it along with the rest of the old view switch.
-  let view: 'config' | 'grid' = 'grid';
+  // The grid is the app's only persistent surface (ticket 10). Every other surface — Capture,
+  // Note, Ask, Settings — is a sheet over it (tickets 05–08). There is no view switch left.
   // The one open sheet, or none. Sheets do not nest, so this is a single value and not a
   // stack: a sheet is a place you drop into from the grid and return from.
   let sheet: 'capture' | 'note' | 'ask' | 'settings' | null = null;
@@ -461,6 +459,22 @@
     sheet = 'settings';
   }
 
+  // ── Keyboard shortcuts (ticket 10) ───────────────────────────────────────────
+  // The grid is the home, and the sheets are reached from it by pointer or by a
+  // single letter: c → Capture, a → Ask, s → Settings. They fire only on the home
+  // surface — never while a sheet is open, never while a modifier is held (so the
+  // browser keeps Cmd+S, Cmd+A, …), and never while the user is typing in a field.
+  function onShortcutKey(e: KeyboardEvent) {
+    if (sheet) return;
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    const el = document.activeElement;
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el as HTMLElement)?.isContentEditable) return;
+    const key = e.key.toLowerCase();
+    if (key === 'c') { e.preventDefault(); openCapture(); }
+    else if (key === 'a') { if (!vaultIsEmpty) { e.preventDefault(); openAsk(); } }
+    else if (key === 's') { e.preventDefault(); openSettings(); }
+  }
+
   /** Ask the sheet to close; `onSettingsSheetClose` does the work, and it is the one way out. */
   function closeSettings() {
     sheetEl?.close();
@@ -539,8 +553,8 @@
       applyConnection(true);
       void recover();
       // A restored connection may have recovered Dumps into Notes on another device — refresh
-      // the grid when it is the surface the user is looking at.
-      if (view === 'grid') void enterGrid();
+      // the grid, the one persistent surface underneath any open sheet.
+      void enterGrid();
     };
     window.addEventListener('online', onOnline);
     // Going offline is the other half of the cross-cutting connection voice. The message comes
@@ -1057,155 +1071,142 @@
   </span>
 {/snippet}
 
-<div class="page" class:wide={view === 'grid'}>
+<svelte:window on:keydown={onShortcutKey} />
+
+<div class="page">
   <header class="masthead">
     <h1 class="wordmark">brain-dump</h1>
-    <nav>
-      <button
-        class:on={view === 'grid'}
-        aria-current={view === 'grid' ? 'page' : undefined}
-        on:click={() => { view = 'grid'; void enterGrid(); }}>grid</button>
-      <button
-        class:on={sheet === 'capture'}
-        aria-current={sheet === 'capture' ? 'page' : undefined}
-        on:click={() => { view = 'grid'; openCapture(); }}>capture</button>
-      <button
-        class:on={sheet === 'ask'}
-        class:nav-dimmed={vaultIsEmpty}
-        aria-current={sheet === 'ask' ? 'page' : undefined}
-        disabled={vaultIsEmpty}
-        title={vaultIsEmpty ? 'Ask needs a Note to answer from' : undefined}
-        on:click={() => { view = 'grid'; openAsk(); }}>ask</button>
-      <button
-        class:on={sheet === 'settings'}
-        aria-current={sheet === 'settings' ? 'page' : undefined}
-        on:click={() => { view = 'grid'; openSettings(); }}>settings</button>
-    </nav>
+    <button class="masthead__gear" on:click={openSettings} aria-label="settings" title="Settings (s)">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+      </svg>
+    </button>
   </header>
 
   <main>
-  {#if view === 'grid'}
-    <section class="surface grid-surface">
-    <!-- The Capture control lives on the grid and never waits on the card read — the grid is
-         the road to capture, and capture friction is the one unforgivable failure. -->
-    <div class="actions grid-controls">
-      <button class="primary" on:click={openCapture}>Capture</button>
-    </div>
+  <section class="surface grid-surface">
+  <!-- The Capture control lives on the grid and never waits on the card read — the grid is
+       the road to capture, and capture friction is the one unforgivable failure. Ask lives
+       beside it, dimmed when there is nothing to ask of — an empty Vault answers nothing. -->
+  <div class="actions grid-controls">
+    <button class="primary" on:click={openCapture} title="Capture (c)">Capture</button>
+    <button on:click={openAsk} disabled={vaultIsEmpty} title={vaultIsEmpty ? 'Ask needs a Note to answer from' : 'Ask (a)'}>Ask</button>
+  </div>
 
-    <!-- The recovery banner. It used to live on the capture surface; a Capture sheet has room
-         for the field and nothing else, and this speaks for the whole app rather than for the
-         thought being typed, so it belongs out here. Four states, kept distinct on purpose:
-         collapsing them into one "waiting" line would restore the ambiguity that caused
-         finding 02 — the user could not tell a Dump being worked on from one nothing was
-         happening to. Stranded outranks the rest; it is the app admitting it broke its
-         promise. Ticket 09 added the separate cross-cutting `.status-strip` below for the
-         card-less kinds (capture landed, connection, settings rejected); this banner stays
-         the voice for the Pending/Stranded Dumps themselves — recovery state, which belongs
-         to those Dumps and not to the strip. -->
-    {#if strandedRecords.length}
-      <p class="status err" aria-live="polite">
-        {strandedRecords.length === 1
-          ? "1 Dump couldn't be Organized"
-          : `${strandedRecords.length} Dumps couldn't be Organized`}: {strandedRecords[0].lastError}
-      </p>
-      <div class="actions"><button on:click={() => retryStranded()}>Retry</button></div>
-    {:else if recoveringCount}
-      <p class="status" aria-live="polite">
-        Organizing {recoveringCount === 1 ? '1 Dump' : `${recoveringCount} Dumps`} left from your last session…
-      </p>
-    {:else if retryingCount}
-      <p class="status" aria-live="polite">
-        {retryingCount === 1 ? "1 Dump couldn't be Organized" : `${retryingCount} Dumps couldn't be Organized`} —
-        trying again shortly.
-      </p>
-    {:else if offlineCount}
-      <p class="status" aria-live="polite">
-        {offlineCount === 1
-          ? '1 Dump saved — it will be Organized'
-          : `${offlineCount} Dumps saved — they will be Organized`} when you're back online.
-      </p>
-    {:else if inFlightCount}
-      <p class="status" aria-live="polite">Organizing your Dump…</p>
-    {/if}
-    {#if pendingError}<p class="status err" aria-live="polite">{pendingError}</p>{/if}
-
-    {#if pendingRecords.length}
-      <!-- Pending Dumps: captured, not yet a Note. Dashed and hue-less — raw scaffolding the app
-           owes the user a Note for — with no actions, because recovery is automatic. -->
-      <div class="grid">
-        {#each pendingRecords as r (r.dump.id)}
-          <article class="card card--open">
-            <p class="card__category">Pending</p>
-            <h3 class="card__title card__title--raw">{firstLine(r.dump.content)}</h3>
-            {#if r.lastError}
-              <p class="card__summary">{r.lastError}</p>
-            {/if}
-            <p class="card__date">{new Date(r.dump.createdAt).toLocaleDateString()}</p>
-          </article>
-        {/each}
-      </div>
-    {/if}
-
-    {#if strandedInVault.length}
-      <!-- Stranded Dumps: a Note was never written, or the one written is gone. Same dashed
-           card, but it carries the reason and the two things the user can do about it — Retry
-           (Organize an unfiled Dump, restore a deleted one) and Dismiss — right where they
-           found it. -->
-      <div class="grid">
-        {#each strandedInVault as s (s.dump.id)}
-          <article class="card card--open">
-            <p class="card__category">Stranded</p>
-            <h3 class="card__title card__title--raw">{firstLine(s.dump.content)}</h3>
-            <p class="card__summary">
-              {#if s.reason === 'unfiled'}
-                never became a Note
-              {:else if s.reason === 'note-deleted'}
-                its Note was deleted — {s.notePath}
-              {:else if s.reason === 'note-unreadable'}
-                its Note exists but Obsidian will not write it — {s.notePath}
-              {:else}
-                the Dump and its Note were both deleted
-              {/if}
-            </p>
-            <div class="card__actions">
-              {#if s.reason === 'unfiled'}
-                <button on:click={() => organizeStranded(s.dump)} disabled={!!organizingStranded}>
-                  {organizingStranded === s.dump.id ? 'Retrying…' : 'Retry'}
-                </button>
-              {:else}
-                <button on:click={() => restoreDeleted(s)} disabled={!!organizingStranded}>
-                  {organizingStranded === s.dump.id ? 'Retrying…' : 'Retry'}
-                </button>
-              {/if}
-              <button on:click={() => dismissStranded(s)} disabled={!!organizingStranded}>Dismiss</button>
-            </div>
-            <p class="card__date">{new Date(s.dump.createdAt).toLocaleDateString()}</p>
-          </article>
-        {/each}
-      </div>
-    {/if}
-
-    {#if cards.length}
-      <div class="grid">
-        {#each cards as card (card.path)}
-          {@render noteCard(card)}
-        {/each}
-      </div>
-    {:else if cardsLoaded && !pendingRecords.length && !strandedInVault.length}
-      <!-- An empty Vault is calm, not broken: show where the first card will land. The placeholder
-           waits only when there are no open thoughts either — a Pending or Stranded card is
-           already something on screen. -->
-      <div class="grid">
-        <p class="card-placeholder">Your first thought will land here.</p>
-      </div>
-    {:else if !pendingRecords.length && !strandedInVault.length}
-      <!-- A cold or failed cache never blocks capture: no spinner, just the grid frame. Open
-           thoughts, when present, already fill the surface, so the empty frame is only for the
-           truly empty case. -->
-      <div class="grid"></div>
-    {/if}
-    </section>
+  <!-- The recovery banner. It used to live on the capture surface; a Capture sheet has room
+       for the field and nothing else, and this speaks for the whole app rather than for the
+       thought being typed, so it belongs out here. Four states, kept distinct on purpose:
+       collapsing them into one "waiting" line would restore the ambiguity that caused
+       finding 02 — the user could not tell a Dump being worked on from one nothing was
+       happening to. Stranded outranks the rest; it is the app admitting it broke its
+       promise. Ticket 09 added the separate cross-cutting `.status-strip` below for the
+       card-less kinds (capture landed, connection, settings rejected); this banner stays
+       the voice for the Pending/Stranded Dumps themselves — recovery state, which belongs
+       to those Dumps and not to the strip. -->
+  {#if strandedRecords.length}
+    <p class="status err" aria-live="polite">
+      {strandedRecords.length === 1
+        ? "1 Dump couldn't be Organized"
+        : `${strandedRecords.length} Dumps couldn't be Organized`}: {strandedRecords[0].lastError}
+    </p>
+    <div class="actions"><button on:click={() => retryStranded()}>Retry</button></div>
+  {:else if recoveringCount}
+    <p class="status" aria-live="polite">
+      Organizing {recoveringCount === 1 ? '1 Dump' : `${recoveringCount} Dumps`} left from your last session…
+    </p>
+  {:else if retryingCount}
+    <p class="status" aria-live="polite">
+      {retryingCount === 1 ? "1 Dump couldn't be Organized" : `${retryingCount} Dumps couldn't be Organized`} —
+      trying again shortly.
+    </p>
+  {:else if offlineCount}
+    <p class="status" aria-live="polite">
+      {offlineCount === 1
+        ? '1 Dump saved — it will be Organized'
+        : `${offlineCount} Dumps saved — they will be Organized`} when you're back online.
+    </p>
+  {:else if inFlightCount}
+    <p class="status" aria-live="polite">Organizing your Dump…</p>
   {/if}
+  {#if pendingError}<p class="status err" aria-live="polite">{pendingError}</p>{/if}
+
+  {#if pendingRecords.length}
+    <!-- Pending Dumps: captured, not yet a Note. Dashed and hue-less — raw scaffolding the app
+         owes the user a Note for — with no actions, because recovery is automatic. -->
+    <div class="grid">
+      {#each pendingRecords as r (r.dump.id)}
+        <article class="card card--open">
+          <p class="card__category">Pending</p>
+          <h3 class="card__title card__title--raw">{firstLine(r.dump.content)}</h3>
+          {#if r.lastError}
+            <p class="card__summary">{r.lastError}</p>
+          {/if}
+          <p class="card__date">{new Date(r.dump.createdAt).toLocaleDateString()}</p>
+        </article>
+      {/each}
+    </div>
+  {/if}
+
+  {#if strandedInVault.length}
+    <!-- Stranded Dumps: a Note was never written, or the one written is gone. Same dashed
+         card, but it carries the reason and the two things the user can do about it — Retry
+         (Organize an unfiled Dump, restore a deleted one) and Dismiss — right where they
+         found it. -->
+    <div class="grid">
+      {#each strandedInVault as s (s.dump.id)}
+        <article class="card card--open">
+          <p class="card__category">Stranded</p>
+          <h3 class="card__title card__title--raw">{firstLine(s.dump.content)}</h3>
+          <p class="card__summary">
+            {#if s.reason === 'unfiled'}
+              never became a Note
+            {:else if s.reason === 'note-deleted'}
+              its Note was deleted — {s.notePath}
+            {:else if s.reason === 'note-unreadable'}
+              its Note exists but Obsidian will not write it — {s.notePath}
+            {:else}
+              the Dump and its Note were both deleted
+            {/if}
+          </p>
+          <div class="card__actions">
+            {#if s.reason === 'unfiled'}
+              <button on:click={() => organizeStranded(s.dump)} disabled={!!organizingStranded}>
+                {organizingStranded === s.dump.id ? 'Retrying…' : 'Retry'}
+              </button>
+            {:else}
+              <button on:click={() => restoreDeleted(s)} disabled={!!organizingStranded}>
+                {organizingStranded === s.dump.id ? 'Retrying…' : 'Retry'}
+              </button>
+            {/if}
+            <button on:click={() => dismissStranded(s)} disabled={!!organizingStranded}>Dismiss</button>
+          </div>
+          <p class="card__date">{new Date(s.dump.createdAt).toLocaleDateString()}</p>
+        </article>
+      {/each}
+    </div>
+  {/if}
+
+  {#if cards.length}
+    <div class="grid">
+      {#each cards as card (card.path)}
+        {@render noteCard(card)}
+      {/each}
+    </div>
+  {:else if cardsLoaded && !pendingRecords.length && !strandedInVault.length}
+    <!-- An empty Vault is calm, not broken: show where the first card will land. The placeholder
+         waits only when there are no open thoughts either — a Pending or Stranded card is
+         already something on screen. -->
+    <div class="grid">
+      <p class="card-placeholder">Your first thought will land here.</p>
+    </div>
+  {:else if !pendingRecords.length && !strandedInVault.length}
+    <!-- A cold or failed cache never blocks capture: no spinner, just the grid frame. Open
+         thoughts, when present, already fill the surface, so the empty frame is only for the
+         truly empty case. -->
+    <div class="grid"></div>
+  {/if}
+  </section>
 
   <!-- The cross-cutting status strip — grid-only, never inside a sheet (ticket 09). One live
        region, announced politely, carrying a word and never colour alone. A capture that landed

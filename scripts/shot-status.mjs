@@ -95,7 +95,7 @@ const STATES = [
       // capture-confirmed via onStatus, and the Capture sheet closes back to the grid.
       await context.setOffline(true);
       await page.waitForFunction(() => !navigator.onLine);
-      await page.click('nav button:has-text("capture")');
+      await page.click('.grid-controls button:has-text("Capture")');
       await page.waitForSelector('dialog.sheet:modal', { timeout: 5000 });
       await page.fill('textarea', 'a thought captured while offline');
       await page.click('dialog.sheet button:has-text("Capture")');
@@ -108,7 +108,7 @@ const STATES = [
   {
     name: 'config-rejected',
     drive: async (page) => {
-      await page.click('nav button:has-text("settings")');
+      await page.click('.masthead__gear');
       await page.waitForSelector('dialog.sheet:modal', { timeout: 5000 });
       // Blank the LLM provider — validateProviderUrl rejects a blank value.
       // Settings inputs have no id; target by their label text.

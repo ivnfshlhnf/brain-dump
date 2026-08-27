@@ -74,26 +74,29 @@
     0 2px 5px oklch(0% 0 0 / 0.7),
     0 16px 40px oklch(0% 0 0 / 0.55);
 
-  --ground: var(--ground-light);
-  --raised: var(--raised-light);
-  --text: var(--text-light);
-  --dim: var(--dim-light);
-  --rule: var(--rule-light);
-  --ember: var(--ember-light);
-  --set: var(--set-light);
-  --alarm: var(--alarm-light);
-  --shadow-card: var(--shadow-card-light);
+  /* Dark leads (spec: "Dark leads; light is a twin that follows the system"). The resolved
+   * tokens default to the dark values; light is the override the system opts into. The
+   * `light-dark()` block below carries the same intent for browsers that support it. */
+  --ground: var(--ground-dark);
+  --raised: var(--raised-dark);
+  --text: var(--text-dark);
+  --dim: var(--dim-dark);
+  --rule: var(--rule-dark);
+  --ember: var(--ember-dark);
+  --set: var(--set-dark);
+  --alarm: var(--alarm-dark);
+  --shadow-card: var(--shadow-card-dark);
 
-  @media (prefers-color-scheme: dark) {
-    --ground: var(--ground-dark);
-    --raised: var(--raised-dark);
-    --text: var(--text-dark);
-    --dim: var(--dim-dark);
-    --rule: var(--rule-dark);
-    --ember: var(--ember-dark);
-    --set: var(--set-dark);
-    --alarm: var(--alarm-dark);
-    --shadow-card: var(--shadow-card-dark);
+  @media (prefers-color-scheme: light) {
+    --ground: var(--ground-light);
+    --raised: var(--raised-light);
+    --text: var(--text-light);
+    --dim: var(--dim-light);
+    --rule: var(--rule-light);
+    --ember: var(--ember-light);
+    --set: var(--set-light);
+    --alarm: var(--alarm-light);
+    --shadow-card: var(--shadow-card-light);
   }
 
   /* NOTE: --shadow-card is deliberately absent below. `light-dark()` resolves to a <color>,
@@ -116,23 +119,24 @@
    * Only the lightness/chroma are per-scheme; the hue is the one thing that differs card to card.
    * Unlike the tokens above, these can't use `light-dark()` — its arguments are `<color>` values,
    * and the hue is per-card, so the per-scheme parts are bare lightness/chroma numbers composed
-   * with the inline hue inside `oklch()`. The `@media (prefers-color-scheme: dark)` block switches
-   * them. `uncategorized` sets no `--cat-hue`, so the neutral fallbacks apply — the absence of a
-   * Category is not a colour. */
-  --cat-edge-l: 52%;
+   * with the inline hue inside `oklch()`. The `@media (prefers-color-scheme: light)` block switches
+   * them (dark leads; light follows the system). `uncategorized` sets no `--cat-hue`, so the
+   * neutral fallbacks apply — the absence of a Category is not a colour. */
+  --cat-edge-l: 72%;
   --cat-edge-c: 0.13;
-  --cat-chip-bg-l: 94%;
+  --cat-chip-bg-l: 32%;
   --cat-chip-bg-c: 0.05;
-  --cat-chip-text-l: 40%;
+  --cat-chip-text-l: 80%;
   --cat-chip-text-c: 0.13;
-  @media (prefers-color-scheme: dark) {
-    --cat-edge-l: 72%;
-    --cat-chip-bg-l: 32%;
-    --cat-chip-text-l: 80%;
+  @media (prefers-color-scheme: light) {
+    --cat-edge-l: 52%;
+    --cat-chip-bg-l: 94%;
+    --cat-chip-text-l: 40%;
   }
 
-  /* Native UI — scrollbars, form controls, the canvas — follows the user's system setting. */
-  color-scheme: light dark;
+  /* Native UI — scrollbars, form controls, the canvas — follows the user's system setting.
+   * Dark is listed first: with no system preference the canvas is dark (dark leads). */
+  color-scheme: dark light;
   accent-color: var(--ember);
 
   --serif: 'Newsreader', Georgia, 'Times New Roman', serif;
@@ -206,12 +210,13 @@ textarea {
  * no article/aside/main/nav/section stands between it and the body, and a plain wrapper div
  * does not. Landmark navigation now offers banner + main instead of main alone. */
 .page {
-  /* The notebook is one column, capped at the reading measure. border-box lets the column
-   * fill the viewport height (min-height below) without its padding pushing the page past
-   * 100dvh; max-width adds the side margins back on top of --measure, so the reading line
-   * stays at 34rem rather than measure-minus-padding. */
+  /* The home is the grid, and the grid is an index, so the page is the grid's wider
+   * column — 60rem, the width `.page.wide` gave the grid when it sat beside the Field
+   * Notebook's narrow reading measure. The notebook and its measure are gone (ticket 10);
+   * the sheets carry their own measure. border-box lets the column fill the viewport
+   * height (min-height below) without its padding pushing the page past 100dvh. */
   box-sizing: border-box;
-  max-width: calc(var(--measure) + var(--s4) * 2);
+  max-width: 60rem;
   margin: 0 auto;
   min-height: 100vh;
   min-height: 100dvh;
@@ -241,24 +246,15 @@ main {
   min-height: 0;
 }
 
-/* Each view is one surface. When the surface's content is shorter than the viewport it
- * centers in the space below the masthead — the capture Dump is the product, so it lands
- * where the eye arrives, not at the top with empty ground beneath. When the content is
- * taller (settings, the whole Note) it flows from the top and scrolls. auto margins, not
- * justify-content: center, so a tall surface never clips its own top; the margins collapse
- * to 0 once the content overflows. The status line lives outside every surface, so it sinks
- * to the bottom of the page body. */
+/* The one surface is the grid. It is a list, so it flows from the top — the centring the
+ * old single-composition surfaces (capture/ask/settings as full pages) used, sitting the
+ * short Dump where the eye arrives, went with them when they became sheets. A sheet that
+ * needs to centre its contents does so itself. */
 .surface {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: var(--s4);
-}
-.surface > :first-child {
-  margin-top: auto;
-}
-.surface > :last-child {
-  margin-bottom: auto;
 }
 
 /* The machine's voice: every label, tag, path, wikilink and status line. */
@@ -315,11 +311,11 @@ p {
   margin: 0;
 }
 
-/* ── Masthead and tabs ───────────────────────────────────────────────── */
+/* ── Masthead ─────────────────────────────────────────────────────────── */
 
 .masthead {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: var(--s4);
   padding-bottom: var(--s3);
@@ -335,48 +331,23 @@ p {
   color: var(--dim);
 }
 
-nav {
-  display: flex;
-  gap: var(--s3);
-}
-
-nav button {
+/* The settings gear: the one control that lives in the masthead. An icon, not a tab — the
+ * masthead carries the wordmark and the way to settings, and nothing else. Strokes take the
+ * dim voice at rest and rise to ink on hover/focus, like the close controls on the sheets. */
+.masthead__gear {
   appearance: none;
   background: none;
   border: 0;
-  padding: var(--s2) var(--s2);
-  font-size: var(--text-sm);
-  letter-spacing: 0.04em;
+  padding: var(--s1);
+  display: inline-flex;
   color: var(--dim);
   cursor: pointer;
-  /* The active indicator is a text underline, not a box-edge border, so it stays tight
-   * under the label while the padding grows the touch box — a tab is text, and the line
-   * belongs to the text, not to the box. */
-  text-decoration: underline;
-  text-decoration-color: transparent;
-  text-underline-offset: 4px;
-  text-decoration-thickness: 2px;
-  transition: color var(--speed) var(--ease), text-decoration-color var(--speed) var(--ease);
+  transition: color var(--speed) var(--ease);
 }
 
-nav button:hover {
+.masthead__gear:hover,
+.masthead__gear:focus-visible {
   color: var(--text);
-}
-
-nav button.on {
-  color: var(--text);
-  text-decoration-color: var(--ember);
-}
-
-/* An entry point that leads nowhere yet — Ask with an empty Vault — is dimmed rather than
- * offered, so the user is not invited to ask a question of nothing. The inactive tab is already
- * `--dim`, so dimming goes one step further: dropped toward the page and quieted, with no hover
- * to suggest it can be pressed. */
-nav button.nav-dimmed,
-nav button.nav-dimmed:hover {
-  color: color-mix(in oklab, var(--dim), var(--ground) 50%);
-  text-decoration-color: transparent;
-  cursor: not-allowed;
 }
 
 /* ── Controls ────────────────────────────────────────────────────────── */
@@ -1004,19 +975,11 @@ textarea.dump {
 
 /* ── The grid (ticket 02; ADR-0007) ──────────────────────────────────────
  *
- * The new home arriving beside the Field Notebook, not replacing it yet (that is ticket 10).
- * Cards are neutral here — colour arrives with ticket 04, when Category becomes a closed set —
- * so a card carries no hue, only the two-ink system the rest of the app already speaks: serif
- * for the thought (title, summary), mono for the scaffolding (category, tags, date).
- *
- * The notebook is one 34rem column; the grid is an index, and an index wants more than two
- * cards across on a laptop. The page widens for the grid view only, so capture/ask/settings
- * keep the reading measure the Field Notebook was designed around.
+ * The home. Cards carry the two-ink system the rest of the app speaks: serif for the
+ * thought (title, summary), mono for the scaffolding (category, tags, date); Category
+ * hue arrived with ticket 04. The page is the grid's own 60rem column (see `.page`); the
+ * Field Notebook's narrow reading measure is gone, kept only inside the sheets.
  */
-
-.page.wide {
-  max-width: 60rem;
-}
 
 /* The grid flows from the top rather than centring like the capture surface — it is a list,
  * not a single composed thing, and a tall grid must not clip its own top. */

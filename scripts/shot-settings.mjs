@@ -1,10 +1,11 @@
-// Screenshot the Settings sheet (ticket 08). The fourth sheet, reached from the grid's nav the
-// way Capture, Note and Ask are. This script seeds the device-local card cache with a real
-// NoteCard (so the grid paints a card) and the settings store with realistic field values (so the
-// two fieldsets render filled, the way they would once the user has configured the app), and
-// points CouchDB at a dead port (so the Vault read rejects and the cached card is kept). It then
-// clicks the nav "settings" button — the app's own openSettings → showModal flow: the sheet's
-// chrome, the modal behaviour and the focus handling are the app's, not a mock's.
+// Screenshot the Settings sheet (ticket 08). The fourth sheet, reached from the grid's masthead
+// gear the way Capture and Ask are reached from the grid's control row (ticket 10). This script
+// seeds the device-local card cache with a real NoteCard (so the grid paints a card) and the
+// settings store with realistic field values (so the two fieldsets render filled, the way they
+// would once the user has configured the app), and points CouchDB at a dead port (so the Vault
+// read rejects and the cached card is kept). It then clicks the masthead gear — the app's own
+// openSettings → showModal flow: the sheet's chrome, the modal behaviour and the focus handling
+// are the app's, not a mock's.
 //
 // Real connection checks, reconcile results and diagnostics need a live CouchDB + LLM + embedder,
 // none available here, so the `full` state injects the result blocks (connection checks, the
@@ -141,8 +142,8 @@ for (const scheme of SCHEMES) {
       await page.waitForSelector('.card--door', { timeout: 5000 });
       await page.evaluate(() => document.fonts.ready);
 
-      // The real thing: the nav's settings control opens the app's own sheet.
-      await page.click('nav button:has-text("settings")');
+      // The real thing: the masthead's settings gear opens the app's own sheet (ticket 10).
+      await page.click('.masthead__gear');
       await page.waitForSelector('dialog.sheet:modal', { timeout: 5000 });
       await page.waitForTimeout(350); // the sheet rises over 280ms
 

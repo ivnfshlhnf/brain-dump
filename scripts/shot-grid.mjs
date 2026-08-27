@@ -119,7 +119,7 @@ for (const scheme of SCHEMES) {
     const page = await context.newPage();
     await page.goto(url, { waitUntil: 'load' });
     await page.evaluate(() => document.fonts.ready);
-    await page.click('nav button:has-text("grid")');
+    // The grid is the home — the app opens on it, no nav tab to click (ticket 10).
     if (!empty) {
       await page.evaluate((html) => {
         // Replace the empty grid frame with the three bands (Pending, Stranded, Notes).

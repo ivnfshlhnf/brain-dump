@@ -1,9 +1,10 @@
 // Screenshot the Ask sheet (ticket 07). The sheet is a native modal <dialog> opened with
-// showModal(), reached from the grid's nav — so this script seeds the device-local card cache
-// with a real NoteCard (so the grid paints a card and the Ask control is enabled, not dimmed for
-// an empty Vault) and points CouchDB at a dead port (so the Vault read rejects and the cached
-// card is kept). It then clicks the nav "ask" button — the app's own openAsk → showModal flow:
-// the sheet's chrome, the modal behaviour and the focus handling are the app's, not a mock's.
+// showModal(), reached from the grid's control row (ticket 10) — so this script seeds the
+// device-local card cache with a real NoteCard (so the grid paints a card and the Ask control is
+// enabled, not disabled for an empty Vault) and points CouchDB at a dead port (so the Vault read
+// rejects and the cached card is kept). It then clicks the grid's Ask button — the app's own
+// openAsk → showModal flow: the sheet's chrome, the modal behaviour and the focus handling are
+// the app's, not a mock's.
 //
 // A real answer needs CouchDB + a live LLM + an embedder, none available here, so the answer and
 // its citation cards are injected into the real, already-open sheet body the way
@@ -117,8 +118,8 @@ for (const scheme of SCHEMES) {
       await page.waitForSelector('.card--door', { timeout: 5000 });
       await page.evaluate(() => document.fonts.ready);
 
-      // The real thing: the nav's ask control opens the app's own sheet.
-      await page.click('nav button:has-text("ask")');
+      // The real thing: the grid's Ask control opens the app's own sheet (ticket 10).
+      await page.click('.grid-controls button:has-text("Ask")');
       await page.waitForSelector('dialog.sheet:modal', { timeout: 5000 });
       await page.waitForTimeout(350); // the sheet rises over 280ms
 
