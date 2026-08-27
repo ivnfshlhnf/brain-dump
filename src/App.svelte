@@ -1094,6 +1094,21 @@
     <button on:click={openAsk} disabled={vaultIsEmpty} title={vaultIsEmpty ? 'Ask needs a Note to answer from' : 'Ask (a)'}>Ask</button>
   </div>
 
+  <!-- The cross-cutting status strip — grid-only, never inside a sheet (ticket 09). One live
+       region, announced politely, carrying a word and never colour alone. A capture that landed
+       fades on its own; a lost connection or a rejected setting holds, and either can be cleared
+       immediately — including one the user would rather deal with later. -->
+  {#if strip && !sheet}
+    <div
+      class="status-strip"
+      class:status-strip--alert={strip.kind === 'connection-lost' || strip.kind === 'config-rejected'}
+      aria-live="polite"
+    >
+      <span class="status-strip__text">{strip.message}</span>
+      <button class="status-strip__dismiss" on:click={clearStrip} aria-label="Dismiss status">Dismiss</button>
+    </div>
+  {/if}
+
   <!-- The recovery banner. It used to live on the capture surface; a Capture sheet has room
        for the field and nothing else, and this speaks for the whole app rather than for the
        thought being typed, so it belongs out here. Four states, kept distinct on purpose:
@@ -1207,21 +1222,6 @@
     <div class="grid"></div>
   {/if}
   </section>
-
-  <!-- The cross-cutting status strip — grid-only, never inside a sheet (ticket 09). One live
-       region, announced politely, carrying a word and never colour alone. A capture that landed
-       fades on its own; a lost connection or a rejected setting holds, and either can be cleared
-       immediately — including one the user would rather deal with later. -->
-  {#if strip && !sheet}
-    <div
-      class="status-strip"
-      class:status-strip--alert={strip.kind === 'connection-lost' || strip.kind === 'config-rejected'}
-      aria-live="polite"
-    >
-      <span class="status-strip__text">{strip.message}</span>
-      <button class="status-strip__dismiss" on:click={clearStrip} aria-label="Dismiss status">Dismiss</button>
-    </div>
-  {/if}
   </main>
 </div>
 
@@ -1387,6 +1387,7 @@
                  link, so "open it where editing happens" is one tap. -->
             <p class="eyebrow">
               <span class="filed-mark">Filed</span>
+              <span class="eyebrow__sep" aria-hidden="true">·</span>
               <a class="vault-link" href={obsidianUrl(settings.vaultName, noteView.path)}>{noteView.path}</a>
             </p>
 
@@ -1504,7 +1505,7 @@
                    recognizable, tappable card, not a link, so checking the answer against the
                    user's own words is one tap into the Note sheet. -->
               <p class="rule-label">sources</p>
-              <div class="grid">
+              <div class="citations">
                 {#each askCards as card (card.path)}
                   {@render noteCard(card)}
                 {/each}

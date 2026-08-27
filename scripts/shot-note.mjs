@@ -73,7 +73,7 @@ function noteHtml({ tags, body, summary, keyPoints, related, dump, context, cate
   ];
   return `
     <article class="note committed">
-      <p class="eyebrow"><span class="filed-mark">Filed</span>${pathLink}</p>
+      <p class="eyebrow"><span class="filed-mark">Filed</span><span class="eyebrow__sep" aria-hidden="true">·</span>${pathLink}</p>
       <h2>Water the plants</h2>
       <dl class="meta">${meta}</dl>
       ${sections.join('')}

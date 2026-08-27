@@ -533,14 +533,14 @@ textarea.dump {
   gap: var(--s3);
   margin: var(--s3) 0 0;
   padding: var(--s2) var(--s3);
-  border: 1px solid var(--hairline);
-  border-left: 3px solid var(--hairline);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--rule);
   border-radius: var(--radius);
   font-family: var(--mono);
   font-size: var(--text-xs);
   letter-spacing: 0.03em;
   color: var(--dim);
-  background: var(--surface);
+  background: var(--raised);
 }
 
 /* A subtle accent for the kinds that hold for a reason — lost connection, rejected setting.
@@ -568,7 +568,7 @@ textarea.dump {
 
 .status-strip__dismiss:hover,
 .status-strip__dismiss:focus-visible {
-  color: var(--ink);
+  color: var(--text);
 }
 
 /* ── Diagnostics and health checks ───────────────────────────────────── */
@@ -750,6 +750,13 @@ textarea.dump {
   text-transform: none;
   letter-spacing: 0.02em;
   word-break: break-all;
+  /* The stamp and the path are two things, not one word. The gap is structural rather than a
+   * space in the template: the markup once rendered "FILEDBrain Dump/2026-…" because the
+   * whitespace between the two elements was collapsed away. */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--s2);
 }
 
 /* The pending eyebrow is an uppercase machine marking — but the appended Note's title is a
@@ -787,8 +794,7 @@ textarea.dump {
 /* Doors are meant to be walked through: the saved path, a Related link and a citation are
  * each a 44px touch target, not a 13px line of text. The eyebrow's inline path link keeps
  * its inline flow; only the stacked lists grow. */
-.note .links .vault-link,
-.answer .sources .vault-link {
+.note .links .vault-link {
   display: flex;
   align-items: center;
   min-height: 44px;
@@ -914,19 +920,6 @@ textarea.dump {
   font-size: var(--text-base);
 }
 
-.answer .sources {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--s1);
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--set);
-  word-break: break-all;
-}
-
 /* ── Stranded Dumps ──────────────────────────────────────────────────────
  *
  * The list a user reads when the app is admitting it took a thought and never filed it.
@@ -1010,6 +1003,22 @@ textarea.dump {
   .grid {
     grid-template-columns: repeat(4, 1fr);
   }
+}
+
+/* The Notes an answer cited. Not the home grid: these are a handful of cards inside a 620px
+ * sheet, read in order rather than scanned as a field, so they stack full-width instead of
+ * splitting the sheet into tracks too narrow to hold a title. */
+.citations {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+/* A grid card is floored at a full card's height so a row of them shares one height. Out of the
+ * grid that floor is just dead space between the tags and the date, so a cited card sizes to its
+ * own content. */
+.citations .card {
+  min-height: 0;
 }
 
 /* A card is stock resting on the page: the same raised surface, radius and shadow as a Note,

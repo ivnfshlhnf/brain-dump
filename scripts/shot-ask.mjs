@@ -47,11 +47,16 @@ function cardHtml(c) {
 
 // The synthesized answer plus the Notes it drew on, as the same cards the grid shows — so checking
 // the answer against the user's own words is one tap into the Note sheet.
+//
+// NOTE: this is a hand-written *replica* of the Ask sheet's markup, not the sheet itself — the
+// script avoids a live LLM on purpose. It therefore has to be kept in sync by hand: it once went
+// on photographing a `.grid` container for a whole fix because the real component had moved to
+// `.citations` and nothing connected the two. If you change the citations markup, change it here.
 const ANSWER_BODY = `
   <section class="answer">
     <p>Water the basil twice a day while this heat lasts — once a day is not enough, and the plant on the windowsill has been telling you that all week.</p>
     <p class="rule-label">sources</p>
-    <div class="grid">
+    <div class="citations">
       ${cardHtml({ title: 'Water the plants before the basil gives up', category: 'productivity', summary: 'A reminder to water the plants before the basil on the windowsill gives up entirely.', tags: ['home', 'plants', 'basil', 'summer'], date: '8/20/2026' })}
       ${cardHtml({ title: 'Grinder settings for the new beans', category: 'tools', summary: 'The new single-origin needs a finer grind than the old blend.', tags: ['coffee', 'grinder'], date: '8/18/2026' })}
     </div>
