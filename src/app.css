@@ -1,19 +1,29 @@
-/* Brain-dump — the design system.
+/* Brain-dump — the Rolodex design system. DESIGN.md is the authority for what follows.
  *
- * The app is a press: it takes something molten (a Dump — verbatim, unstructured) and sets
- * it into something permanent (a Note in the Vault). State is therefore the material, and
- * exactly two accents carry it:
+ * The view is a self-sorting grid of cards on a near-neutral ground (#15161b, dark leading;
+ * warm paper #faf9f7 paired). Two ideas hold the visual world together.
  *
- *   ember — uncommitted. The Dump, the preview, the five-second countdown.
- *   set   — in the Vault. The saved path, Related links, Ask citations.
+ * One Voice. A single blue accent (#6ea8d8 dark / #3a5a8a light) is the only state colour, and
+ * it is budgeted to ≤10% of any screen — a focus ring, a primary button, the "+N more" pointer,
+ * the burn countdown while a Note is still wet. Two further hues are permitted only where their
+ * state already has a word: `filed` green for the capture-confirmed strip and the committed burn
+ * endpoint, `stranded` red for the rejected strip and a Stranded card's edge. They never appear
+ * where their word does not.
  *
- * Neither colour appears anywhere it does not mean that. If you reach for ember as
- * decoration, the system is broken.
+ * Category is not decoration. Colour also carries Category — one hue per member, derived by
+ * golden angle — but that hue appears in exactly two places: a card's 1px left edge and its
+ * category chip. Nowhere else. A card has no other border; the rest of it is open, so the grid
+ * reads as one quiet field. Tags are neutral mono and carry no hue.
  *
- * Two faces, no third. The machine speaks in mono (labels, tags, paths, wikilinks,
- * frontmatter keys); your thought is set in serif (the Dump you type, titles, bodies,
- * summaries). The contrast is the idea: the scaffolding is the app's job, the thought is
- * yours.
+ * Two voices, no third. The machine scans in mono (labels, tags, paths, wikilinks, dates,
+ * frontmatter keys); your thought reads in serif — the words you captured, titles, bodies,
+ * summaries. The type system encodes whose words these are, not how finished they are, so a raw
+ * Dump on a Pending card is already set in the serif it will keep as a Note.
+ *
+ * State is the only thing that lifts. A card rests on a hairline shadow; the diffuse shadow is
+ * reserved for the hover a door invites — never decoration on the resting page. The wet-to-dry
+ * countdown (accent → filed) carries over from the Field Notebook; the palette that named it
+ * did not.
  *
  * Fonts are self-hosted, not fetched from a CDN — this is an offline-capable PWA with an
  * offline outbox, and a webfont request is exactly what fails when the app matters most.
