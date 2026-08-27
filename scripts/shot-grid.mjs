@@ -52,7 +52,7 @@ function noteHtml(c, isWet = false) {
   const hue = hueFor(c.category);
   const catClass = `${hue !== null ? ' card card--cat' : ' card'}${isWet ? ' card--wet' : ''}`;
   const catStyle = hue !== null ? ` style="--cat-hue:${hue}"` : '';
-  const tags = c.tags.slice(0, 3).map((t) => `<span class="card__tag">${t}</span>`).join('');
+  const tags = c.tags.slice(0, 3).map((t) => `<span class="card__tag">#${t}</span>`).join('');
   const more = c.tags.length > 3 ? `<span class="card__tag-more">+${c.tags.length - 3} more</span>` : '';
   return [
     `<article class="${catClass.trim()}"${catStyle}>`,
@@ -67,7 +67,7 @@ function noteHtml(c, isWet = false) {
 
 function pendingHtml(c) {
   return [
-    '<article class="card card--open">',
+    '<article class="card card--open card--pending">',
     '<p class="card__category">Pending</p>',
     `<h3 class="card__title card__title--raw">${c.words}</h3>`,
     `<p class="card__date">${c.date}</p>`,
@@ -77,7 +77,7 @@ function pendingHtml(c) {
 
 function strandedHtml(c) {
   return [
-    '<article class="card card--open">',
+    '<article class="card card--open card--stranded">',
     '<p class="card__category">Stranded</p>',
     `<h3 class="card__title card__title--raw">${c.words}</h3>`,
     `<p class="card__summary">${c.reason}</p>`,
@@ -90,13 +90,17 @@ function strandedHtml(c) {
   ].join('');
 }
 
-// The three bands in DOM order: Pending, Stranded, Notes — each its own `.grid`, so the open
-// thoughts occupy their own row(s) pinned above the Note cards (acceptance #6).
+// One grid, three bands pinned in DOM order: Pending, then Stranded, then Notes (reverse-
+// chronological) — the band is an ordering within the one grid, not a second grid, so cards stay
+// uniform and no row is left half-empty (acceptance #6 / DESIGN.md). Mirrors the merged `{#if}`
+// block in src/App.svelte; update this if the card structure there changes.
 function bandsHtml() {
   return [
-    pending.length ? `<div class="grid">${pending.map(pendingHtml).join('')}</div>` : '',
-    stranded.length ? `<div class="grid">${stranded.map(strandedHtml).join('')}</div>` : '',
-    `<div class="grid">${notes.map((c, i) => noteHtml(c, wet && i === 0)).join('')}</div>`,
+    `<div class="grid">`,
+    pending.map(pendingHtml).join(''),
+    stranded.map(strandedHtml).join(''),
+    notes.map((c, i) => noteHtml(c, wet && i === 0)).join(''),
+    `</div>`,
   ].join('');
 }
 

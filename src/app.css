@@ -422,7 +422,7 @@ button {
   color: var(--text);
   background: transparent;
   border: 1px solid var(--rule-soft);
-  border-radius: var(--radius);
+  border-radius: var(--r-lg);
   cursor: pointer;
   box-sizing: border-box;
   /* Nothing moves silently: every state a control can be in resolves over one beat,
@@ -455,6 +455,7 @@ button.primary {
   color: var(--accent-ink);
   background: var(--accent);
   border-color: var(--accent);
+  border-radius: var(--r-xl);
   font-weight: 500;
 }
 
@@ -494,7 +495,7 @@ textarea {
   color: var(--text);
   background: var(--surface-2);
   border: 1px solid var(--rule);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   padding: var(--s2);
   box-sizing: border-box;
   width: 100%;
@@ -594,8 +595,7 @@ textarea.dump {
   margin: var(--s3) 0 0;
   padding: var(--s2) var(--s3);
   border: 1px solid var(--rule);
-  border-left: 3px solid var(--rule);
-  border-radius: var(--radius);
+  border-radius: var(--r-xl);
   font-family: var(--mono);
   font-size: var(--label);
   letter-spacing: 0.03em;
@@ -603,10 +603,22 @@ textarea.dump {
   background: var(--surface);
 }
 
-/* A subtle accent for the kinds that hold for a reason — lost connection, rejected setting.
-   The word is always the signal; this only gives the eye a place to land. */
-.status-strip--alert {
-  border-left-color: var(--stranded);
+/* The three kinds the strip carries (DESIGN.md status line). The word is always the signal; the
+ * tint only gives the eye a place to land — never colour alone.
+ *   caught      — a capture landed. filed tint + border, fades on its own (~3s).
+ *   connection  — lost or restored. a dashed neutral; holds until cleared.
+ *   rejected    — a settings rejection. stranded tint + border; holds until cleared. */
+.status-strip--caught {
+  background: color-mix(in oklab, var(--filed), var(--surface) 86%);
+  border-color: color-mix(in oklab, var(--filed), var(--rule) 45%);
+}
+.status-strip--connection {
+  border: 1px dashed var(--dashed);
+  background: var(--surface);
+}
+.status-strip--rejected {
+  background: color-mix(in oklab, var(--stranded), var(--surface) 86%);
+  border-color: color-mix(in oklab, var(--stranded), var(--rule) 45%);
 }
 
 .status-strip__text {
@@ -1086,11 +1098,10 @@ textarea.dump {
  * the date pinned to the bottom — the same rule DESIGN.md sets for the finished grid. */
 .card {
   background: var(--surface);
-  border: 1px solid var(--rule);
-  /* The left edge carries a Category's hue (ticket 04): 3px, neutral by default, coloured for a
-   * member card via `.card--cat` + the inline `--cat-hue`. The 2px extra over the 1px border is
-   * uniform across member cards, so the grid stays aligned. */
-  border-left: 3px solid var(--rule);
+  /* A card's identity is a single 1px left edge in its Category hue (set via `.card--cat` +
+   * the inline `--cat-hue`). No other border — DESIGN.md has an explicit Don't on a thicker
+   * edge, and the rest of the card is open, so the grid reads as one quiet field. */
+  border-left: 1px solid var(--rule);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
   padding: var(--s3);
@@ -1102,6 +1113,7 @@ textarea.dump {
    * the last row has no taller sibling to stretch to, so floor it at a full card's height
    * (category + two-line title + two-line summary + tags + date) to keep the grid uniform. */
   min-height: 12rem;
+  transition: transform var(--speed) var(--ease), box-shadow var(--speed) var(--ease);
 }
 
 /* A Note card is a door into the full Note (ticket 06): the whole card opens the sheet, so it
@@ -1114,6 +1126,21 @@ textarea.dump {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+/* A door lifts when reached for (State-Only Lift Rule): the resting card carries only a hairline
+ * shadow, and the diffuse shadow is reserved for the hover/active state — the only place a shadow
+ * is allowed to decorate. Gated behind hover capability so touch never gets a stuck-up card, and
+ * the lift is dropped entirely under reduced motion (the hairline shadow still conveys the state). */
+@media (hover: hover) {
+  .card--door:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lift);
+  }
+}
+@media (hover: hover) and (prefers-reduced-motion: reduce) {
+  .card--door:hover {
+    transform: none;
+  }
+}
 
 /* A member-Category card: its left edge takes the member's hue. `--cat-hue` is set inline per
  * card; the lightness/chroma are per scheme. `uncategorized` (and the dashed Pending/Stranded
@@ -1122,21 +1149,20 @@ textarea.dump {
   border-left-color: oklch(var(--cat-edge-l) var(--cat-edge-c) var(--cat-hue));
 }
 
-/* The Category chip: a fit-content pill, mono uppercase. Neutral by default — the same quiet
+/* The Category chip: a fit-content chip, mono lowercase. Neutral by default — the same quiet
  * treatment a Tag gets — so `uncategorized` and the Pending/Stranded status labels carry no hue
  * (the absence of a Category is not a colour). A member card colours the chip with its hue. */
 .card__category {
   font-family: var(--mono);
   font-size: var(--label);
   letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--text-dim);
   display: inline-flex;
   align-items: center;
   width: fit-content;
   max-width: 100%;
-  padding: 0.1rem 0.5rem;
-  border-radius: 9999px;
+  padding: 0.1rem 0.42rem;
+  border-radius: var(--r-xs);
   background: transparent;
   margin: 0;
 }
@@ -1186,12 +1212,24 @@ textarea.dump {
   color: var(--text-dim);
   display: flex;
   flex-wrap: wrap;
+  align-items: baseline;
   gap: var(--s1) var(--s2);
   margin: 0;
 }
 
+/* A Tag is neutral mono (DESIGN.md): a surface-2 fill, mid text, the same 3px radius as the
+ * Category chip. It never carries hue — that is Category's only job. */
+.card__tag {
+  background: var(--surface-2);
+  color: var(--text-mid);
+  border-radius: var(--r-xs);
+  padding: 0.1rem 0.42rem;
+}
+
+/* "+N more" is the one warm signal in the tag row: it points at something, so it takes the accent
+ * rather than sitting with the neutral chips. */
 .card__tag-more {
-  color: var(--text);
+  color: var(--accent);
 }
 
 /* Pinned to the foot of the card so a row of cards shares one height. */
@@ -1204,19 +1242,37 @@ textarea.dump {
 }
 
 /* An open thought — a Pending or Stranded Dump — is not yet stock resting on the page. It is raw
- * scaffolding the app owes the user a Note for, so it wears a dashed rule and no fill or shadow:
- * visually distinct from the solid Note card, which is a finished thought. The grid reads as one
- * field, but an open card is a promise still to keep, not a thing filed. */
+ * scaffolding the app owes the user a Note for, so it sits on a quieter surface-2 fill with no
+ * resting shadow: visually distinct from the solid Note card, which is a finished thought. The
+ * kind sets its own left edge below; the rest of the card stays open like a filed one. */
 .card--open {
-  background: transparent;
-  border: 1px dashed var(--dashed);
+  background: var(--surface-2);
   box-shadow: none;
 }
 
-/* The raw capture words stay in the mono voice until Organize turns them into a serif thought —
- * the two-ink rule (serif = thought, mono = scaffolding) read across the grid's two card kinds. */
+/* Pending: captured, not yet a Note — a dashed neutral edge, the same dashed rule the Capture
+ * field uses to say "in progress". Recovery is automatic, so it carries no action and no hue. */
+.card--pending {
+  border-left: 2px dashed var(--dashed);
+}
+
+/* Stranded: a Note that was never written, or one that's gone. A solid stranded edge — the one
+ * place the stranded red rides — so the thing the user can act on is what carries the signal. */
+.card--stranded {
+  border-left: 1px solid var(--stranded);
+}
+
+/* A Stranded card's Category label rides the stranded tint, the same word-with-color rule the
+ * status strip uses: the word "Stranded" is the signal, the tint only gives it a place to land. */
+.card--stranded .card__category {
+  color: var(--stranded-tx);
+}
+
+/* The raw capture words are set in serif — the same face the capture field uses. The type system
+ * encodes whose words these are (the user's, in serif), not how finished they are, so a Dump on a
+ * Pending card reads in the same voice as the Note it will become (Q4). */
 .card__title--raw {
-  font-family: var(--mono);
+  font-family: var(--serif);
   font-size: var(--headline);
   font-weight: 400;
   line-height: 1.3;

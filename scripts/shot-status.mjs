@@ -162,7 +162,9 @@ for (const scheme of SCHEMES) {
           sheetOpen: !!document.querySelector('dialog.sheet:modal'),
           text: strip?.querySelector('.status-strip__text')?.textContent?.trim() ?? null,
           dismiss: !!strip?.querySelector('.status-strip__dismiss'),
-          alert: strip?.classList.contains('status-strip--alert') ?? false,
+          kind: ['caught', 'connection', 'rejected'].find((k) =>
+            strip?.classList.contains(`status-strip--${k}`),
+          ) ?? null,
         };
       });
 

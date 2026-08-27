@@ -1038,7 +1038,7 @@
     {/if}
     {#if card.tags.length}
       <p class="card__tags">
-        {#each card.tags.slice(0, 3) as tag}<span class="card__tag">{tag}</span>{/each}
+        {#each card.tags.slice(0, 3) as tag}<span class="card__tag">#{tag}</span>{/each}
         {#if card.tags.length > 3}<span class="card__tag-more">+{card.tags.length - 3} more</span>{/if}
       </p>
     {/if}
@@ -1101,7 +1101,9 @@
   {#if strip && !sheet}
     <div
       class="status-strip"
-      class:status-strip--alert={strip.kind === 'connection-lost' || strip.kind === 'config-rejected'}
+      class:status-strip--caught={strip.kind === 'capture-confirmed'}
+      class:status-strip--connection={strip.kind === 'connection-lost' || strip.kind === 'connection-restored'}
+      class:status-strip--rejected={strip.kind === 'config-rejected'}
       aria-live="polite"
     >
       <span class="status-strip__text">{strip.message}</span>
@@ -1146,12 +1148,16 @@
   {/if}
   {#if pendingError}<p class="status err" aria-live="polite">{pendingError}</p>{/if}
 
-  {#if pendingRecords.length}
-    <!-- Pending Dumps: captured, not yet a Note. Dashed and hue-less — raw scaffolding the app
-         owes the user a Note for — with no actions, because recovery is automatic. -->
+  <!-- One grid, three bands. Pending and Stranded pin to the top ahead of the Notes (which
+       follow reverse-chronologically), pinning within the one grid so cards stay uniform and no
+       row is left half-empty (spec: the band is an ordering, not a second grid). An open card
+       is hue-less — state and Category never compete for the same signal. -->
+  {#if pendingRecords.length || strandedInVault.length || cards.length}
     <div class="grid">
       {#each pendingRecords as r (r.dump.id)}
-        <article class="card card--open">
+        <!-- Pending: captured, not yet a Note. Dashed and hue-less, no actions (recovery is
+             automatic). -->
+        <article class="card card--open card--pending">
           <p class="card__category">Pending</p>
           <h3 class="card__title card__title--raw">{firstLine(r.dump.content)}</h3>
           {#if r.lastError}
@@ -1160,17 +1166,11 @@
           <p class="card__date">{new Date(r.dump.createdAt).toLocaleDateString()}</p>
         </article>
       {/each}
-    </div>
-  {/if}
-
-  {#if strandedInVault.length}
-    <!-- Stranded Dumps: a Note was never written, or the one written is gone. Same dashed
-         card, but it carries the reason and the two things the user can do about it — Retry
-         (Organize an unfiled Dump, restore a deleted one) and Dismiss — right where they
-         found it. -->
-    <div class="grid">
       {#each strandedInVault as s (s.dump.id)}
-        <article class="card card--open">
+        <!-- Stranded: a Note was never written, or the one written is gone. Same open card,
+             stranded-edged, carrying the reason and the two things the user can do — Retry and
+             Dismiss — right where they found it. -->
+        <article class="card card--open card--stranded">
           <p class="card__category">Stranded</p>
           <h3 class="card__title card__title--raw">{firstLine(s.dump.content)}</h3>
           <p class="card__summary">
@@ -1199,26 +1199,17 @@
           <p class="card__date">{new Date(s.dump.createdAt).toLocaleDateString()}</p>
         </article>
       {/each}
-    </div>
-  {/if}
-
-  {#if cards.length}
-    <div class="grid">
       {#each cards as card (card.path)}
         {@render noteCard(card)}
       {/each}
     </div>
-  {:else if cardsLoaded && !pendingRecords.length && !strandedInVault.length}
-    <!-- An empty Vault is calm, not broken: show where the first card will land. The placeholder
-         waits only when there are no open thoughts either — a Pending or Stranded card is
-         already something on screen. -->
+  {:else if cardsLoaded}
+    <!-- An empty Vault is calm, not broken: show where the first card will land. -->
     <div class="grid">
       <p class="card-placeholder">Your first thought will land here.</p>
     </div>
-  {:else if !pendingRecords.length && !strandedInVault.length}
-    <!-- A cold or failed cache never blocks capture: no spinner, just the grid frame. Open
-         thoughts, when present, already fill the surface, so the empty frame is only for the
-         truly empty case. -->
+  {:else}
+    <!-- A cold or failed cache never blocks capture: no spinner, just the grid frame. -->
     <div class="grid"></div>
   {/if}
   </section>
