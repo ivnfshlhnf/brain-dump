@@ -59,3 +59,17 @@ leave.
   `prototype.html`, its mockups and its Impeccable critiques record how this direction was
   found. Its `spec.md`, `DESIGN.md` and `PRODUCT.md` predate the Stranded work and use words
   `CONTEXT.md` rejects; the buildable spec at `.scratch/rolodex/spec.md` supersedes them.
+
+## Clarification (2026-08-27)
+
+Added after an audit found the shipped app running the Field Notebook's palette under the
+Rolodex's architecture. The sentence above — *"The two-accent discipline is spent"* — turned out
+to read two ways, and the implementation took the wrong one.
+
+It means the two accents were **replaced**, not kept and supplemented. What carried over from the
+Field Notebook is the list in the Consequences and nothing beyond it: the two type faces, the rule
+that a state always rides a word and never colour alone, and the wet-to-dry countdown. **The
+palette did not survive.** Nor did the radius or spacing ladders. `DESIGN.md` is the authority for
+all three, and `ember` / `set` / `alarm` are retired along with the design that named them.
+
+The decision itself is unchanged; only this ambiguity is resolved.

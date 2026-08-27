@@ -127,8 +127,8 @@ unforgivable failure; every other decision bends to it.
 Spartan and nocturnal. Dark by default, surfaces nearly monochrome at rest — the ground, the
 cards, and the rules are all close in value, so the page reads as a quiet field until
 something moves. Two things move: the **category hues** (one per card, the only place color
-spends freely) and the single **blue accent** (the wet/organizing state, the Ask entry point,
-and the Ask answer). Everything else — dates, paths, tags, labels, buttons — stays neutral
+spends freely) and the single **blue accent** (the Organizing state, the just-filed card, the
+Ask entry point, and the Ask answer). Everything else — dates, paths, tags, labels, buttons — stays neutral
 monospaced metadata. Restraint is the default; color is spent deliberately, never
 decoratively.
 
@@ -153,9 +153,9 @@ follows as a complete set. State colors are separate from category hues — stat
 category is eight hues.
 
 ### Primary
-- **Accent** (#6ea8d8, oklch(0.710 0.093 244.6)): the one state color. The wet/organizing
-  status fill, the Ask entry point and answer surface, focus rings, the countdown, the
-  capture-field caret and selection, hover accents on controls. Saturated against the
+- **Accent** (#6ea8d8, oklch(0.710 0.093 244.6)): the one state color. The Organizing status
+  fill, the just-filed (**wet**) card's ring, the Ask entry point and answer surface, focus
+  rings, the countdown, the capture-field caret and selection, hover accents on controls. Saturated against the
   near-monochrome ground, which is the point — it is the only thing that signals "active."
   Used on ≤10% of any screen; its rarity is its signal.
 
@@ -211,8 +211,8 @@ dim `#737373` / faint `#a0a0a0`. Accent deepens to `#3a5a8a` (it must carry more
 white), filed to `#22745a`, stranded to `#c0392b`, pending to `#9a9a8e`. Category hues use the
 same golden-angle positions at a darker lightness and higher chroma — `oklch(0.48 0.13 h)` in
 place of dark's `oklch(0.66 0.12 h)` — so a Category keeps its identity across themes while
-carrying enough weight on paper. Their chips drop to a 0.14 alpha tint. The wet status inverts: a 0.1 accent tint with accent text and a 1px accent border,
-instead of the solid accent fill used in dark.
+carrying enough weight on paper. Their chips drop to a 0.14 alpha tint. The Organizing status inverts: a 0.1 accent tint with
+accent text and a 1px accent border, instead of the solid accent fill used in dark.
 
 ### Named Rules
 **The One Voice Rule.** The blue accent is the only state color and is used on ≤10% of any
@@ -265,6 +265,12 @@ collapses to two equal columns at a `.5rem` gap. Cards are uniform height — ti
 clamped summary, up to three tag chips + a `+N more`, and a date pinned to the bottom — so the
 grid reads as a true index, not a feed.
 
+**Pending and Stranded cards pin to a band at the top**, ahead of the Notes, which follow in
+reverse chronological order. The pinning is required by the domain rather than chosen for
+looks: Stranded is defined as always surfaced, and chronological placement makes that promise
+false the moment the Vault outgrows one screen. They pin *within the one grid* — the band is an
+ordering, not a second grid — so cards stay uniform and no row is left half-empty.
+
 Four full-screen sheets (Capture, Ask, Note, Settings) slide up over the grid
 (`transform: translateY(100%) → 0`, `.28s`) and return to it; the grid never scrolls into a
 sub-page. Each sheet centers a 620px-max inner column with a top bar, a scrolling body, and a
@@ -292,6 +298,13 @@ drop-shadow. Focus is a 2px solid accent ring (`outline-offset: 2px`), not a glo
   paired with `-2px` translate. The only place a diffuse shadow appears.
 - **Wet inset** (`0 0 0 2px var(--accent) inset`): the just-filed/highlighted card. A ring, not
   a shadow.
+
+**Wet names exactly one state**: a Note just filed, still inside the window where the user can
+intervene — the ink has not dried. A Dump the app is still working on is **Organizing**, and a
+Dump captured with no Note yet is **Pending** (`CONTEXT.md`). The word used to cover both ends
+of that journey, which made it useless at either; it now covers only the filed end. Wet is a
+view state and deliberately not in the glossary — the Vault cannot tell a Note filed four
+seconds ago from one filed last week.
 
 ### Named Rules
 **The State-Only Lift Rule.** Shadows respond to state (hover, wet), never decorate a resting
@@ -378,9 +391,12 @@ border + chip and never touches a button.
 
 ### Signature: the Burn Edge
 The new-note preview carries a 3px accent edge bar at its top that drains left-to-right over
-5s (`@keyframes burn` width 100%→0) — a literal countdown to auto-save. Editing any field or
-pressing hold pauses it (`animation-play-state: paused`); the edge is the clock. It is the one
-authored motion moment and it carries information (time-to-commit), not decoration.
+5s (`@keyframes burn` width 100%→0) — a literal countdown to auto-save. **Hold cancels the
+countdown; it does not pause it.** The edge stops and stays stopped, and the only thing that
+files the Note after that is the user pressing the primary action — a clock the user stopped
+never restarts behind them. An unconfirmed Append holds the edge full from the start and never
+auto-saves at all. The edge is the clock. It is the one authored motion moment and it carries
+information (time-to-commit), not decoration.
 
 ## Do's and Don'ts
 
@@ -407,7 +423,7 @@ authored motion moment and it carries information (time-to-commit), not decorati
   stay accent or neutral.
 - **Don't** add a colored `border-left` above 1px on a filed card (a Pending card's 2px is
   dashed neutral, a different signal). The 1px category edge is the card's whole identity.
-- **Don't** spread the blue accent thin — it is the only state color and the wet/Ask signal;
+- **Don't** spread the blue accent thin — it is the only state color and the Organizing/wet/Ask signal;
   using it decoratively destroys its meaning.
 - **Don't** use a third type family, or a display sans for headings. Serif reads, mono scans.
 - **Don't** let a state color stand alone without a word, or a status hold the user hostage —
