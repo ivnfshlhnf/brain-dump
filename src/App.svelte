@@ -1261,6 +1261,13 @@
         {:else}
           <!-- The whole Note, before it is committed. You are approving a Note, so you are
                shown one — every field of it, at full length. -->
+          <!-- The raw thought above what it became: the verbatim original, kept and quoted in
+               the serif voice so the user's own words stay distinct from the organized Note
+               below. The same box appears on the committed Note sheet (DESIGN.md). -->
+          <div class="your-words">
+            <p class="your-words__label">your original words</p>
+            <p class="your-words__text">{session.dump.content}</p>
+          </div>
           <article class="note">
             {#key contextRevision}
               <div class="burn" class:burn--held={held || (session.match.kind === 'append' && !appendConfirmed)}></div>
@@ -1341,18 +1348,25 @@
           {#if !session}
             <button class="primary" on:click={captureDump} disabled={busy || !text.trim()}>
               {busy ? 'Capturing…' : 'Capture'}
+              <span class="primary__sub">save the raw thought</span>
             </button>
           {:else if session.match.kind === 'append' && !appendConfirmed}
             <!-- The app files and the user signs once: the suggested Append is the primary
                  action, and founding a new Note stays available as the quiet override. Nothing
                  files until one of them is pressed. -->
-            <button class="primary" on:click={confirmAppend}>Append</button>
+            <button class="primary" on:click={confirmAppend}>
+              Append
+              <span class="primary__sub">add to the matched note</span>
+            </button>
             <button on:click={chooseNewNote}>Save as new Note</button>
           {:else}
             <!-- "Save now" forces the autosave, and after a Hold it is the only thing that
                  files the Note. It is only shown where a save will actually happen — an
                  unconfirmed append no-ops, so on that path the two buttons above are the save. -->
-            <button class="primary" on:click={() => autosaver.flush()}>Save now</button>
+            <button class="primary" on:click={() => autosaver.flush()}>
+              Save now
+              <span class="primary__sub">file to the vault</span>
+            </button>
             {#if !held}
               <button on:click={holdCapture}>Hold</button>
             {/if}
@@ -1435,9 +1449,12 @@
 
             {#if noteView.dump}
               <!-- The verbatim Dump: the user's original words, kept and reachable but not the
-                   headline. Context, if the capture added any, follows it. -->
-              <p class="rule-label">your original</p>
-              <div class="verbatim">{noteView.dump.content}</div>
+                   headline. The same dashed provenance box as the capture preview; Context, if
+                   the capture added any, follows it. -->
+              <div class="your-words">
+                <p class="your-words__label">your original words</p>
+                <p class="your-words__text">{noteView.dump.content}</p>
+              </div>
               {#if noteView.dump.context}
                 <p class="rule-label">context</p>
                 <div class="verbatim">{noteView.dump.context}</div>
@@ -1460,6 +1477,10 @@
             <button on:click={reorganizeCurrentNote} disabled={reorganizing}>
               {reorganizing ? 'Re-organizing…' : 'Re-organize'}
             </button>
+            <!-- The trailing ghost door back into the Vault (DESIGN.md): the eyebrow already
+                 links the path; this is the quiet, right-aligned way out for the reader who is
+                 done. -->
+            <a class="btn-ghost" href={obsidianUrl(settings.vaultName, noteView.path)}>open in obsidian →</a>
           {/if}
         </div>
       </div>
@@ -1496,6 +1517,7 @@
         <div class="actions">
           <button class="primary" on:click={askQuestion} disabled={asking || !question.trim()}>
             {asking ? 'Reading your vault…' : 'Ask'}
+            <span class="primary__sub">search your vault</span>
           </button>
         </div>
 
@@ -1562,7 +1584,10 @@
     </fieldset>
 
     <div class="actions">
-      <button class="primary" on:click={saveConfig}>Save settings</button>
+      <button class="primary" on:click={saveConfig}>
+        Save settings
+        <span class="primary__sub">commit both fieldsets</span>
+      </button>
     </div>
 
     <p class="rule-label">connection</p>

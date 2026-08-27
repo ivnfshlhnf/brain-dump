@@ -67,7 +67,7 @@ function noteHtml({ tags, body, summary, keyPoints, related, dump, context, cate
         ? `<ul class="links">${related.map((l) => `<li><a class="vault-link" href="${linkHref(VAULT, l)}">${linkText(l)}</a></li>`).join('')}</ul>`
         : `<p class="pending">No related documents.</p>`),
     dump
-      ? `<p class="rule-label">your original</p><div class="verbatim">${dump}</div>` +
+      ? `<div class="your-words"><p class="your-words__label">your original words</p><p class="your-words__text">${dump}</p></div>` +
         (context ? `<p class="rule-label">context</p><div class="verbatim">${context}</div>` : '')
       : '',
   ];
@@ -111,9 +111,13 @@ const TAGS = {
 // (noteView is null).
 const GONE_BODY = '<p class="pending">This Note is no longer in your Vault.</p>';
 
+// The foot: Re-organize (the one in-sheet action) plus the trailing ghost door back into the
+// Vault (DESIGN.md line 340), right-aligned against it.
+const FOOT = `<button>Re-organize</button><a class="btn-ghost" href="${obsidianUrl(VAULT, PATH)}">open in obsidian →</a>`;
+
 const STATES = [
-  { name: 'full', body: noteHtml(FULL), foot: '<button>Re-organize</button>' },
-  { name: 'tags', body: noteHtml(TAGS), foot: '<button>Re-organize</button>' },
+  { name: 'full', body: noteHtml(FULL), foot: FOOT },
+  { name: 'tags', body: noteHtml(TAGS), foot: FOOT },
   { name: 'gone', body: GONE_BODY, foot: '' },
 ];
 
@@ -193,7 +197,6 @@ for (const scheme of SCHEMES) {
         const inner = document.querySelector('.sheet__inner');
         const pathLink = document.querySelector('.eyebrow .vault-link');
         const tagsDd = document.querySelector('.meta dd');
-        const verbatim = document.querySelector('.verbatim');
         return {
           modal: d?.matches(':modal') ?? false,
           coversViewport:
@@ -204,7 +207,8 @@ for (const scheme of SCHEMES) {
           pathIsObsidian: pathLink ? pathLink.getAttribute('href').startsWith('obsidian://open') : null,
           // Every Tag is shown — no `+N more` truncation in the sheet.
           tagsShown: tagsDd ? tagsDd.textContent.trim().split(/\s{2,}/).length : 0,
-          verbatimPresent: verbatim !== null,
+          yourWordsPresent: document.querySelector('.your-words') !== null,
+          ghostPresent: document.querySelector('.sheet__foot .btn-ghost') !== null,
           buttons: [...document.querySelectorAll('.sheet__foot button')].map((b) => b.textContent.trim()),
           focused: document.activeElement?.className || null,
         };

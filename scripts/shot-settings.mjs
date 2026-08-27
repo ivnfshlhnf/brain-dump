@@ -178,9 +178,11 @@ for (const scheme of SCHEMES) {
             Math.round(d.getBoundingClientRect().width) >= document.documentElement.clientWidth,
           innerWidth: inner ? Math.round(inner.getBoundingClientRect().width) : null,
           fieldsets: document.querySelectorAll('.sheet__body .field-group').length,
-          saveButton: !![...document.querySelectorAll('.sheet__body button')].find(
-            (b) => b.textContent.trim() === 'Save settings',
-          ),
+          saveButton: !![...document.querySelectorAll('.sheet__body button')].find((b) => {
+            const sub = b.querySelector('.primary__sub');
+            const label = sub ? b.textContent.replace(sub.textContent, '').trim() : b.textContent.trim();
+            return label === 'Save settings';
+          }),
           checks: document.querySelectorAll('.sheet__body .checks li').length,
           stranded: document.querySelectorAll('.sheet__body .stranded li').length,
           diagnostics: document.querySelectorAll('.sheet__body .diagnostics li').length,

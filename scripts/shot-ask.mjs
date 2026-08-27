@@ -57,8 +57,8 @@ const ANSWER_BODY = `
     <p>Water the basil twice a day while this heat lasts — once a day is not enough, and the plant on the windowsill has been telling you that all week.</p>
     <p class="rule-label">sources</p>
     <div class="citations">
-      ${cardHtml({ title: 'Water the plants before the basil gives up', category: 'productivity', summary: 'A reminder to water the plants before the basil on the windowsill gives up entirely.', tags: ['home', 'plants', 'basil', 'summer'], date: '8/20/2026' })}
-      ${cardHtml({ title: 'Grinder settings for the new beans', category: 'tools', summary: 'The new single-origin needs a finer grind than the old blend.', tags: ['coffee', 'grinder'], date: '8/18/2026' })}
+      ${cardHtml({ title: 'Water the plants before the basil gives up', category: 'productivity', summary: 'A reminder to water the plants before the basil on the windowsill gives up entirely.', tags: ['home', 'plants', 'basil', 'summer'], date: 'AUG 20 · 14:00' })}
+      ${cardHtml({ title: 'Grinder settings for the new beans', category: 'tools', summary: 'The new single-origin needs a finer grind than the old blend.', tags: ['coffee', 'grinder'], date: 'AUG 18 · 09:15' })}
     </div>
   </section>`;
 

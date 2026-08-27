@@ -30,6 +30,10 @@ function previewHtml({ append = false, held = false } = {}) {
       ? 'Held — the countdown is stopped and won’t restart. It saves when you say so.'
       : 'Saves 5 seconds after you stop typing. Your verbatim original is kept.';
   return `
+    <div class="your-words">
+      <p class="your-words__label">your original words</p>
+      <p class="your-words__text">water the plants before the basil gives up — twice a day in this heat</p>
+    </div>
     <article class="note">
       <div class="burn${burnHeld}"></div>
       <p class="eyebrow">${eyebrow}</p>
@@ -55,9 +59,9 @@ function previewHtml({ append = false, held = false } = {}) {
 
 function footHtml({ append = false, held = false } = {}) {
   if (append) {
-    return '<button class="primary">Append</button><button>Save as new Note</button>';
+    return '<button class="primary">Append<span class="primary__sub">add to the matched note</span></button><button>Save as new Note</button>';
   }
-  return `<button class="primary">Save now</button>${held ? '' : '<button>Hold</button>'}`;
+  return `<button class="primary">Save now<span class="primary__sub">file to the vault</span></button>${held ? '' : '<button>Hold</button>'}`;
 }
 
 const STATES = [
@@ -125,7 +129,10 @@ for (const scheme of SCHEMES) {
               }
             : null,
           dumpFills: dump ? Math.round(dump.getBoundingClientRect().height) : null,
-          buttons: [...document.querySelectorAll('.sheet__foot button')].map((b) => b.textContent.trim()),
+          buttons: [...document.querySelectorAll('.sheet__foot button')].map((b) => {
+            const sub = b.querySelector('.primary__sub');
+            return sub ? b.textContent.replace(sub.textContent, '').trim() : b.textContent.trim();
+          }),
           focused: document.activeElement?.className || null,
         };
       });
