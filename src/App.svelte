@@ -465,15 +465,81 @@
   // single letter: c → Capture, a → Ask, s → Settings. They fire only on the home
   // surface — never while a sheet is open, never while a modifier is held (so the
   // browser keeps Cmd+S, Cmd+A, …), and never while the user is typing in a field.
+  // Chords (⌘K → Ask, ⌘, → Settings) are added on top: they fire even from a
+  // focused field, because a chord never conflicts with typing a plain letter.
   function onShortcutKey(e: KeyboardEvent) {
     if (sheet) return;
+    const key = e.key.toLowerCase();
+    // Chords first — they work anywhere on the home, including inside a field.
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
+      if (key === 'k') { e.preventDefault(); if (!vaultIsEmpty) openAsk(); }
+      else if (key === ',') { e.preventDefault(); openSettings(); }
+      return;
+    }
+    // Bare c/a/s fire only at rest: no modifier, not while typing in a field.
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
     const el = document.activeElement;
     if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el as HTMLElement)?.isContentEditable) return;
-    const key = e.key.toLowerCase();
     if (key === 'c') { e.preventDefault(); openCapture(); }
     else if (key === 'a') { if (!vaultIsEmpty) { e.preventDefault(); openAsk(); } }
     else if (key === 's') { e.preventDefault(); openSettings(); }
+  }
+
+  // ── Roving-tabindex grid navigation (branch 3) ────────────────────────────────
+  // Only the `.card--door` notes participate — Pending/Stranded cards carry their own
+  // action buttons and stay out of the roving set. The first door is the one tab stop
+  // (tabindex 0); the rest are -1, so Tab enters the grid once and the Arrow keys move
+  // that single stop across it. Arrows clamp at the grid edges (no wrap); the column
+  // count is read from the resolved grid template. The roving index resets to the
+  // first door whenever the grid's children change (a filed Note slots in, a reconcile
+  // drops a card) — the grid is the home, and the home re-anchors on change.
+  function rovingGrid(node: HTMLElement) {
+    let doors: HTMLElement[] = [];
+    let active = 0;
+
+    function relayout() {
+      doors = [...node.querySelectorAll<HTMLElement>('.card--door')];
+      if (active >= doors.length) active = 0;
+      doors.forEach((d, i) => (d.tabIndex = i === active ? 0 : -1));
+    }
+    function columnCount() {
+      const tmpl = getComputedStyle(node).gridTemplateColumns.trim();
+      if (!tmpl || tmpl === 'none') return 1;
+      return tmpl.split(/\s+/).length;
+    }
+    function onkeydown(e: KeyboardEvent) {
+      const door = (e.target as HTMLElement)?.closest('.card--door') as HTMLElement | null;
+      if (!door || !doors.includes(door)) return;
+      const i = doors.indexOf(door);
+      const c = columnCount();
+      let next = i;
+      if (e.key === 'ArrowRight') next = i + 1;
+      else if (e.key === 'ArrowLeft') next = i - 1;
+      else if (e.key === 'ArrowDown') next = i + c;
+      else if (e.key === 'ArrowUp') next = i - c;
+      else return;
+      e.preventDefault();
+      next = Math.max(0, Math.min(next, doors.length - 1));
+      if (next !== i) {
+        active = next;
+        doors.forEach((d, j) => (d.tabIndex = j === active ? 0 : -1));
+        doors[active].focus();
+      }
+    }
+
+    node.addEventListener('keydown', onkeydown);
+    relayout();
+    const mo = new MutationObserver(() => {
+      active = 0;
+      relayout();
+    });
+    mo.observe(node, { childList: true });
+    return {
+      destroy() {
+        node.removeEventListener('keydown', onkeydown);
+        mo.disconnect();
+      },
+    };
   }
 
   /** Ask the sheet to close; `onSettingsSheetClose` does the work, and it is the one way out. */
@@ -1077,7 +1143,7 @@
 <div class="page">
   <header class="masthead">
     <h1 class="wordmark"><b>brain</b>·dump</h1>
-    <button class="masthead__gear" on:click={openSettings} aria-label="settings" title="Settings (s)">
+    <button class="masthead__gear" on:click={openSettings} aria-label="settings" title="Settings (⌘, or s)">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <circle cx="12" cy="12" r="3" />
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
@@ -1164,7 +1230,7 @@
        row is left half-empty (spec: the band is an ordering, not a second grid). An open card
        is hue-less — state and Category never compete for the same signal. -->
   {#if pendingRecords.length || strandedInVault.length || cards.length}
-    <div class="grid">
+    <div class="grid" use:rovingGrid>
       {#each pendingRecords as r (r.dump.id)}
         <!-- Pending: captured, not yet a Note. Dashed and hue-less, no actions (recovery is
              automatic). -->
