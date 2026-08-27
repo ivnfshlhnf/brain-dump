@@ -1,7 +1,7 @@
 // Screenshot the home (ticket 10): the grid is the app's only persistent surface. The masthead
-// carries the wordmark and the settings gear; the grid's control row carries Capture and Ask;
-// Ask is disabled when the Vault is empty. Dark leads — dark is the default when the system
-// expresses no preference, light follows the system.
+// carries the wordmark and the settings gear; the control stack carries Catch (the dashed entry
+// point) and Ask; Ask is disabled when the Vault is empty. Dark leads — dark is the default when
+// the system expresses no preference, light follows the system.
 //
 // This is the view cutover, which has no operation seam (spec: "the view has no seam,
 // deliberately"), so like the other shot scripts this verifies how the home *looks* and *feels*:
@@ -110,14 +110,14 @@ await mkdir(outDir, { recursive: true });
   await page.waitForSelector('.card--door', { timeout: 5000 });
   await page.evaluate(() => document.fonts.ready);
 
-  // The home has the wordmark, the gear, and Capture + Ask in the control row (Ask enabled, the
+  // The home has the wordmark, the gear, and Catch + Ask in the control stack (Ask enabled, the
   // Vault is not empty).
   const home = await page.evaluate(() => ({
     wordmark: !!document.querySelector('.wordmark'),
     gear: !!document.querySelector('.masthead__gear'),
-    capture: !!document.querySelector('.grid-controls button.primary'),
-    ask: !!document.querySelector('.grid-controls button:not(.primary)'),
-    askDisabled: document.querySelector('.grid-controls button:not(.primary)')?.disabled ?? null,
+    catch: !!document.querySelector('.ctl-catch'),
+    ask: !!document.querySelector('.ctl-ask'),
+    askDisabled: document.querySelector('.ctl-ask')?.disabled ?? null,
   }));
 
   // The c/a/s shortcuts open the right sheet, one at a time — sheets do not nest. Wait for the
@@ -128,7 +128,7 @@ await mkdir(outDir, { recursive: true });
   // has settled, the way a user would encounter it.
   await page.waitForFunction(
     () => {
-      const b = document.querySelector('.grid-controls button:not(.primary)');
+      const b = document.querySelector('.ctl-ask');
       return !!b && !b.disabled;
     },
     null,
@@ -145,7 +145,7 @@ await mkdir(outDir, { recursive: true });
     try {
       await page.waitForFunction(() => !!document.querySelector('dialog.sheet:modal'), null, { timeout: 5000 });
     } catch (e) {
-      const st = await page.evaluate(() => ({ open: !!document.querySelector('dialog.sheet:modal'), askBtn: (() => { const b = document.querySelector('.grid-controls button:not(.primary)'); return b ? { disabled: b.disabled, text: b.textContent.trim() } : null; })(), active: document.activeElement?.tagName }));
+      const st = await page.evaluate(() => ({ open: !!document.querySelector('dialog.sheet:modal'), askBtn: (() => { const b = document.querySelector('.ctl-ask'); return b ? { disabled: b.disabled, text: b.textContent.trim() } : null; })(), active: document.activeElement?.tagName }));
       console.log(`ITER ${key} open-wait FAILED. DOM:`, JSON.stringify(st));
       throw e;
     }
@@ -207,8 +207,8 @@ for (const scheme of SCHEMES) {
     const metrics = await page.evaluate(() => ({
       wordmark: !!document.querySelector('.wordmark'),
       gear: !!document.querySelector('.masthead__gear'),
-      capture: !!document.querySelector('.grid-controls button.primary'),
-      ask: !!document.querySelector('.grid-controls button:not(.primary)'),
+      catch: !!document.querySelector('.ctl-catch'),
+      ask: !!document.querySelector('.ctl-ask'),
       sheetOpen: !!document.querySelector('dialog.sheet:modal'),
     }));
 

@@ -27,22 +27,22 @@ const hueFor = (category) =>
   category === 'uncategorized' ? null : (CATEGORIES.indexOf(category) * 137.5 + 30) % 360;
 
 const notes = [
-  { title: 'Why the adapter returns undefined', category: 'troubleshooting', summary: 'The PouchDB adapter returns undefined for a missing doc where the type says it throws — caught by a failing test, not by running the app.', tags: ['bug', 'pouchdb', 'adapter'], date: '8/21/2026' },
-  { title: 'Water the plants before the basil gives up', category: 'productivity', summary: 'A reminder to water the plants before the basil on the windowsill gives up entirely, which it has been threatening to do all week.', tags: ['home', 'plants', 'basil', 'routine', 'summer'], date: '8/20/2026' },
-  { title: 'Grinder settings for the new beans', category: 'tools', summary: 'The new single-origin needs a finer grind than the old blend; the old setting drowns it.', tags: ['coffee', 'grinder'], date: '8/18/2026' },
-  { title: 'The new single-origin is too bright', category: 'coffee', summary: '', tags: ['coffee'], date: '8/16/2026' },
-  { title: 'Birthday dinner for Dad', category: 'personal', summary: 'Book the place near the lake before it fills up — he does not want a party, just the family.', tags: ['family', 'birthday'], date: '8/15/2026' },
-  { title: 'A thought that never got a Category', category: 'uncategorized', summary: 'An older Note carrying a free-form Category that is not a member; it reads as uncategorized and stays neutral.', tags: ['legacy'], date: '8/12/2026' },
+  { title: 'Why the adapter returns undefined', category: 'troubleshooting', summary: 'The PouchDB adapter returns undefined for a missing doc where the type says it throws — caught by a failing test, not by running the app.', tags: ['bug', 'pouchdb', 'adapter'], date: 'AUG 21 · 20:30' },
+  { title: 'Water the plants before the basil gives up', category: 'productivity', summary: 'A reminder to water the plants before the basil on the windowsill gives up entirely, which it has been threatening to do all week.', tags: ['home', 'plants', 'basil', 'routine', 'summer'], date: 'AUG 20 · 14:00' },
+  { title: 'Grinder settings for the new beans', category: 'tools', summary: 'The new single-origin needs a finer grind than the old blend; the old setting drowns it.', tags: ['coffee', 'grinder'], date: 'AUG 18 · 09:15' },
+  { title: 'The new single-origin is too bright', category: 'coffee', summary: '', tags: ['coffee'], date: 'AUG 16 · 11:40' },
+  { title: 'Birthday dinner for Dad', category: 'personal', summary: 'Book the place near the lake before it fills up — he does not want a party, just the family.', tags: ['family', 'birthday'], date: 'AUG 15 · 19:00' },
+  { title: 'A thought that never got a Category', category: 'uncategorized', summary: 'An older Note carrying a free-form Category that is not a member; it reads as uncategorized and stays neutral.', tags: ['legacy'], date: 'AUG 12 · 08:25' },
 ];
 
 // A Pending Dump: captured, not yet a Note. Raw words in the mono voice, no actions.
 const pending = [
-  { words: 'kopi yang udah sebulan disimpen di freezer, masih bisa nggak ya', date: '8/22/2026' },
+  { words: 'kopi yang udah sebulan disimpen di freezer, masih bisa nggak ya', date: 'AUG 22 · 07:30' },
 ];
 
 // A Stranded Dump: raw words, the reason it is stranded, and Retry + Dismiss.
 const stranded = [
-  { words: 'bayar pajak motor yang jatuh tempo bulan depan', reason: 'never became a Note', date: '8/20/2026' },
+  { words: 'bayar pajak motor yang jatuh tempo bulan depan', reason: 'never became a Note', date: 'AUG 20 · 16:50' },
 ];
 
 // NOTE: this markup mirrors the `.card` / `.card--open` structure in src/App.svelte so the

@@ -95,7 +95,7 @@ const STATES = [
       // capture-confirmed via onStatus, and the Capture sheet closes back to the grid.
       await context.setOffline(true);
       await page.waitForFunction(() => !navigator.onLine);
-      await page.click('.grid-controls button:has-text("Capture")');
+      await page.click('.ctl-catch');
       await page.waitForSelector('dialog.sheet:modal', { timeout: 5000 });
       await page.fill('textarea', 'a thought captured while offline');
       await page.click('dialog.sheet button:has-text("Capture")');

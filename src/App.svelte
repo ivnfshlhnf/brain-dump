@@ -33,6 +33,7 @@
   import { createAutosaver } from './lib/autosave';
   import { createLog, createDevFileSink, type Log, type LogEvent } from './lib/logger';
   import { obsidianUrl, linkHref, linkText } from './lib/obsidian';
+  import { formatStamp } from './lib/format';
   import { checkConnections, type HealthReport, type CheckResult } from './lib/health';
   import { createCachingEmbedder } from './lib/embedding-cache';
   import { validateProviderUrl } from './lib/config';
@@ -1042,7 +1043,7 @@
         {#if card.tags.length > 3}<span class="card__tag-more">+{card.tags.length - 3} more</span>{/if}
       </p>
     {/if}
-    <p class="card__date">{new Date(card.createdAt).toLocaleDateString()}</p>
+    <p class="card__date">{formatStamp(card.createdAt)}</p>
   </article>
 {/snippet}
 
@@ -1075,7 +1076,7 @@
 
 <div class="page">
   <header class="masthead">
-    <h1 class="wordmark">brain-dump</h1>
+    <h1 class="wordmark"><b>brain</b>·dump</h1>
     <button class="masthead__gear" on:click={openSettings} aria-label="settings" title="Settings (s)">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <circle cx="12" cy="12" r="3" />
@@ -1086,28 +1087,38 @@
 
   <main>
   <section class="surface grid-surface">
-  <!-- The Capture control lives on the grid and never waits on the card read — the grid is
-       the road to capture, and capture friction is the one unforgivable failure. Ask lives
-       beside it, dimmed when there is nothing to ask of — an empty Vault answers nothing. -->
-  <div class="actions grid-controls">
-    <button class="primary" on:click={openCapture} title="Capture (c)">Capture</button>
-    <button on:click={openAsk} disabled={vaultIsEmpty} title={vaultIsEmpty ? 'Ask needs a Note to answer from' : 'Ask (a)'}>Ask</button>
+  <!-- The two stacked controls are the grid's primary nav (DESIGN.md): the dashed Catch entry
+       point — the one heavy dashed stroke, the door into the whole product — and the crisp Ask
+       beside it, dimmed when an empty Vault has nothing to answer from. Both read as fields to
+       write into, not buttons to press. -->
+  <div class="controls">
+    <button type="button" class="ctl ctl-catch" on:click={openCapture} title="Catch a thought (c)">
+      <span>Catch a thought…</span><span class="plus" aria-hidden="true">+</span>
+    </button>
+    <button type="button" class="ctl ctl-ask" on:click={openAsk} disabled={vaultIsEmpty} title={vaultIsEmpty ? 'Ask needs a Note to answer from' : 'Ask your notes (⌘K or a)'}>
+      <span>Ask your notes…</span><span class="kbd" aria-hidden="true">⌘K</span>
+    </button>
   </div>
 
   <!-- The cross-cutting status strip — grid-only, never inside a sheet (ticket 09). One live
        region, announced politely, carrying a word and never colour alone. A capture that landed
        fades on its own; a lost connection or a rejected setting holds, and either can be cleared
        immediately — including one the user would rather deal with later. -->
-  {#if strip && !sheet}
+  {#if !sheet}
     <div
       class="status-strip"
-      class:status-strip--caught={strip.kind === 'capture-confirmed'}
-      class:status-strip--connection={strip.kind === 'connection-lost' || strip.kind === 'connection-restored'}
-      class:status-strip--rejected={strip.kind === 'config-rejected'}
+      class:status-strip--idle={!strip}
+      class:status-strip--caught={strip?.kind === 'capture-confirmed'}
+      class:status-strip--connection={strip?.kind === 'connection-lost' || strip?.kind === 'connection-restored'}
+      class:status-strip--rejected={strip?.kind === 'config-rejected'}
       aria-live="polite"
     >
-      <span class="status-strip__text">{strip.message}</span>
-      <button class="status-strip__dismiss" on:click={clearStrip} aria-label="Dismiss status">Dismiss</button>
+      {#if strip}
+        <span class="status-strip__text">{strip.message}</span>
+        <button class="status-strip__dismiss" on:click={clearStrip} aria-label="Dismiss status">Dismiss</button>
+      {:else}
+        <span class="status-strip__text">all filed · nothing pending</span>
+      {/if}
     </div>
   {/if}
 
@@ -1163,7 +1174,7 @@
           {#if r.lastError}
             <p class="card__summary">{r.lastError}</p>
           {/if}
-          <p class="card__date">{new Date(r.dump.createdAt).toLocaleDateString()}</p>
+          <p class="card__date">{formatStamp(r.dump.createdAt)}</p>
         </article>
       {/each}
       {#each strandedInVault as s (s.dump.id)}
@@ -1196,7 +1207,7 @@
             {/if}
             <button on:click={() => dismissStranded(s)} disabled={!!organizingStranded}>Dismiss</button>
           </div>
-          <p class="card__date">{new Date(s.dump.createdAt).toLocaleDateString()}</p>
+          <p class="card__date">{formatStamp(s.dump.createdAt)}</p>
         </article>
       {/each}
       {#each cards as card (card.path)}

@@ -88,7 +88,7 @@ for (const scheme of SCHEMES) {
       await page.goto(url, { waitUntil: 'load' });
       await page.evaluate(() => document.fonts.ready);
       // The real thing: the grid's Capture control opens the app's own sheet.
-      await page.click('.grid-controls .primary');
+      await page.click('.ctl-catch');
       await page.waitForTimeout(350); // the sheet rises over 280ms
 
       if (state.preview) {

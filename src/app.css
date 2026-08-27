@@ -399,9 +399,15 @@ p {
   font-family: var(--mono);
   font-size: var(--label);
   font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: lowercase;
-  color: var(--text-dim);
+  letter-spacing: 0.04em;
+  color: var(--text-mid);
+}
+
+/* `brain` reads in full ink; `·dump` stays mid — the word is one mark in two voices, the dot a
+ * literal middle-dot (DESIGN.md §Navigation). */
+.wordmark b {
+  color: var(--text);
+  font-weight: 500;
 }
 
 /* The settings gear: the one control that lives in the masthead. An icon, not a tab — the
@@ -629,6 +635,15 @@ textarea.dump {
 .status-strip--rejected {
   background: color-mix(in oklab, var(--stranded), var(--surface) 86%);
   border-color: color-mix(in oklab, var(--stranded), var(--rule) 45%);
+}
+
+/* Idle is the absence of state: no chrome, no Dismiss, just the word centered in text-dim
+ * (DESIGN.md §Status line). It reads as quiet, not as a thing to act on. */
+.status-strip--idle {
+  justify-content: center;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-dim);
 }
 
 .status-strip__text {
@@ -1065,25 +1080,91 @@ textarea.dump {
   margin-bottom: 0;
 }
 
-.grid-controls {
-  flex-wrap: nowrap;
+/* ── The grid controls ────────────────────────────────────────────────── */
+
+/* Two stacked full-width controls (Catch / Ask) are the grid's primary nav (DESIGN.md). They
+ * read as fields to write into, not buttons to press: the dashed Catch is the one heavy dashed
+ * stroke in the system — "the entry point for the whole product" — and the crisp Ask sits below
+ * it. The label takes the mid voice at rest; reaching for either lifts it to ink and turns the
+ * border to the accent. */
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.ctl {
+  width: 100%;
+  text-align: left;
+  border-radius: var(--r-3xl);
+  padding: var(--s3) var(--s4);
+  min-height: 44px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--s2);
+  font-family: var(--mono);
+  font-size: var(--label);
+  color: var(--text-mid);
+  background: var(--surface);
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: border-color var(--speed) var(--ease), color var(--speed) var(--ease);
+}
+
+/* Catch a thought: the 1.5px dashed inviting border — the only heavy dashed stroke. The `+` is
+ * the accent, the one warm signal that this is the way in. */
+.ctl-catch {
+  border: 1.5px dashed var(--dashed);
+}
+.ctl-catch:hover:not(:disabled),
+.ctl-catch:focus-visible:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.ctl-catch .plus {
+  color: var(--accent);
+  font-size: var(--capture);
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* Ask your notes: a crisp solid border, the ⌘K hint as a mono chip on the right. Dimmed when the
+ * Vault is empty — an empty Vault answers nothing. */
+.ctl-ask {
+  border: 1px solid var(--rule);
+}
+.ctl-ask:hover:not(:disabled),
+.ctl-ask:focus-visible:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.ctl-ask:disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+.ctl .kbd {
+  font-family: var(--mono);
+  font-size: var(--label);
+  color: var(--accent);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  padding: 0.05rem 0.3rem;
+  line-height: 1;
 }
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: var(--s3);
 }
 
-@media (min-width: 36rem) {
+/* Below the card floor, two equal columns: the cards stay legible and the grid never drops to a
+ * single lonesome column. */
+@media (max-width: 35rem) {
   .grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-@media (min-width: 52rem) {
-  .grid {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: 1fr 1fr;
+    gap: var(--s2);
   }
 }
 
@@ -1247,6 +1328,7 @@ textarea.dump {
   font-family: var(--mono);
   font-size: var(--label);
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
   color: var(--text-dim);
   margin-top: auto;
 }

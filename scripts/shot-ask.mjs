@@ -124,7 +124,7 @@ for (const scheme of SCHEMES) {
       await page.evaluate(() => document.fonts.ready);
 
       // The real thing: the grid's Ask control opens the app's own sheet (ticket 10).
-      await page.click('.grid-controls button:has-text("Ask")');
+      await page.click('.ctl-ask');
       await page.waitForSelector('dialog.sheet:modal', { timeout: 5000 });
       await page.waitForTimeout(350); // the sheet rises over 280ms
 
