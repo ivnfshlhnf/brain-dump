@@ -205,7 +205,10 @@ for (const scheme of SCHEMES) {
       await page.waitForTimeout(120);
 
       const file = `${outDir}/${state.name}-${vp.name}-${scheme}.png`;
-      await page.locator('dialog.sheet').screenshot({ path: file });
+      // The viewport, not the sheet (AGENTS.md § View verification): a sheet scoped to itself
+      // photographs as full-bleed whether or not it actually covers the grid, which is the one
+      // thing "full-screen sheet" is claiming.
+      await page.screenshot({ path: file });
       console.log(`${state.name}/${vp.name}/${scheme} → ${file}`, JSON.stringify(metrics));
       await context.close();
     }

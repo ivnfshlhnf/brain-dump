@@ -166,8 +166,13 @@ for (const scheme of SCHEMES) {
         };
       });
 
+      // The viewport, not the element (AGENTS.md § View verification). This shot used to be
+      // `locator('.status-strip').screenshot()`, which is how the strip shipped with no border
+      // and no background — an element with no chrome photographs exactly like one with correct
+      // chrome — and sitting below the whole card grid, which an element-scoped shot cannot show
+      // at all. Where the strip sits relative to the controls and the grid is the point.
       const file = `${outDir}/${state.name}-${vp.name}-${scheme}.png`;
-      await page.locator('.status-strip').screenshot({ path: file });
+      await page.screenshot({ path: file });
       console.log(`${state.name}/${vp.name}/${scheme} → ${file}`, JSON.stringify(metrics));
       await context.close();
     }
