@@ -44,92 +44,143 @@
 }
 
 :root {
-  /* Raw values, kept separate from the resolved tokens so a pair can be recombined and so
-   * the no-light-dark() fallback below has something to switch. */
-  --ground-light: oklch(97% 0.008 240);
-  --ground-dark: oklch(21% 0.028 235);
-  --raised-light: oklch(100% 0 0);
-  --raised-dark: oklch(25% 0.03 235);
-  --text-light: oklch(28% 0.02 240);
-  --text-dark: oklch(92% 0.012 230);
-  --dim-light: oklch(52% 0.02 240);
-  --dim-dark: oklch(70% 0.018 230);
-  --rule-light: oklch(76% 0.013 240);
-  --rule-dark: oklch(40% 0.02 235);
-  --ember-light: oklch(54% 0.15 55);
-  --ember-dark: oklch(75% 0.15 65);
-  --set-light: oklch(52% 0.09 195);
-  --set-dark: oklch(72% 0.09 195);
-  --alarm-light: oklch(52% 0.19 25);
-  --alarm-dark: oklch(74% 0.16 25);
+  /* Raw values, kept separate from the resolved tokens so the no-light-dark() fallback below
+   * has something to switch. Dark is the default (dark leads; light follows the system);
+   * DESIGN.md states the dark set and a paired light set. Five light values — --rule,
+   * --rule-soft, --dashed, --accent-ink, --stranded-tx — are not in DESIGN.md and are derived
+   * to sit on the warm paper ground (#faf9f7). The four state colours are in oklch as DESIGN.md
+   * gives them; the neutrals are in hex, as DESIGN.md gives them. */
+  --ground-light: #faf9f7;
+  --ground-dark: #15161b;
+  --surface-light: #ffffff;
+  --surface-dark: #1e2026;
+  --surface-2-light: #f2f1ee;
+  --surface-2-dark: #16181d;
+  --sheet-light: #ffffff;
+  --sheet-dark: #101116;
+  --rule-light: #e2ded8;
+  --rule-dark: #23252d;
+  --rule-soft-light: #d4d0ca;
+  --rule-soft-dark: #2a2d36;
+  --dashed-light: #c4c0ba;
+  --dashed-dark: #393c46;
+  --text-light: #2a2a2a;
+  --text-dark: #e4e4e8;
+  --text-mid-light: #6a6a6a;
+  --text-mid-dark: #9a9aa4;
+  --text-dim-light: #737373;
+  --text-dim-dark: #888a93;
+  --text-faint-light: #a0a0a0;
+  --text-faint-dark: #5a5c66;
+  --accent-light: #3a5a8a;
+  --accent-dark: #6ea8d8;
+  --accent-ink-light: #ffffff;
+  --accent-ink-dark: #0c0d10;
+  --filed-light: #22745a;
+  --filed-dark: #56a890;
+  --stranded-light: #c0392b;
+  --stranded-dark: #d65a4a;
+  --stranded-tx-light: #c0392b;
+  --stranded-tx-dark: #e09a8e;
+  --pending-light: #9a9a8e;
+  --pending-dark: #64656d;
 
-  /* The card's weight on the page: a tight close shadow + a soft far one, both with an
-   * offset (a zero-offset halo is decoration, not depth). Dark mode sits the card on a
-   * darker, wider, more present shadow — the ground is already dark, so the cast has to
-   * reach further and dig deeper to read as lift rather than vanish into the page. */
-  --shadow-card-light:
-    0 1px 2px oklch(28% 0.02 240 / 0.1),
-    0 8px 22px oklch(28% 0.02 240 / 0.08);
-  --shadow-card-dark:
-    0 2px 5px oklch(0% 0 0 / 0.7),
-    0 16px 40px oklch(0% 0 0 / 0.55);
+  /* Shadows cannot ride light-dark() (it resolves to a <color>, not a list), so the shadow
+   * tokens switch via prefers-color-scheme. Resting is a 1px hairline lift; the hover lift is
+   * the only diffuse shadow and is applied on card hover (State-Only Lift Rule). */
+  --shadow-card-light: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-card-dark: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-lift-light: 0 4px 12px rgba(0, 0, 0, 0.12);
+  --shadow-lift-dark: 0 4px 12px rgba(0, 0, 0, 0.25);
 
-  /* Dark leads (spec: "Dark leads; light is a twin that follows the system"). The resolved
-   * tokens default to the dark values; light is the override the system opts into. The
-   * `light-dark()` block below carries the same intent for browsers that support it. */
+  /* Dark leads (DESIGN.md: "Dark by default"). The resolved tokens default to the dark values;
+   * light is the override the system opts into. The light-dark() block below carries the same
+   * intent for browsers that support it. */
   --ground: var(--ground-dark);
-  --raised: var(--raised-dark);
-  --text: var(--text-dark);
-  --dim: var(--dim-dark);
+  --surface: var(--surface-dark);
+  --surface-2: var(--surface-2-dark);
+  --sheet: var(--sheet-dark);
   --rule: var(--rule-dark);
-  --ember: var(--ember-dark);
-  --set: var(--set-dark);
-  --alarm: var(--alarm-dark);
+  --rule-soft: var(--rule-soft-dark);
+  --dashed: var(--dashed-dark);
+  --text: var(--text-dark);
+  --text-mid: var(--text-mid-dark);
+  --text-dim: var(--text-dim-dark);
+  --text-faint: var(--text-faint-dark);
+  --accent: var(--accent-dark);
+  --accent-ink: var(--accent-ink-dark);
+  --filed: var(--filed-dark);
+  --stranded: var(--stranded-dark);
+  --stranded-tx: var(--stranded-tx-dark);
+  --pending: var(--pending-dark);
   --shadow-card: var(--shadow-card-dark);
+  --shadow-lift: var(--shadow-lift-dark);
 
   @media (prefers-color-scheme: light) {
     --ground: var(--ground-light);
-    --raised: var(--raised-light);
-    --text: var(--text-light);
-    --dim: var(--dim-light);
+    --surface: var(--surface-light);
+    --surface-2: var(--surface-2-light);
+    --sheet: var(--sheet-light);
     --rule: var(--rule-light);
-    --ember: var(--ember-light);
-    --set: var(--set-light);
-    --alarm: var(--alarm-light);
+    --rule-soft: var(--rule-soft-light);
+    --dashed: var(--dashed-light);
+    --text: var(--text-light);
+    --text-mid: var(--text-mid-light);
+    --text-dim: var(--text-dim-light);
+    --text-faint: var(--text-faint-light);
+    --accent: var(--accent-light);
+    --accent-ink: var(--accent-ink-light);
+    --filed: var(--filed-light);
+    --stranded: var(--stranded-light);
+    --stranded-tx: var(--stranded-tx-light);
+    --pending: var(--pending-light);
     --shadow-card: var(--shadow-card-light);
+    --shadow-lift: var(--shadow-lift-light);
   }
 
-  /* NOTE: --shadow-card is deliberately absent below. `light-dark()` resolves to a <color>,
-   * so it cannot carry a shadow *list*; wrapping one made the token invalid at every use site
-   * and silently dropped the shadow from every card. The `prefers-color-scheme` switch above
-   * is the right mechanism for a non-colour token. */
+  /* NOTE: --shadow-card / --shadow-lift are deliberately absent below. light-dark() resolves to
+   * a <color>, so it cannot carry a shadow *list*; wrapping one made the token invalid at every
+   * use site and silently dropped the shadow from every card. The prefers-color-scheme switch
+   * above is the right mechanism for a non-colour token. */
   @supports (color: light-dark(white, black)) {
     --ground: light-dark(var(--ground-light), var(--ground-dark));
-    --raised: light-dark(var(--raised-light), var(--raised-dark));
-    --text: light-dark(var(--text-light), var(--text-dark));
-    --dim: light-dark(var(--dim-light), var(--dim-dark));
+    --surface: light-dark(var(--surface-light), var(--surface-dark));
+    --surface-2: light-dark(var(--surface-2-light), var(--surface-2-dark));
+    --sheet: light-dark(var(--sheet-light), var(--sheet-dark));
     --rule: light-dark(var(--rule-light), var(--rule-dark));
-    --ember: light-dark(var(--ember-light), var(--ember-dark));
-    --set: light-dark(var(--set-light), var(--set-dark));
-    --alarm: light-dark(var(--alarm-light), var(--alarm-dark));
+    --rule-soft: light-dark(var(--rule-soft-light), var(--rule-soft-dark));
+    --dashed: light-dark(var(--dashed-light), var(--dashed-dark));
+    --text: light-dark(var(--text-light), var(--text-dark));
+    --text-mid: light-dark(var(--text-mid-light), var(--text-mid-dark));
+    --text-dim: light-dark(var(--text-dim-light), var(--text-dim-dark));
+    --text-faint: light-dark(var(--text-faint-light), var(--text-faint-dark));
+    --accent: light-dark(var(--accent-light), var(--accent-dark));
+    --accent-ink: light-dark(var(--accent-ink-light), var(--accent-ink-dark));
+    --filed: light-dark(var(--filed-light), var(--filed-dark));
+    --stranded: light-dark(var(--stranded-light), var(--stranded-dark));
+    --stranded-tx: light-dark(var(--stranded-tx-light), var(--stranded-tx-dark));
+    --pending: light-dark(var(--pending-light), var(--pending-dark));
   }
 
-  /* Category colour (ticket 04; spec.md §Category). A member's hue is its index in CATEGORIES,
+  /* Category colour (ADR-0008; spec.md §Category). A member's hue is its index in CATEGORIES,
    * stepped by the golden angle — it arrives per card as the inline custom property `--cat-hue`.
    * Only the lightness/chroma are per-scheme; the hue is the one thing that differs card to card.
-   * Unlike the tokens above, these can't use `light-dark()` — its arguments are `<color>` values,
-   * and the hue is per-card, so the per-scheme parts are bare lightness/chroma numbers composed
-   * with the inline hue inside `oklch()`. The `@media (prefers-color-scheme: light)` block switches
-   * them (dark leads; light follows the system). `uncategorized` sets no `--cat-hue`, so the
-   * neutral fallbacks apply — the absence of a Category is not a colour. */
-  --cat-edge-l: 72%;
-  --cat-edge-c: 0.13;
+   * DESIGN.md fixes these at oklch(0.66 0.12 h) dark / oklch(0.48 0.13 h) light; light chips drop
+   * to a translucent tint. Unlike the tokens above, these can't use `light-dark()` — its
+   * arguments are `<color>` values, and the hue is per-card, so the per-scheme parts are bare
+   * lightness/chroma numbers composed with the inline hue inside `oklch()`. The `@media
+   * (prefers-color-scheme: light)` block switches them (dark leads; light follows the system).
+   * `uncategorized` sets no `--cat-hue`, so the neutral fallbacks apply — the absence of a
+   * Category is not a colour. */
+  --cat-edge-l: 66%;
+  --cat-edge-c: 0.12;
   --cat-chip-bg-l: 32%;
   --cat-chip-bg-c: 0.05;
   --cat-chip-text-l: 80%;
   --cat-chip-text-c: 0.13;
   @media (prefers-color-scheme: light) {
-    --cat-edge-l: 52%;
+    --cat-edge-l: 48%;
+    --cat-edge-c: 0.13;
     --cat-chip-bg-l: 94%;
     --cat-chip-text-l: 40%;
   }
@@ -137,29 +188,41 @@
   /* Native UI — scrollbars, form controls, the canvas — follows the user's system setting.
    * Dark is listed first: with no system preference the canvas is dark (dark leads). */
   color-scheme: dark light;
-  accent-color: var(--ember);
+  accent-color: var(--accent);
 
   --serif: 'Newsreader', Georgia, 'Times New Roman', serif;
   --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
-  --text-xs: 0.6875rem;
-  --text-sm: 0.8125rem;
-  --text-base: 1rem;
-  --text-lg: 1.125rem;
-  --text-dump: clamp(1.15rem, 1rem + 0.9vw, 1.4rem);
-  --text-title: clamp(1.4rem, 1.1rem + 1.4vw, 1.9rem);
+  /* Type scale — DESIGN.md §Typography. Role tokens, not size steps: serif reads (display,
+   * headline, capture, body, answer), mono scans (label). The scale is deliberately tight. */
+  --display: 1.3rem;
+  --headline: 1.15rem;
+  --capture: 1.25rem;
+  --body: 0.86rem;
+  --answer: 0.95rem;
+  --label: 0.7rem;
 
-  --s1: 0.25rem;
+  /* Spacing — a loose scale, applied by feel (DESIGN.md). s6/s7 are off-ladder larger steps. */
+  --s1: 0.2rem;
   --s2: 0.5rem;
-  --s3: 0.75rem;
-  --s4: 1rem;
-  --s5: 1.5rem;
+  --s3: 0.7rem;
+  --s4: 0.85rem;
+  --s5: 1rem;
   --s6: 2rem;
   --s7: 3rem;
 
+  /* Radius ladder — DESIGN.md §Shapes. Corners climb a small scale; nothing is pill-shaped. */
+  --r-xs: 3px;
+  --r-sm: 5px;
+  --r-md: 7px;
+  --r-lg: 8px;
+  --r-xl: 9px;
+  --r-2xl: 10px;
+  --r-3xl: 11px;
+  --radius: var(--r-xs);
+  --radius-card: var(--r-3xl);
+
   --measure: 34rem;
-  --radius: 3px;
-  --radius-card: 4px; /* a second, larger step for stacked stock — cards are not controls */
   --speed: 140ms; /* the 120–160ms tactility band; state changes resolve in one beat */
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1); /* exponential ease-out — motion from rest */
   --autosave: 5s; /* AUTOSAVE_DELAY_MS — the countdown must agree with autosave.ts */
@@ -186,7 +249,7 @@ body {
 
 ::selection {
   /* A wash, not a fill: the words stay Graphite and readable through it. */
-  background: color-mix(in oklab, var(--ember), transparent 78%);
+  background: color-mix(in oklab, var(--accent), transparent 78%);
 }
 
 :root {
@@ -195,13 +258,13 @@ body {
 
 input,
 textarea {
-  caret-color: var(--ember);
+  caret-color: var(--accent);
 }
 
 /* The placeholder is the most-read text on the arrival screen ("What are you thinking?"),
  * so it takes a known token rather than the browser's own fade, which lands under 4.5:1. */
 ::placeholder {
-  color: var(--dim);
+  color: var(--text-dim);
   opacity: 1; /* Firefox fades placeholders by default; the token already carries the level. */
 }
 
@@ -324,11 +387,11 @@ p {
 
 .wordmark {
   font-family: var(--mono);
-  font-size: var(--text-sm);
+  font-size: var(--label);
   font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: lowercase;
-  color: var(--dim);
+  color: var(--text-dim);
 }
 
 /* The settings gear: the one control that lives in the masthead. An icon, not a tab — the
@@ -340,7 +403,7 @@ p {
   border: 0;
   padding: var(--s1);
   display: inline-flex;
-  color: var(--dim);
+  color: var(--text-dim);
   cursor: pointer;
   transition: color var(--speed) var(--ease);
 }
@@ -353,12 +416,12 @@ p {
 /* ── Controls ────────────────────────────────────────────────────────── */
 
 button {
-  font-size: var(--text-sm);
+  font-size: var(--label);
   letter-spacing: 0.02em;
   padding: var(--s2) var(--s4);
   color: var(--text);
-  background: var(--raised);
-  border: 1px solid var(--rule);
+  background: transparent;
+  border: 1px solid var(--rule-soft);
   border-radius: var(--radius);
   cursor: pointer;
   box-sizing: border-box;
@@ -372,7 +435,7 @@ button {
 }
 
 button:hover:not(:disabled) {
-  border-color: var(--dim);
+  border-color: var(--text-dim);
 }
 
 button:active:not(:disabled) {
@@ -382,37 +445,34 @@ button:active:not(:disabled) {
 /* A disabled control is absent, not broken: it takes its own colour treatment — desaturated
  * and dropped to the page — rather than a flat opacity fade that reads as half-rendered. */
 button:disabled {
-  color: var(--dim);
+  color: var(--text-dim);
   background: var(--ground);
   border-color: var(--rule);
   cursor: not-allowed;
 }
 
 button.primary {
-  color: var(--ground);
-  background: var(--ember);
-  border-color: var(--ember);
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
   font-weight: 500;
 }
 
-/* The committing action, deactivated: the ink is washed out toward pencil, not dimmed to a
- * ghost. The label stays light so it still reads, only the fill loses its conviction.
+/* The committing action, deactivated: the accent is washed out toward text-dim, not dimmed
+ * to a ghost. The label stays light so it still reads, only the fill loses its conviction.
  *
- * Mixed in oklab, never oklch. oklch interpolates the *hue angle*, and ember and pencil sit
- * on opposite sides of the wheel (55° vs 240°), so the shorter arc between them runs through
- * colours that are in neither: `in oklch` resolved this fill to hue 336° — plum — in light,
- * and hue 139° — green — in dark. That put two invented accents on the most-pressed control
- * in the app, in its resting state, in flat breach of the two-inks rule. oklab is
- * rectangular, so there is no arc to travel: the hue stays ember's own (54°/67°) and only the
- * chroma drains, which is what "washed out" was always supposed to mean. */
+ * Mixed in oklab. The accent (blue) and text-dim (a slightly-blue grey) are close in hue, so
+ * the arc oklch would travel between them is short — but oklab is kept for consistency with
+ * the rest of the system, and only the chroma drains. The One Voice Rule still holds: no
+ * second accent is invented, the fill just loses its saturation. */
 button.primary:disabled {
-  background: color-mix(in oklab, var(--ember), var(--dim) 45%);
-  border-color: color-mix(in oklab, var(--ember), var(--dim) 45%);
-  color: var(--ground);
+  background: color-mix(in oklab, var(--accent), var(--text-dim) 45%);
+  border-color: color-mix(in oklab, var(--accent), var(--text-dim) 45%);
+  color: var(--accent-ink);
 }
 
 :focus-visible {
-  outline: 2px solid var(--ember);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -420,19 +480,19 @@ label {
   display: flex;
   flex-direction: column;
   gap: var(--s1);
-  font-size: var(--text-xs);
+  font-size: var(--label);
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--dim);
+  color: var(--text-dim);
 }
 
 input,
 select,
 textarea {
   font-family: var(--mono);
-  font-size: var(--text-sm);
+  font-size: var(--label);
   color: var(--text);
-  background: var(--raised);
+  background: var(--surface-2);
   border: 1px solid var(--rule);
   border-radius: var(--radius);
   padding: var(--s2);
@@ -486,16 +546,16 @@ input[type='checkbox'] {
  * reads "form control" rather than "page to write on". */
 textarea.dump {
   font-family: var(--serif);
-  font-size: var(--text-dump);
+  font-size: var(--capture);
   line-height: 1.5;
   min-height: 9rem;
   padding: var(--s3);
 }
 
 .hint {
-  font-size: var(--text-xs);
+  font-size: var(--label);
   letter-spacing: 0.02em;
-  color: var(--dim);
+  color: var(--text-dim);
 }
 
 .actions {
@@ -515,13 +575,13 @@ textarea.dump {
 
 .status {
   font-family: var(--mono);
-  font-size: var(--text-xs);
+  font-size: var(--label);
   letter-spacing: 0.03em;
-  color: var(--dim);
+  color: var(--text-dim);
 }
 
 .status.err {
-  color: var(--alarm);
+  color: var(--stranded);
 }
 
 /* ── The status strip (ticket 09) — grid-only, one cross-cutting voice ─── */
@@ -537,16 +597,16 @@ textarea.dump {
   border-left: 3px solid var(--rule);
   border-radius: var(--radius);
   font-family: var(--mono);
-  font-size: var(--text-xs);
+  font-size: var(--label);
   letter-spacing: 0.03em;
-  color: var(--dim);
-  background: var(--raised);
+  color: var(--text-dim);
+  background: var(--surface);
 }
 
 /* A subtle accent for the kinds that hold for a reason — lost connection, rejected setting.
    The word is always the signal; this only gives the eye a place to land. */
 .status-strip--alert {
-  border-left-color: var(--alarm);
+  border-left-color: var(--stranded);
 }
 
 .status-strip__text {
@@ -559,7 +619,7 @@ textarea.dump {
   padding: 0;
   font: inherit;
   letter-spacing: inherit;
-  color: var(--dim);
+  color: var(--text-dim);
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
@@ -578,7 +638,7 @@ textarea.dump {
   list-style: none;
   padding: 0;
   margin: var(--s2) 0 0;
-  font-size: var(--text-xs);
+  font-size: var(--label);
 }
 
 .diagnostics {
@@ -600,11 +660,11 @@ textarea.dump {
 
 .diagnostics li.err,
 .checks li.err {
-  color: var(--alarm);
+  color: var(--stranded);
 }
 
 .diagnostics .detail {
-  color: var(--dim);
+  color: var(--text-dim);
 }
 
 .checks li {
@@ -666,18 +726,18 @@ textarea.dump {
 /* ── The Note ────────────────────────────────────────────────────────────
  *
  * The signature. A Note card carries its own state on its top edge, and the edge only moves
- * when the move is honest. While a new Note is uncommitted the edge is an ember hairline
+ * when the move is honest. While a new Note is uncommitted the edge is an accent hairline
  * burning down over the autosave window, so the card *is* the clock — a save really will
  * fire at the end. An unconfirmed append never autosaves, so on that path the edge is held:
  * static, full, wet, not burning (the hint states the reason in words). When the Note reaches
- * the Vault the edge stops, fills back to full, and cross-fades to `set`. That wet→dry
+ * the Vault the edge stops, fills back to full, and cross-fades to `filed`. That wet→dry
  * cross-fade is the only moment of drama in the app, and it happens exactly where the
  * meaning is — molten to permanent.
  */
 
 .note {
   position: relative;
-  background: var(--raised);
+  background: var(--surface-2);
   border: 1px solid var(--rule);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
@@ -692,7 +752,7 @@ textarea.dump {
   position: absolute;
   inset: 0 0 auto;
   height: 2px;
-  background: var(--ember);
+  background: var(--accent);
   transform-origin: left center;
   animation: burn-down var(--autosave) linear forwards;
   transition: background-color var(--speed) var(--ease);
@@ -718,7 +778,7 @@ textarea.dump {
  * That cross-fade is the one moment worth animating — molten to permanent — and it happens
  * exactly where the meaning is. */
 .note.committed .burn {
-  background: var(--set);
+  background: var(--filed);
   animation: none;
   transform: scaleX(1);
   transition: background-color 260ms var(--ease), transform 260ms var(--ease);
@@ -738,15 +798,15 @@ textarea.dump {
 }
 
 .eyebrow {
-  font-size: var(--text-xs);
+  font-size: var(--label);
   font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--ember);
+  color: var(--accent);
 }
 
 .note.committed .eyebrow {
-  color: var(--set);
+  color: var(--filed);
   text-transform: none;
   letter-spacing: 0.02em;
   word-break: break-all;
@@ -779,7 +839,7 @@ textarea.dump {
  * underline at rest, underline on hover so the link says "follow me" only when reached for.
  * Visited stays Dry: a followed link is not a different state here. */
 .vault-link {
-  color: var(--set);
+  color: var(--filed);
   text-decoration: none;
   word-break: break-all;
 }
@@ -788,7 +848,7 @@ textarea.dump {
   text-underline-offset: 2px;
 }
 .vault-link:visited {
-  color: var(--set);
+  color: var(--filed);
 }
 
 /* Doors are meant to be walked through: the saved path, a Related link and a citation are
@@ -812,7 +872,7 @@ textarea.dump {
 
 .note h2 {
   font-family: var(--serif);
-  font-size: var(--text-title);
+  font-size: var(--display);
   font-weight: 400;
 }
 
@@ -820,12 +880,12 @@ textarea.dump {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: var(--s1) var(--s3);
-  font-size: var(--text-xs);
+  font-size: var(--label);
   letter-spacing: 0.02em;
 }
 
 .meta dt {
-  color: var(--dim);
+  color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
@@ -837,7 +897,7 @@ textarea.dump {
 
 .note-body {
   font-family: var(--serif);
-  font-size: var(--text-base);
+  font-size: var(--body);
   white-space: pre-wrap;
   overflow-wrap: break-word;
 }
@@ -848,10 +908,10 @@ textarea.dump {
   display: flex;
   align-items: center;
   gap: var(--s3);
-  font-size: var(--text-xs);
+  font-size: var(--label);
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--dim);
+  color: var(--text-dim);
 }
 
 .rule-label::after {
@@ -873,15 +933,15 @@ textarea.dump {
   list-style: none;
   padding: 0;
   font-family: var(--mono);
-  font-size: var(--text-sm);
-  color: var(--set);
+  font-size: var(--label);
+  color: var(--filed);
   word-break: break-all;
 }
 
 .note .pending {
   font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--dim);
+  font-size: var(--label);
+  color: var(--text-dim);
 }
 
 /* The verbatim Dump — the user's original words, kept as provenance behind the organized
@@ -889,8 +949,8 @@ textarea.dump {
  * pre-wrap keeps the capture's own line breaks rather than reflowing them. */
 .note .verbatim {
   font-family: var(--mono);
-  font-size: var(--text-sm);
-  color: var(--dim);
+  font-size: var(--label);
+  color: var(--text-dim);
   white-space: pre-wrap;
   overflow-wrap: break-word;
 }
@@ -909,7 +969,7 @@ textarea.dump {
  * Vault" on a border that carries no state. The depth says "stacked"; the ink stays with the
  * citations, where it is true. */
 .answer {
-  background: var(--raised);
+  background: var(--surface);
   border: 1px solid var(--rule);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
@@ -917,7 +977,7 @@ textarea.dump {
   display: flex;
   flex-direction: column;
   gap: var(--s3);
-  font-size: var(--text-base);
+  font-size: var(--answer);
 }
 
 /* ── Stranded Dumps ──────────────────────────────────────────────────────
@@ -932,7 +992,7 @@ textarea.dump {
   list-style: none;
   padding: 0;
   margin: var(--s2) 0 0;
-  font-size: var(--text-xs);
+  font-size: var(--label);
 }
 
 .stranded li {
@@ -944,7 +1004,7 @@ textarea.dump {
 }
 
 .stranded li.err {
-  color: var(--alarm);
+  color: var(--stranded);
 }
 
 .stranded-when {
@@ -959,7 +1019,7 @@ textarea.dump {
 }
 
 .stranded .detail {
-  color: var(--dim);
+  color: var(--text-dim);
 }
 
 .stranded button {
@@ -1021,11 +1081,11 @@ textarea.dump {
   min-height: 0;
 }
 
-/* A card is stock resting on the page: the same raised surface, radius and shadow as a Note,
+/* A card is stock resting on the page: the same surface, radius and shadow as a Note,
  * so the grid reads as one quiet field. Uniform height comes from a clamped 2-line summary and
  * the date pinned to the bottom — the same rule DESIGN.md sets for the finished grid. */
 .card {
-  background: var(--raised);
+  background: var(--surface);
   border: 1px solid var(--rule);
   /* The left edge carries a Category's hue (ticket 04): 3px, neutral by default, coloured for a
    * member card via `.card--cat` + the inline `--cat-hue`. The 2px extra over the 1px border is
@@ -1051,7 +1111,7 @@ textarea.dump {
   cursor: pointer;
 }
 .card--door:focus-visible {
-  outline: 2px solid var(--set);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -1067,10 +1127,10 @@ textarea.dump {
  * (the absence of a Category is not a colour). A member card colours the chip with its hue. */
 .card__category {
   font-family: var(--mono);
-  font-size: var(--text-xs);
+  font-size: var(--label);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--dim);
+  color: var(--text-dim);
   display: inline-flex;
   align-items: center;
   width: fit-content;
@@ -1090,7 +1150,7 @@ textarea.dump {
 
 .card__title {
   font-family: var(--serif);
-  font-size: var(--text-lg);
+  font-size: var(--headline);
   font-weight: 500;
   line-height: 1.2;
   margin: 0;
@@ -1111,8 +1171,8 @@ textarea.dump {
 
 .card__summary {
   font-family: var(--serif);
-  font-size: var(--text-sm);
-  color: var(--dim);
+  font-size: var(--body);
+  color: var(--text-mid);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   line-clamp: 2;
@@ -1122,8 +1182,8 @@ textarea.dump {
 
 .card__tags {
   font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--dim);
+  font-size: var(--label);
+  color: var(--text-dim);
   display: flex;
   flex-wrap: wrap;
   gap: var(--s1) var(--s2);
@@ -1137,9 +1197,9 @@ textarea.dump {
 /* Pinned to the foot of the card so a row of cards shares one height. */
 .card__date {
   font-family: var(--mono);
-  font-size: var(--text-xs);
+  font-size: var(--label);
   font-variant-numeric: tabular-nums;
-  color: var(--dim);
+  color: var(--text-dim);
   margin-top: auto;
 }
 
@@ -1149,7 +1209,7 @@ textarea.dump {
  * field, but an open card is a promise still to keep, not a thing filed. */
 .card--open {
   background: transparent;
-  border: 1px dashed var(--rule);
+  border: 1px dashed var(--dashed);
   box-shadow: none;
 }
 
@@ -1157,7 +1217,7 @@ textarea.dump {
  * the two-ink rule (serif = thought, mono = scaffolding) read across the grid's two card kinds. */
 .card__title--raw {
   font-family: var(--mono);
-  font-size: var(--text-base);
+  font-size: var(--headline);
   font-weight: 400;
   line-height: 1.3;
 }
@@ -1175,14 +1235,14 @@ textarea.dump {
  * "write here", sized to the grid so it reads as a place a card will occupy. */
 .card-placeholder {
   grid-column: 1 / -1;
-  border: 2px dashed var(--rule);
+  border: 2px dashed var(--dashed);
   border-radius: var(--radius-card);
   padding: var(--s5);
   margin: 0;
   text-align: center;
   font-family: var(--mono);
-  font-size: var(--text-sm);
-  color: var(--dim);
+  font-size: var(--label);
+  color: var(--text-dim);
 }
 
 /* ── Sheets ──────────────────────────────────────────────────────────────
@@ -1268,10 +1328,10 @@ dialog.sheet::backdrop {
 
 .sheet__title {
   font-family: var(--mono);
-  font-size: var(--text-sm);
+  font-size: var(--label);
   font-weight: 500;
   letter-spacing: 0.08em;
-  color: var(--dim);
+  color: var(--text-dim);
   margin: 0;
 }
 
@@ -1282,9 +1342,9 @@ dialog.sheet::backdrop {
   border: 0;
   padding: var(--s2);
   margin: calc(var(--s2) * -1);
-  font-size: var(--text-sm);
+  font-size: var(--label);
   letter-spacing: 0.04em;
-  color: var(--dim);
+  color: var(--text-dim);
   cursor: pointer;
   transition: color var(--speed) var(--ease);
 }
@@ -1327,16 +1387,15 @@ dialog.sheet::backdrop {
   gap: var(--s2);
 }
 
-/* The card of the Note just filed. It slots in wearing the `set` ring — the receipt for a
+/* The card of the Note just filed. It slots in wearing the accent ring — the receipt for a
  * commit is the thing itself arriving on the grid, not a message about it — and the ring
  * clears itself a moment later, so nothing accumulates. */
 .card--wet {
   /* A ring, not a drop shadow: the filed card is not lifted off the page, it is marked as
-   * having reached the Vault, so it takes the `set` accent on its own edge. Written as a
-   * standalone box-shadow rather than composed with `var(--shadow-card)` — that token is
-   * currently invalid (a shadow list wrapped in `light-dark()`, which only takes colours), and
-   * composing with it would make this whole declaration invalid too. */
-  box-shadow: 0 0 0 2px var(--set) inset;
+   * having reached the Vault, so it takes the accent on its own edge. Written as a standalone
+   * box-shadow rather than composed with `var(--shadow-card)` — the wet state is a ring (the
+   * State-Only Lift Rule), not a lift, so it does not borrow the resting shadow. */
+  box-shadow: 0 0 0 2px var(--accent) inset;
   animation: slot-in 420ms var(--ease);
 }
 
