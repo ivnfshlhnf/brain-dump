@@ -428,10 +428,11 @@
     noteView = null;
   }
 
-  /** Re-organize the Note on screen: re-derive its title, Tags, summary and Category from the
-   *  current body (the user may have edited it in Obsidian), preserving the body, and paint
-   *  the refreshed Note back into the sheet. The card on the grid is now stale, so the grid is
-   *  refreshed too — this is where re-organize finally lives (ticket 05 left it with no surface). */
+  /** Re-organize the Note on screen (ADR-0009): rebuild it wholesale from its Dump — body
+   *  and title alike — and paint the rebuilt Note back into the sheet. The card on the grid
+   *  is now stale, so the grid is refreshed too — this is where re-organize finally lives
+   *  (ticket 05 left it with no surface). When the Note's Dump is gone, the operation falls
+   *  back to re-deriving only the frontmatter against the body on the file. */
   async function reorganizeCurrentNote() {
     if (!noteView) return;
     reorganizing = true;
@@ -439,6 +440,8 @@
       const view = await reorganizeNote(noteView.path, {
         ...storeDeps(),
         organizer: createOrganizer(settings, log),
+        embedder: cachedEmbedder(),
+        relater: createRelater(settings, log),
         now: () => Date.now(),
       });
       if (view) {
@@ -804,11 +807,15 @@
         relater: createRelater(settings, log),
         now: () => Date.now(),
       });
-      const appended = session.match.kind === 'append';
       const appendedTo = session.match.suggestion?.title;
       session = result.session;
       await refreshPending();
       if (result.ok) {
+        // Whether this truly appended — the target's path was already on the grid — rather
+        // than fell back to founding a fresh Note (the target or its Dump may be gone). The
+        // receipt and the card fold must follow what happened, not what was suggested.
+        const appended =
+          session.match.kind === 'append' && cards.some((c) => c.path === result.written.path);
         // Back to the grid, with the card the commit produced already on it. The card comes
         // from the Note in hand rather than a second Vault read: the receipt must not cost
         // the capture path a full-Vault round trip.
@@ -1440,7 +1447,8 @@
           </label>
           <p class="hint">
             {#if session.match.kind === 'append' && !appendConfirmed}
-              Append waits for your confirmation — it won’t save on its own. Your verbatim original is kept.
+              Append waits for your confirmation — it won’t save on its own. Confirming merges
+              this capture into the matched note and re-organizes it; your verbatim original is kept.
             {:else if held}
               Held — the countdown is stopped and won’t restart. It saves when you say so.
             {:else}
@@ -1464,7 +1472,7 @@
                  files until one of them is pressed. -->
             <button class="primary" on:click={confirmAppend}>
               Append
-              <span class="primary__sub">add to the matched note</span>
+              <span class="primary__sub">merge in and re-organize the note</span>
             </button>
             <button on:click={chooseNewNote}>Save as new Note</button>
           {:else}
@@ -1559,7 +1567,8 @@
             {#if noteView.dump}
               <!-- The verbatim Dump: the user's original words, kept and reachable but not the
                    headline. The same dashed provenance box as the capture preview; Context, if
-                   the capture added any, follows it. -->
+                   the capture added any, follows it. Appended captures follow those — the
+                   whole accumulated Dump is the record the Note was organized from. -->
               <div class="your-words">
                 <p class="your-words__label">your original words</p>
                 <p class="your-words__text">{noteView.dump.content}</p>
@@ -1567,6 +1576,12 @@
               {#if noteView.dump.context}
                 <p class="rule-label">context</p>
                 <div class="verbatim">{noteView.dump.context}</div>
+              {/if}
+              {#if noteView.dump.appended?.length}
+                {#each noteView.dump.appended as capture}
+                  <p class="rule-label">appended {capture.stamp}</p>
+                  <div class="verbatim">{capture.text}</div>
+                {/each}
               {/if}
             {/if}
           </article>
@@ -1581,8 +1596,9 @@
         {#if status}<p class="status" aria-live="polite">{status}</p>{/if}
         <div class="actions">
           {#if noteView}
-            <!-- Re-organize re-derives the metadata from the current body — the user may have
-                 edited the Note in Obsidian — and is the one place that action surfaces. -->
+            <!-- Re-organize rebuilds the Note wholesale from its Dump (ADR-0009) — a hand edit
+                 to the Note is provisional and this is where it ends. The one place the
+                 action surfaces. -->
             <button on:click={reorganizeCurrentNote} disabled={reorganizing}>
               {reorganizing ? 'Re-organizing…' : 'Re-organize'}
             </button>
@@ -1692,6 +1708,25 @@
       <label>LLM API key <input type="password" bind:value={settings.llmApiKey} /></label>
       <label>Embedder model <input bind:value={settings.embedderModel} /></label>
       <label>Embeddings database <input bind:value={settings.embeddingsDb} /></label>
+    </fieldset>
+
+    <fieldset class="field-group">
+      <legend class="rule-label">organizing</legend>
+      <!-- The standing Instruction (CONTEXT.md): written once here, applied verbatim to every
+           Organize — the founding, every Append, every manual Re-organize. It never reaches
+           the decisions about where content belongs; it shapes how the Note is written. -->
+      <label>
+        Standing instruction
+        <textarea
+          bind:value={settings.organizeInstruction}
+          placeholder="e.g. always write the note in English, regardless of the dump's language"
+        ></textarea>
+      </label>
+      <p class="hint">
+        Left empty, Notes are organized by the built-in rules alone. Anything written here is
+        passed to the model with every organize — where it conflicts with the built-in rules,
+        your instruction wins.
+      </p>
     </fieldset>
 
     <div class="actions">

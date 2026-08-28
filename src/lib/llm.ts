@@ -33,7 +33,11 @@ import type {
 export function createOrganizer(settings: Settings, log: Log = noopLog): Organizer {
   return {
     async organize(content, modality): Promise<OrganizeOutput> {
-      const reply = await chat(settings, buildOrganizePrompt(content, modality), log);
+      const reply = await chat(
+        settings,
+        buildOrganizePrompt(content, modality, settings.organizeInstruction),
+        log,
+      );
       return parseOrganizeOutput(reply);
     },
   };
@@ -203,8 +207,8 @@ function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : -1;
 }
 
-function buildOrganizePrompt(content: string, modality: Modality): string {
-  return [
+function buildOrganizePrompt(content: string, modality: Modality, instruction: string): string {
+  const lines = [
     'You organize a brain-dump into a Note. Reply ONLY with a JSON object — no prose,',
     'no markdown fences — with exactly these fields:',
     '- title: short title (string)',
@@ -212,7 +216,6 @@ function buildOrganizePrompt(content: string, modality: Modality): string {
     `- category: exactly one of: ${CATEGORIES.join(', ')} (lowercase string)`,
     '- summary: one-sentence summary (string)',
     '- keyPoints: concise bullets (array of strings)',
-    '- related: Obsidian wikilinks or URLs, empty if none (array of strings)',
     '- body: the cleaned, organized content in markdown (string)',
     '',
     'Faithfulness — the one rule that governs every field: derive ONLY from the Dump',
@@ -223,10 +226,25 @@ function buildOrganizePrompt(content: string, modality: Modality): string {
     "restates and lightly structures the Dump's actual content — it does not answer,",
     'solve, or expand it. A short Dump yields a short Note; that is correct, not a',
     'failure. When in doubt, leave something out rather than invent it.',
+  ];
+  // The user's standing Instruction (CONTEXT.md: Instruction), verbatim. It sits after the
+  // built-in rules and wins where the two conflict: the user opting out of faithfulness is
+  // a deliberate act. Empty means no Instruction — the prompt says nothing about it.
+  const trimmed = instruction.trim();
+  if (trimmed) {
+    lines.push(
+      '',
+      'The user\'s standing instruction for how Notes are organized. It takes precedence',
+      'over the rules above where the two conflict:',
+      trimmed,
+    );
+  }
+  lines.push(
     `The dump was captured via ${modality}.`,
     `Dump content:`,
     content,
-  ].join('\n');
+  );
+  return lines.join('\n');
 }
 
 function authHeaders(settings: Settings): Record<string, string> {

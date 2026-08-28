@@ -9,7 +9,7 @@ The act of capturing a thought in the moment, before it is organized.
 _Avoid_: entry, log
 
 **Dump**:
-The raw record of a single brain-dump — a voice transcript or typed text, captured verbatim. During the capture session the user may add Context, which edits the Dump while preserving the verbatim original inside it. Once the Note is saved (or the session ends) the Dump is frozen and never changes again. Every Dump is in exactly one of four states — filed into a Note, Pending, Stranded, or Dismissed.
+The raw record of a brain-dump — a voice transcript or typed text, captured verbatim. During the capture session the user may add Context, which edits the Dump while preserving the verbatim original inside it. An Append merges the new capture into the target Note's Dump as a dated section, so a Note has exactly one Dump and that Dump accumulates the Note's whole history, every capture verbatim inside it. A founding Dump is frozen once its Note is saved; a Dump only ever grows by an Append. Every founding Dump is in exactly one of four states — filed into a Note, Pending, Stranded, or Dismissed.
 _Avoid_: raw note, transcript, entry
 
 **Context**:
@@ -17,12 +17,12 @@ Detail the user adds to a Dump during the capture session, before the Note is sa
 _Avoid_: addition, edit, note edit
 
 **Note**:
-The organized, editable artifact derived from one or more Dumps. The thing you browse, edit, and retrieve. A Note may be re-enriched but its source Dumps are never altered.
-_Avoid_: document, file, entry
+The organized artifact derived from exactly one Dump. The Dump is the record; the Note is a view of it. The thing you browse and retrieve — but an edit made directly to a Note is provisional: it lasts until the next Organize, which regenerates the Note from the Dump. Anything worth keeping belongs in the Dump. A Dump is never rewritten, only grown by an Append.
+_Avoid_: document, file, entry, source of truth
 
 **Organize**:
-The additive enrichment of a Dump into or onto a Note — a title, tags, summary, key points, related links, and category — without altering the source Dump. Every part of this is derived from the Dump alone except the related links, which describe the Note's connections to *other* Notes and so cannot be known from the Dump by itself.
-_Avoid_: process, format, clean up, rewrite
+The rendering of a Dump into a Note — a title, tags, summary, key points, category, and body — without altering the source Dump. Every part of this is derived from the Dump alone. On an Append the Note is re-organized wholesale from the accumulated Dump: body and title alike are rewritten, not patched.
+_Avoid_: process, format, clean up, additive enrichment
 
 **Category**:
 The single coarse subject a Note belongs to, drawn from a fixed set the app defines. Every Note has exactly one; a Note the Organize could not place takes `uncategorized`, which is an ordinary member and not a failure.
@@ -49,16 +49,20 @@ A Stranded Dump the user has decided not to file. Dismissing is a note to self a
 _Avoid_: ignored, archived, deleted, skipped
 
 **Append**:
-Adding a Dump's content to an existing Note, rather than founding a new Note. A Dump either founds a new Note or Appends to an existing one.
-_Avoid_: merge, update, edit
+Adding a capture to an existing Note rather than founding a new Note. Appending merges the capture into the target Note's one Dump as a dated section, then re-organizes the Note wholesale from the accumulated Dump. A Dump either founds a new Note or Appends to an existing one.
+_Avoid_: merge, update, edit, section insert
 
 **Related**:
-A connection between two Notes that is real but not strong enough to Append — the two stay separate documents. Any genuine connection counts; Append is the stronger case, where the connection warrants merging the content into one Note. Related and Append are the same judgment at two thresholds.
+A connection between two Notes that is real but not strong enough to Append — the two stay separate documents. Any genuine connection counts; Append is the stronger case, where the connection warrants merging the content into one Note. Related links are recomputed on every Organize and point only at Notes that exist — a link to a Note that does not exist is not a Related link but an error.
 _Avoid_: similar, linked, see also
 
 **Retrieve**:
 Answering a natural-language question by reading the relevant Notes and synthesizing an answer that cites them.
 _Avoid_: search, query, lookup
+
+**Instruction**:
+A standing instruction the user writes once, which the app applies to every Organize — shaping how the Dump is rendered into the Note, such as the language the Note is written in. It never reaches the judgments about where content belongs: founding, Appending, and Related are not its business.
+_Avoid_: preference, prompt tweak, system prompt
 
 **Modality**:
 Whether an input is voice or text. Applies to both Capture and Retrieve.

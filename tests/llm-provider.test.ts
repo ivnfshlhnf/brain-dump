@@ -126,6 +126,54 @@ describe('OpenAI-compatible chat seam (createOrganizer / createAnswerer)', () =>
     await expect(createOrganizer(settings()).organize('dump', 'text')).rejects.toThrow();
   });
 
+  it('no longer asks the model for related links (the app owns Related)', async () => {
+    // Related is resolved by the app — vault-ranked, judged by index, dead links impossible
+    // by construction. The prompt's `related` field was dead code: every value it produced
+    // was discarded. Asking for it invites the model to spend effort (and invent wikilinks)
+    // on a field nothing reads (append-rework spec; ADR-0009).
+    responseBody = {
+      choices: [{ message: { content: JSON.stringify({
+        title: 'T', tags: [], category: 'C', summary: 'S', keyPoints: [], body: 'B',
+      }) } }],
+    };
+    await createOrganizer(settings()).organize('a short dump', 'text');
+    const prompt = (JSON.parse(lastOpts.body as string).messages[0] as { content: string }).content;
+    expect(prompt).not.toMatch(/^- related:/m);
+  });
+
+  it('carries the standing Instruction verbatim, after the faithfulness block and before the Dump', async () => {
+    // The Instruction setting (append-rework): the user writes once how every Note is
+    // organized — e.g. the language — and the app applies it to every Organize call. It
+    // must reach the prompt verbatim (it is the user's own words, not a paraphrase), sit
+    // after the built-in rules, and win where the two conflict: the user overriding
+    // faithfulness is a deliberate act, not a leak (ADR-0009).
+    const instruction = 'Always write the Note in English, regardless of the dump language.';
+    responseBody = {
+      choices: [{ message: { content: JSON.stringify({
+        title: 'T', tags: [], category: 'C', summary: 'S', keyPoints: [], body: 'B',
+      }) } }],
+    };
+    await createOrganizer(settings({ organizeInstruction: instruction })).organize('a short dump', 'text');
+    const prompt = (JSON.parse(lastOpts.body as string).messages[0] as { content: string }).content;
+    expect(prompt).toContain(instruction);
+    // After the built-in rules, before the Dump content.
+    expect(prompt.indexOf('leave something out')).toBeLessThan(prompt.indexOf(instruction));
+    expect(prompt.indexOf(instruction)).toBeLessThan(prompt.indexOf('Dump content:'));
+    // And the override is stated, not just implied by ordering.
+    expect(prompt).toMatch(/overrides|takes precedence/i);
+  });
+
+  it('says nothing about an Instruction when none is set', async () => {
+    responseBody = {
+      choices: [{ message: { content: JSON.stringify({
+        title: 'T', tags: [], category: 'C', summary: 'S', keyPoints: [], body: 'B',
+      }) } }],
+    };
+    await createOrganizer(settings({ organizeInstruction: '' })).organize('a short dump', 'text');
+    const prompt = (JSON.parse(lastOpts.body as string).messages[0] as { content: string }).content;
+    expect(prompt).not.toMatch(/instruction/i);
+  });
+
   it('instructs the model to be faithful to the Dump (finding 03 guard)', async () => {
     // CONTEXT.md's Organize contract: "Every part of this is derived from the Dump alone
     // except the related links." The prompt must say so to the model — without it, given a

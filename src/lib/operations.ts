@@ -2,6 +2,7 @@
 import type {
   DocStore,
   Dump,
+  DumpAppendment,
   Embedder,
   Relater,
   Modality,
@@ -31,12 +32,16 @@ function contextBlock(ctx: string): string {
   return `## Context\n\n${ctx}`;
 }
 
-/** The full text of a Dump as it should be Organized: the verbatim original plus
- *  any added Context. With no Context, this is just the original (so the initial
- *  Organize sees the bare capture). The final Organize sees original + Context. */
+/** The full text of a Dump as it should be Organized: the verbatim original, plus any
+ *  added Context, plus every capture Appended into it (ADR-0009 — the Note is organized
+ *  from the whole Dump, captures first to last). With none of those, just the original. */
 export function dumpText(dump: Dump): string {
   const ctx = dump.context.trim();
-  return ctx ? `${dump.content}\n\n${contextBlock(ctx)}` : dump.content;
+  let text = ctx ? `${dump.content}\n\n${contextBlock(ctx)}` : dump.content;
+  for (const appends of dump.appended ?? []) {
+    text += `\n\n## Appended ${appends.stamp}\n\n${appends.text.trim()}`;
+  }
+  return text;
 }
 
 /** The store-side deps every write needs: where to write, how to name it, how to
@@ -144,20 +149,25 @@ export function dumpPath(dump: Dump, settings: Settings): string {
 }
 
 /** Minimal frontmatter + the verbatim original in a `## Original` section, plus a
- *  `## Context` section when Context has been added. The verbatim original is
- *  preserved inside the Dump even as Context edits it. */
+ *  `## Context` section when Context has been added, plus one `## Appended <stamp>`
+ *  section per Appended capture (ADR-0009). Every capture is verbatim inside the Dump.
+ *  A Dump whose capture was Appended into another Note's Dump carries the pointer in
+ *  its frontmatter instead — filed, not Stranded. */
 export function dumpFileContent(dump: Dump): string {
   const ctx = dump.context.trim();
   const ctxSection = ctx ? `\n\n${contextBlock(ctx)}` : '';
+  const appended = (dump.appended ?? [])
+    .map((a) => `\n\n## Appended ${a.stamp}\n\n${a.text.trim()}`)
+    .join('');
   return `---
 id: ${dump.id}
 created: ${dump.createdAt}
-modality: ${dump.modality}
+modality: ${dump.modality}${dump.appendedInto ? `\nappendedInto: ${dump.appendedInto}` : ''}
 ---
 
 ## Original
 
-${dump.content}${ctxSection}
+${dump.content}${ctxSection}${appended}
 `;
 }
 
@@ -358,16 +368,24 @@ export type FinalizeResult =
   | { ok: true; note: Note; session: CaptureSession; written: WriteResult }
   | { ok: false; note: Note; session: CaptureSession; error: Error };
 
-/** Finalize a capture: settle the Note, then either found a new Note or append a dated
- *  section to the matched existing Note, and freeze the Dump.
+/** Finalize a capture: either found a new Note from the Dump, or — when the user confirmed
+ *  the Append suggestion — merge the capture into the target Note's Dump and re-organize
+ *  that Note wholesale from it (ADR-0009). Either way the Dump freezes on success.
  *
- *  The final Organize runs over the full Dump (original + Context) **only when Context was
- *  added**. With no Context the Dump never changed, so the held preview already is the
- *  Organize of the full Dump and is reused — the Note the user approved is the Note that
- *  gets saved. Running it unconditionally meant every plain capture paid for a second LLM
- *  call whose only possible effect was to disagree with the first.
+ *  Founding: the final Organize runs over the full Dump (original + Context) **only when
+ *  Context was added**. With no Context the Dump never changed, so the held preview already
+ *  is the Organize of the full Dump and is reused — the Note the user approved is the Note
+ *  that gets saved. Running it unconditionally meant every plain capture paid for a second
+ *  LLM call whose only possible effect was to disagree with the first.
  *
- *  If the final save fails, the Dump persists (Context already written) and the Note is
+ *  Appending: the merge into the target's Dump happens **first** and is the point of
+ *  durability — once it lands, the accumulated Dump is the saved source of truth. An
+ *  Organize that fails after it leaves the old Note untouched; the user (or recovery)
+ *  retries and the Note is re-organized from the Vault, never from memory. The merge is
+ *  idempotent — a capture already merged into the target Dump is not merged twice — so a
+ *  retry after a mid-flight failure adds no duplicate section.
+ *
+ *  If the final save fails, the Dump (with the merged capture) persists and the Note is
  *  generated from it later — the session stays unsaved so the user can retry. */
 export async function finalizeCapture(
   session: CaptureSession,
@@ -375,20 +393,12 @@ export async function finalizeCapture(
 ): Promise<FinalizeResult> {
   if (session.saved) throw new Error('Already saved.');
 
-  // Re-organize only when Context edited the Dump; otherwise the preview already is the
-  // Organize of the unchanged Dump. See the docstring for why.
-  const organized = session.dump.context
-    ? await organizeNote(session.dump, deps.organizer, deps.settings)
-    : session.preview;
-  // Related is resolved here, at save, and never at capture: it ranks the whole vault, and the
-  // capture path exists to feel instant. By now the Dump is complete (original plus any
-  // Context), so the links reflect the finished thought rather than the first draft.
-  const note = await withRelated(organized, session, deps);
   try {
-    const written =
-      session.match.kind === 'append' && session.match.suggestion
-        ? await appendDumpToNote(note, session.match.suggestion.path, deps)
-        : await writeNote(note, deps.db, deps.settings, deps.hash);
+    const suggestion =
+      session.match.kind === 'append' ? session.match.suggestion : undefined;
+    const { note, written } = suggestion
+      ? await appendCaptureToNote(session, suggestion.path, deps)
+      : await foundNewNote(session, deps);
     // The Note exists, so the Dump is no longer Pending. If this dequeue is the thing
     // that fails, recovery's already-cited check dequeues it later without a second Note.
     await deps.pending?.remove(session.dump.id);
@@ -400,28 +410,219 @@ export async function finalizeCapture(
     // session is excluded from recovery, so the retry cannot race the user's own save.
     const record = await deps.pending?.get(session.dump.id);
     if (record) await recordFailure(record, error as Error, deps.pending!, deps.now());
-    return { ok: false, note, error: error as Error, session: { ...session, saved: false } };
+    return {
+      ok: false,
+      note: session.preview,
+      error: error as Error,
+      session: { ...session, saved: false },
+    };
   }
 }
 
-/** The Note with its Related links filled in, or unchanged when the caller supplied no
- *  embedder and judge.
+/** Found a new Note: settle the Organize (a fresh call only when Context edited the Dump —
+ *  otherwise the held preview already is the Organize of the unchanged Dump; see
+ *  `finalizeCapture`), fill in Related, write the Note. Related is resolved here, at save,
+ *  and never at capture: it ranks the whole vault, and the capture path exists to feel
+ *  instant. */
+async function foundNewNote(
+  session: CaptureSession,
+  deps: FinalizeDeps,
+): Promise<{ note: Note; written: WriteResult }> {
+  const organized = session.dump.context
+    ? await organizeNote(session.dump, deps.organizer, deps.settings)
+    : session.preview;
+  const note = await withRelated(organized, session, deps);
+  const written = await writeNote(note, deps.db, deps.settings, deps.hash);
+  return { note, written };
+}
+
+/** Read one file from the Vault, matching the bare path or the path with its `.md`
+ *  extension (wikilinks drop the extension). Null when the file is gone — soft-deleted
+ *  or unreadable files are not content the app can organize from. The file's `path` is
+ *  its original-case path as stored, extension included — what a subsequent write must
+ *  address, since a wikilink target alone (no `.md`) is not a metadata doc's id. */
+async function readSingleFile(path: string, deps: StoreDeps): Promise<VaultFile | null> {
+  const files = await readVaultFiles(deps.db, (p) => p === path || p === `${path}.md`);
+  const file = files.find((f) => !f.deleted && !f.unreadable);
+  return file ?? null;
+}
+
+/** Append a capture to an existing Note (ADR-0009): merge the capture into the target
+ *  Note's one Dump as a dated verbatim section, then re-organize the Note wholesale from
+ *  the accumulated Dump and rewrite it at its frozen path.
  *
- *  A failure to resolve Related must never cost the user the Note: the whole step is best
- *  effort, and on any error the Note is written exactly as Organize produced it. */
+ *  The merge is written first and is the point of durability. It is idempotent — the
+ *  guard lives inside the transform, so a retry after a mid-flight failure (or a 409
+ *  from a device that landed the same section) re-checks against fresh content and never
+ *  merges twice. After it lands the accumulated Dump is re-read from the Vault and the
+ *  Organize runs over that copy of record — never over a string built in memory, so a
+ *  concurrent device's capture is not absent from the rebuilt Note.
+ *
+ *  With the merge saved, the capture's own Dump file is marked `appendedInto: <the
+ *  target Note>` — the thought now lives in the target's Dump, so the file becomes a
+ *  pointer: reconciliation counts it filed (no Stranded row) and recovery counts it
+ *  organized (no second Note). From here the capture is filed even if the Organize
+ *  fails; a failed Organize leaves the old Note intact, and a Re-organize renders the
+ *  merged Dump into it.
+ *
+ *  An old-format Note's body may still carry `## Appended` sections from before this
+ *  rework; they are absorbed into the Dump first, so the first Append migrates the Note
+ *  rather than dropping the user's earlier captures (ADR-0009). The Note is a view of
+ *  the Dump (CONTEXT.md): the rewrite replaces body and frontmatter wholesale, which is
+ *  why a hand edit to a Note is provisional. The Note keeps its identity — the frozen
+ *  path, the original capture time, the modality, and the single `source` wikilink.
+ *
+ *  When the target's Dump cannot be read (the user deleted it, or the `source` link
+ *  points at a file that is not a Dump), there is nothing to merge into and the capture
+ *  still deserves filing: it founds a new Note instead. */
+async function appendCaptureToNote(
+  session: CaptureSession,
+  notePath: string,
+  deps: FinalizeDeps,
+): Promise<{ note: Note; written: WriteResult }> {
+  const target = await readSingleFile(notePath, deps);
+  const fm = target ? parseFrontmatter(target.content) : null;
+  const dumpFilePath = target && fm?.source ? wikilinkTarget(fm.source) : '';
+  let dumpFile = dumpFilePath ? await readSingleFile(dumpFilePath, deps) : null;
+  // The `source` link must resolve to a file that IS a Dump — a hand-linked (or corrupt)
+  // `source` pointing at a personal note must not have sections merged into it.
+  if (dumpFile && !parseDumpFile(dumpFile.content)) dumpFile = null;
+  if (!target || !fm || !dumpFile) return foundNewNote(session, deps);
+
+  // 1. Absorb the old format, then merge: every section lands in the target's one Dump
+  //    with the same idempotent, 409-safe write, stamped with its capture's own time.
+  //    The write addresses the Dump's stored path — the wikilink target has no `.md`,
+  //    and the metadata doc does.
+  await mergeSection(dumpFile, dumpText(session.dump).trim(), formatStamp(session.dump.createdAt), deps);
+  for (const legacy of legacyAppendedSections(target.content)) {
+    if (!dumpFile.content.includes(`## Appended ${legacy.stamp}\n`)) {
+      await mergeSection(dumpFile, legacy.text, legacy.stamp, deps);
+    }
+  }
+
+  // 2. Organize from the accumulated Dump as the Vault now holds it — the copy of
+  //    record, not a string assembled in memory.
+  const mergedFile = (await readSingleFile(dumpFile.path, deps)) ?? dumpFile;
+  const { body: dumpBody } = splitFrontmatter(mergedFile.content);
+  const out = await deps.organizer.organize(dumpBody, fm.modality);
+
+  // 3. The new Note keeps the target's identity: frozen path, original capture time and
+  //    modality, the single source wikilink. Everything else is the organizer's output.
+  const organized: Note = {
+    title: out.title,
+    tags: out.tags,
+    createdAt: fm.created,
+    modality: fm.modality,
+    source: fm.source,
+    category: out.category,
+    summary: out.summary,
+    body: out.body,
+    keyPoints: out.keyPoints,
+    related: [],
+  };
+  // 4. Related is recomputed for the Note as it now stands — an Append that changes what
+  //    the Note is about may drop links, add them, or keep them (finding 07: they were
+  //    computed then discarded).
+  const note = await fillRelated(organized, notePath, deps);
+
+  // 5. Rewrite the Note in place at the frozen path. Wholesale, by design: the Note is a
+  //    view of the Dump, and this Organize is its newest rendering.
+  const { metadataId, chunkId } = await modifyFile(
+    deps.db,
+    notePath,
+    () => noteFileContent(note),
+    { mtime: deps.now(), hash: deps.hash, settings: deps.settings },
+  );
+
+  // 6. The capture's own Dump file becomes a pointer to the Note that now carries the
+  //    thought — filed, not Stranded, and recovery will not found a second Note for it.
+  await markAppendedInto(session.dump, notePath, deps);
+
+  return { note, written: { path: notePath, metadataId, chunkId } };
+}
+
+/** Merge one dated verbatim section into a Dump file. The idempotency check sits inside
+ *  the transform so it runs against the freshest content on every 409 retry — a section
+ *  a concurrent device already landed is detected there, not against a stale read. */
+async function mergeSection(
+  dumpFile: VaultFile,
+  text: string,
+  stamp: string,
+  deps: FinalizeDeps,
+): Promise<void> {
+  const section = `## Appended ${stamp}\n\n${text}`;
+  await modifyFile(
+    deps.db,
+    dumpFile.path,
+    (current) =>
+      current.includes(section) ? current : `${current.trimEnd()}\n\n${section}\n`,
+    { mtime: deps.now(), hash: deps.hash, settings: deps.settings },
+  );
+}
+
+/** The `## Appended <date>` sections an old-format Note still carries in its body —
+ *  pre-ADR-0009 files kept them below `## Related`, each traced by a `_Source:` line.
+ *  Parsed back into appendments (the `_Source` line dropped), they are what the first
+ *  Append or Re-organize folds into the Note's Dump. */
+export function legacyAppendedSections(noteFile: string): DumpAppendment[] {
+  const { body } = splitFrontmatter(noteFile);
+  return body
+    .trimStart()
+    .split(/\n+(?=## Appended \d{4}-\d{2}-\d{2} )/)
+    .slice(1)
+    .map((part) => {
+      const nl = part.indexOf('\n');
+      const heading = (nl >= 0 ? part.slice(0, nl) : part).trim();
+      const raw = nl >= 0 ? part.slice(nl + 1).trim() : '';
+      return {
+        stamp: heading.replace(/^##\s+Appended\s+/, '').trim(),
+        text: raw.replace(/\n*_?[Ss]ource:\s*\[\[[^\]\n]+\]\]\s*$/, '').trim(),
+      };
+    });
+}
+
+/** Point the capture's own Dump file at the Note that absorbed it. Reads the Vault's
+ *  copy first, so a hand edit to the file survives the mark; a missing or unparseable
+ *  file is left alone — there is nothing to mark. */
+async function markAppendedInto(
+  dump: Dump,
+  notePath: string,
+  deps: FinalizeDeps,
+): Promise<void> {
+  const path = dumpPath(dump, deps.settings);
+  const file = await readSingleFile(path, deps);
+  const parsed = file ? parseDumpFile(file.content) : null;
+  if (!parsed || parsed.appendedInto) return;
+  await writeDump({ ...parsed, appendedInto: wikilink(notePath) }, deps);
+}
+
+/** The Note with its Related links filled in, or unchanged when the caller supplied no
+ *  embedder and judge (the founding path — the append and re-organize paths call
+ *  `fillRelated` directly with their own exclude path). */
 async function withRelated(
   note: Note,
   session: CaptureSession,
   deps: FinalizeDeps,
 ): Promise<Note> {
-  if (!deps.embedder || !deps.relater) return note;
+  return fillRelated(note, `${deps.settings.managedFolder}/${noteFilename(note)}`, deps);
+}
 
-  // On the Append path the Note being written already exists in the vault; excluding it keeps
-  // it from ranking as its own closest match.
-  const target =
-    session.match.kind === 'append' && session.match.suggestion
-      ? session.match.suggestion.path
-      : `${deps.settings.managedFolder}/${noteFilename(note)}`;
+/** The Note with its Related links resolved against the Vault, excluding `excludePath` —
+ *  the Note itself, which must not rank as its own closest match. Best effort: no
+ *  embedder and judge means no links, and a resolution failure logs and returns the Note
+ *  unchanged rather than costing the user the Note. */
+async function fillRelated(
+  note: Note,
+  excludePath: string,
+  deps: {
+    db: DocStore;
+    settings: Settings;
+    embedder?: Embedder;
+    relater?: Relater;
+    log?: Log;
+  },
+): Promise<Note> {
+  if (!deps.embedder || !deps.relater) return note;
 
   const relatedDeps: RelatedDeps = {
     db: deps.db,
@@ -432,7 +633,7 @@ async function withRelated(
   };
 
   try {
-    return { ...note, related: await findRelated(note, target, relatedDeps) };
+    return { ...note, related: await findRelated(note, excludePath, relatedDeps) };
   } catch (error) {
     (deps.log ?? noopLog)({
       level: 'error',
@@ -444,13 +645,13 @@ async function withRelated(
   }
 }
 
-// --- Append a Dump to an existing Note (ticket 04) -----------------------
+// --- Append a capture to an existing Note (ADR-0009) ----------------------
 // Matching is LLM-assisted (by tags/topic) against the existing Notes in the
-// managed folder; embedding-based matching is deferred until Retrieve (06).
-// Appending adds a new dated section to the Note body and never overwrites the
-// user's edits — writes use optimistic concurrency (write with the current `_rev`;
-// on a 409, re-fetch, re-apply the append, retry). Metadata refresh (re-deriving
-// title/tags/summary) is explicit and user-triggered, never automatic.
+// managed folder. Appending merges the capture into the target Note's one Dump
+// and re-organizes the Note wholesale from it (ADR-0009) — the Note is a view of
+// its Dump, so the rewrite replaces body and frontmatter alike. Writes use
+// optimistic concurrency (write with the current `_rev`; on a 409, re-fetch,
+// re-apply, retry).
 
 /** The frontmatter fields parsed out of a Note file, in the v1 schema shape. */
 export interface ParsedFrontmatter {
@@ -755,10 +956,9 @@ export interface FiledNote {
  *  user will look for it; a Dump captured days ago and filed today would sort further down, and
  *  the next home read restores strict newest-first order anyway.
  *
- *  An Append writes a dated section into an existing Note and leaves its frontmatter untouched,
- *  so that Note's card is unchanged and stays exactly where it already is — folding the appended
- *  content in would overwrite the card of the Note that received it with the card of the fragment
- *  it received.
+ *  An Append re-organizes the Note it landed in (ADR-0009), so that Note's card may now
+ *  carry a new title or summary — the card is refreshed *in place*, keeping its position:
+ *  the Note is the same thought the user filed where it already is, not a new arrival.
  *
  *  The cache is refreshed to match, so the fold survives a restart and the grid does not paint
  *  a stale set of cards before the next Vault read reconciles. A failed cache write costs only
@@ -769,7 +969,7 @@ export async function fileOnGrid(
   cache?: NoteCardCache,
 ): Promise<NoteCard[]> {
   const next = filed.appended
-    ? cards
+    ? cards.map((c) => (c.path === filed.path ? cardForNote(filed.note, filed.path) : c))
     : [cardForNote(filed.note, filed.path), ...cards.filter((c) => c.path !== filed.path)];
   await safeWrite(cache, next);
   return next;
@@ -808,61 +1008,13 @@ export async function matchNote(
   return candidate ? { kind: 'append', suggestion: candidate } : { kind: 'new' };
 }
 
-/** `<YYYY-MM-DD> <HH:MM:SS> UTC` — the stamp on an appended section (UTC, like the
- *  filenames, so it is deterministic across machines). */
+/** `<YYYY-MM-DD> <HH:MM:SS> UTC` — the stamp on an Appended capture's section inside its
+ *  Dump (UTC, like the filenames, so it is deterministic across machines). */
 function formatStamp(ms: number): string {
   const d = new Date(ms);
   return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())} ${pad2(
     d.getUTCHours(),
   )}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())} UTC`;
-}
-
-/** A new dated section for the Note body: a timestamped heading, the organized
- *  body of the appended Dump, and a traceability link back to the source Dump.
- *
- *  The stamp is the Dump's capture time (`note.createdAt`), not the moment of the
- *  append: the section *is* the Dump, so it is dated by when the thought occurred —
- *  the meaningful date for a journal-style entry. The append action's time is
- *  recorded as the file's `mtime` instead. */
-export function datedSection(note: Note): string {
-  return `## Appended ${formatStamp(note.createdAt)}\n\n${note.body.trim()}\n\n_Source: ${note.source}_`;
-}
-
-export interface AppendDeps {
-  db: DocStore;
-  settings: Settings;
-  hash: (content: string) => Promise<string>;
-  now: () => number;
-}
-
-/** Append a Dump's organized content to an existing Note as a new dated section.
- *  Optimistic concurrency: writes with the current `_rev`; on a 409, re-fetches the
- *  fresh Note content and re-applies the append, so a concurrent edit survives. The
- *  frontmatter (title/tags/summary) is untouched — metadata refresh is explicit.
- *
- *  The section joins the *body* — inserted before the trailing sections, not at the
- *  end of the file (finding 06). The reader takes Summary/Key points/Related to be the
- *  last sections on the file; writing below them made the reader swallow the appended
- *  content into the Related list. Appends stack here in capture order, and the
- *  sections stay the last thing on the file. */
-export async function appendDumpToNote(
-  note: Note,
-  notePath: string,
-  deps: AppendDeps,
-): Promise<WriteResult> {
-  const section = datedSection(note);
-  const { metadataId, chunkId } = await modifyFile(
-    deps.db,
-    notePath,
-    (current) => {
-      const { frontmatter, body: raw } = splitFrontmatter(current);
-      const sectionsAt = splitNoteBody(raw).bodyEnd + frontmatter.length;
-      if (sectionsAt >= current.length) return `${current.trimEnd()}\n\n${section}\n`;
-      return `${current.slice(0, sectionsAt).trimEnd()}\n\n${section}\n\n${current.slice(sectionsAt).trimStart()}`;
-    },
-    { mtime: deps.now(), hash: deps.hash, settings: deps.settings },
-  );
-  return { path: notePath, metadataId, chunkId };
 }
 
 export interface RefreshDeps {
@@ -871,51 +1023,141 @@ export interface RefreshDeps {
   organizer: Organizer;
   hash: (content: string) => Promise<string>;
   now: () => number;
+  /** Supplied to recompute the Note's Related links as part of the re-organize. Omit both
+   *  and the rebuilt Note carries no Related links — except when the Note has no Dump, where
+   *  the fallback refresh keeps whatever links its file already carries. */
+  embedder?: Embedder;
+  relater?: Relater;
+  log?: Log;
 }
 
-/** Explicit, user-triggered metadata refresh: re-organize the Note's full body and
- *  re-derive the frontmatter (title/tags/category/summary) from it, preserving the
- *  body byte-for-byte. Never called automatically — the append never refreshes.
+/** Explicit, user-triggered Re-organize (ADR-0009): rebuild the Note wholesale from its
+ *  Dump — body and frontmatter alike — and recompute Related. The same path as an
+ *  Append's re-organize, minus the merge of a new capture (an old-format Note's legacy
+ *  `## Appended` sections are still absorbed — they are its content): the Note is a view
+ *  of its Dump, so anything worth keeping belongs in the Dump, and this regenerates the
+ *  view from the record.
  *
- *  The Organize runs once per user action: the re-derived frontmatter is computed on
- *  the first attempt and cached, then re-applied to the (possibly fresher) body on
- *  each 409 retry. A concurrent body edit therefore survives (the body is preserved);
- *  only the derived metadata may be one revision stale, which is acceptable for an
- *  explicit, best-effort refresh. */
+ *  The Organize runs once per user action. In the dump-present branch the rebuilt file
+ *  content is computed on the first attempt and re-applied to each 409 retry — a
+ *  concurrent hand edit is regenerated over rather than preserved, which is the contract
+ *  (the Note is a view of its Dump). In the no-Dump fallback the derived frontmatter is
+ *  what is cached; each retry re-applies it to the freshest body on the file, so a
+ *  concurrent hand edit there survives.
+ *
+ *  When the Note's Dump is gone (deleted by the user), the body on the file is all there
+ *  is: the frontmatter is re-derived against it and the body preserved byte-for-byte —
+ *  the pre-rework metadata-refresh behavior, kept for exactly that case. */
 export async function refreshNoteMetadata(
   notePath: string,
   deps: RefreshDeps,
 ): Promise<WriteResult> {
-  let frontmatter: string | null = null; // re-derived once, reused across 409 retries
+  let plan:
+    | { mode: 'note'; content: string }
+    | { mode: 'frontmatter'; fields: RefreshFrontmatter }
+    | null = null; // built once, re-applied across 409 retries
   const { metadataId, chunkId } = await modifyFile(
     deps.db,
     notePath,
     async (current) => {
-      if (frontmatter === null) {
-        const fm = parseFrontmatter(current);
-        // The organizer re-derives metadata against the *current body* — the user's content,
-        // not the trailing `## Summary` / `## Key points` / `## Related` sections this file
-        // itself appends. Strip them so a refresh isn't coloured by its own stale metadata.
-        const { body: raw } = splitFrontmatter(current);
-        const { body } = splitNoteBody(raw);
-        const out = await deps.organizer.organize(body, fm.modality);
-        frontmatter = noteFrontmatter({
-          title: out.title,
-          tags: out.tags,
-          createdAt: fm.created,
-          modality: fm.modality,
-          source: fm.source,
-          category: out.category,
-          summary: out.summary,
-        });
-      }
-      // Re-apply the once-derived frontmatter to the freshest body (preserved verbatim).
-      const { body } = splitFrontmatter(current);
-      return `${frontmatter}${body}`;
+      if (plan === null) plan = await buildReorganized(current, notePath, deps);
+      if (plan.mode === 'note') return plan.content;
+      // The fallback re-applies only the derived frontmatter to the freshest body — a
+      // concurrent hand edit lands between retries is kept, as the pre-rework refresh did.
+      return withFrontmatter(plan.fields, splitFrontmatter(current).body);
     },
     { mtime: deps.now(), hash: deps.hash, settings: deps.settings },
   );
   return { path: notePath, metadataId, chunkId };
+}
+
+/** A Note file with `frontmatter` re-derived and its existing body untouched — the
+ *  trailing sections and any hand-written prose included. */
+function withFrontmatter(
+  fields: {
+    title: string;
+    tags: string[];
+    createdAt: number;
+    modality: Modality;
+    source: string;
+    category: Category;
+    summary: string;
+  },
+  body: string,
+): string {
+  return `${noteFrontmatter(fields)}${body.replace(/^\n+/, '')}`;
+}
+
+/** The frontmatter a Re-organize re-derives in the no-Dump fallback — the v1 schema's
+ *  identity fields, with the body left exactly as the file holds it. */
+type RefreshFrontmatter = Pick<
+  Note,
+  'title' | 'tags' | 'createdAt' | 'modality' | 'source' | 'category' | 'summary'
+>;
+
+/** The rebuilt file content for a Re-organize: from the Note's Dump when it exists, from
+ *  the file's own body when it does not. */
+async function buildReorganized(
+  current: string,
+  notePath: string,
+  deps: RefreshDeps,
+): Promise<
+  | { mode: 'note'; content: string }
+  | { mode: 'frontmatter'; fields: RefreshFrontmatter }
+> {
+  const fm = parseFrontmatter(current);
+  const dumpFilePath = fm.source ? wikilinkTarget(fm.source) : '';
+  const dumpFile = dumpFilePath ? await readSingleFile(dumpFilePath, deps) : null;
+  const dump = dumpFile ? parseDumpFile(dumpFile.content) : null;
+
+  if (dumpFile && dump) {
+    // An old-format Note's body may still carry pre-ADR-0009 `## Appended` sections;
+    // they are absorbed into the Dump first, so a Re-organize migrates rather than
+    // drops them.
+    for (const legacy of legacyAppendedSections(current)) {
+      if (!dumpFile.content.includes(`## Appended ${legacy.stamp}\n`)) {
+        await mergeSection(dumpFile, legacy.text, legacy.stamp, deps);
+      }
+    }
+    // The accumulated Dump body — every capture, verbatim, first to last. The source the
+    // Note is a view of.
+    const fresh = (await readSingleFile(dumpFile.path, deps)) ?? dumpFile;
+    const { body } = splitFrontmatter(fresh.content);
+    const out = await deps.organizer.organize(body, fm.modality);
+    const note: Note = {
+      title: out.title,
+      tags: out.tags,
+      createdAt: fm.created,
+      modality: fm.modality,
+      source: fm.source,
+      category: out.category,
+      summary: out.summary,
+      body: out.body,
+      keyPoints: out.keyPoints,
+      related: [],
+    };
+    return { mode: 'note', content: noteFileContent(await fillRelated(note, notePath, deps)) };
+  }
+
+  // No Dump behind the Note: the file's own body is all there is. Organize against the
+  // user's content alone (never the trailing sections this file appends), preserve the
+  // body verbatim — hand-written prose under the trailing sections included — and
+  // refresh only the derived frontmatter.
+  const { body: raw } = splitFrontmatter(current);
+  const { body } = splitNoteBody(raw);
+  const out = await deps.organizer.organize(body, fm.modality);
+  return {
+    mode: 'frontmatter',
+    fields: {
+      title: out.title,
+      tags: out.tags,
+      createdAt: fm.created,
+      modality: fm.modality,
+      source: fm.source,
+      category: out.category,
+      summary: out.summary,
+    },
+  };
 }
 
 // --- The Note sheet (ticket 06) ------------------------------------------
@@ -1348,8 +1590,9 @@ export async function retryPending(pending: PendingStore, ids?: string[]): Promi
 // on its first run, spend LLM calls on thoughts the user may have abandoned months ago.
 
 /** Every Dump a Note cites, as wikilinks — from a Note's `source:` frontmatter and from
- *  the `_Source:` line of each appended dated section. Both forms matter: an Appended
- *  Dump founded no Note of its own, and is filed exactly as thoroughly. */
+ *  the `_Source:` line of each appended dated section. The `_Source:` form matters for
+ *  old-format files: under ADR-0009 an Appended capture is filed by the `appendedInto`
+ *  pointer its own Dump file carries instead (see `buildVaultState`). */
 export function referencedDumpLinks(files: Array<{ content: string }>): Set<string> {
   const links = new Set<string>();
   for (const file of files) {
@@ -1360,19 +1603,40 @@ export function referencedDumpLinks(files: Array<{ content: string }>): Set<stri
   return links;
 }
 
-/** Parse a Dump back out of its file — the inverse of `dumpFileContent`. Returns null
- *  for a file that is not a Dump (no id in the frontmatter), so a stray file in the
- *  Dumps folder is skipped rather than half-read. */
+/** Parse a Dump back out of its file — the inverse of `dumpFileContent`. The body is a
+ *  run of sections: the verbatim original, then optional Context, then any Appended
+ *  captures. Each keeps its own text, so a Dump that has grown by Appends round-trips
+ *  exactly — a rewrite (a recovery re-syncing the file) never drops an Appended capture.
+ *  Returns null for a file that is not a Dump (no id in the frontmatter), so a stray
+ *  file in the Dumps folder is skipped rather than half-read. */
 export function parseDumpFile(content: string): Dump | null {
   const { fields, body } = splitFrontmatter(content);
   if (!fields.id) return null;
-  const [original = '', context = ''] = body.split(/\n+##\s+Context\s*\n+/);
+  // Only `## Appended <date>` is a top-level section boundary; `## Context` bounds the
+  // founding capture's Context inside the head. An Appended capture's own `## Context`
+  // must not become the founding Dump's — it is verbatim text inside the appended
+  // section — so the Appended split runs first. (The body leads with a newline before
+  // `## Original`; without the trim the split would open with an empty part and the
+  // original would read as empty.)
+  const parts = body.trimStart().split(/\n+(?=## Appended \d{4}-\d{2}-\d{2} )/);
+  const head = parts.shift() ?? '';
+  const [originalPart = '', contextPart] = head.split(/\n+##\s+Context\s*\n+/);
+  const original = originalPart.replace(/^\s*##\s+Original\s*\n+/, '').trim();
+  const appended: DumpAppendment[] = [];
+  for (const part of parts) {
+    const nl = part.indexOf('\n');
+    const heading = (nl >= 0 ? part.slice(0, nl) : part).trim();
+    const text = nl >= 0 ? part.slice(nl + 1).trim() : '';
+    appended.push({ stamp: heading.replace(/^##\s+Appended\s+/, '').trim(), text });
+  }
   return {
     id: fields.id,
-    content: original.replace(/^\s*##\s+Original\s*\n+/, '').trim(),
-    context: context.trim(),
+    content: original,
+    context: contextPart?.trim() ?? '',
     createdAt: Number(fields.created ?? 0),
     modality: fields.modality === 'voice' ? 'voice' : 'text',
+    appended,
+    ...(fields.appendedInto ? { appendedInto: fields.appendedInto } : {}),
   };
 }
 
@@ -1415,6 +1679,13 @@ function buildVaultState(files: VaultFile[], settings: Settings): VaultState {
 
   const notes = files.filter((f) => f.path.startsWith(`${managedFolder}/`));
   const referenced = referencedDumpLinks(notes.filter((f) => !f.deleted && !f.unreadable));
+  // A Dump whose capture was Appended into another Note's Dump is filed — the pointer in
+  // its frontmatter names the Note that carries the thought. Without this the grid would
+  // show the just-appended capture as Stranded `unfiled`, and recovery would organize a
+  // second Note for a thought already inside its target.
+  for (const [, { dump }] of dumps) {
+    if (dump.appendedInto) referenced.add(wikilink(dumpPath(dump, settings)));
+  }
   const brokenRefs = new Map<string, { path: string; deleted: boolean }>();
   for (const note of notes.filter((f) => f.deleted || f.unreadable)) {
     for (const link of referencedDumpLinks([note])) {

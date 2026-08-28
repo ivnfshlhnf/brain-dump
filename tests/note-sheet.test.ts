@@ -206,20 +206,24 @@ describe('readNote — the full Note and its verbatim source (ticket 06)', () =>
   });
 });
 
-// --- reorganizeNote: re-derive metadata from the current body -------------
+// --- reorganizeNote: the manual Re-organize (ADR-0009) ---------------------
 
-describe('reorganizeNote — refresh the metadata against the current body (ticket 06)', () => {
-  it('re-derives title, Tags, summary and Category from the body, and reads them back', async () => {
-    const path = await seedNote(makeNote({ title: 'Old Title', tags: ['old'], category: 'uncategorized', summary: 'Old summary.' }));
+describe('reorganizeNote — rebuild the Note wholesale from its Dump (the append rework)', () => {
+  it('re-organizes from the accumulated Dump: body and frontmatter alike are regenerated, and read back', async () => {
+    const dump = sourceDump();
+    const path = await seedNote(
+      makeNote({ source: sourceWikilink(dump, settings), title: 'Old Title', tags: ['old'], summary: 'Old summary.', body: 'A stale body.' }),
+    );
+    await seedDump(dump);
 
-    const refreshOrganizer: Organizer = {
-      organize: async () => ({ ...sampleOutput, title: 'New Title', tags: ['new'], category: 'personal', summary: 'New summary.' }),
+    const reorganizer: Organizer = {
+      organize: async () => ({ ...sampleOutput, title: 'New Title', tags: ['new'], category: 'personal', summary: 'New summary.', body: 'The whole thought, re-organized.' }),
     };
 
     const view = await reorganizeNote(path, {
       db,
       settings,
-      organizer: refreshOrganizer,
+      organizer: reorganizer,
       hash: sha1Hex,
       now: () => fixedNow,
     });
@@ -229,51 +233,44 @@ describe('reorganizeNote — refresh the metadata against the current body (tick
     expect(view!.note.tags).toEqual(['new']);
     expect(view!.note.category).toBe('personal');
     expect(view!.note.summary).toBe('New summary.');
+    expect(view!.note.body).toBe('The whole thought, re-organized.'); // regenerated, not preserved
+    expect(view!.note.source).toBe(sourceWikilink(dump, settings)); // identity survives
   });
 
-  it('preserves the body byte-for-byte — only the metadata is touched', async () => {
-    const note = makeNote({ body: 'The body the user may have edited.' });
-    const path = await seedNote(note);
+  it('a hand edit to the Note does not survive — the Dump is the record, the Note a view', async () => {
+    const dump = sourceDump();
+    const path = await seedNote(makeNote({ source: sourceWikilink(dump, settings) }));
+    await seedDump(dump);
+    // The user edited the Note in Obsidian.
+    await writeFile(db, path, noteFileContent(makeNote({ source: sourceWikilink(dump, settings), body: 'A hand-written edit.' })), {
+      ctime: fixedNow, mtime: fixedNow, hash: sha1Hex, settings,
+    });
 
     const view = await reorganizeNote(path, {
       db,
       settings,
-      organizer: { organize: async () => ({ ...sampleOutput, title: 'New Title' }) },
+      organizer: { organize: async () => sampleOutput },
       hash: sha1Hex,
       now: () => fixedNow,
     });
 
-    expect(view!.note.body).toBe('The body the user may have edited.');
+    expect(view!.note.body).toContain('The basil is wilting again.'); // the organized body is back
+    expect(view!.note.body).not.toBe('A hand-written edit.');
   });
 
-  it('assigns a member Category to a legacy Note — old Notes join the colour system when touched', async () => {
-    // A legacy Note carries a free-form Category ('Hardware'); it reads as `uncategorized`.
-    const path = await seedNote(makeNote({ category: 'uncategorized' }));
-    expect((await readNote(path, { db, settings, hash: sha1Hex }))!.note.category).toBe('uncategorized');
-
-    // Re-organizing assigns a member Category from the closed set.
-    const view = await reorganizeNote(path, {
-      db,
-      settings,
-      organizer: { organize: async () => ({ ...sampleOutput, category: 'tools' }) },
-      hash: sha1Hex,
-      now: () => fixedNow,
-    });
-
-    expect(view!.note.category).toBe('tools');
-  });
-
-  it('organizes against the current body, not the stale trailing sections — a refresh is not coloured by its own metadata', async () => {
-    // A Note on disk carries the trailing `## Summary` / `## Key points` / `## Related`
-    // sections `noteFileContent` appends. Re-organizing must hand the organizer the user's
-    // content body alone, or the re-derived title/Tags/summary are skewed by the old sections.
-    const note = makeNote({
-      body: 'The body the user actually wrote.',
-      summary: 'An old summary that must not reach the organizer.',
-      keyPoints: ['An old key point that must not reach the organizer'],
-      related: ['[[old/related]]'],
-    });
-    const path = await seedNote(note);
+  it('organizes against the accumulated Dump, not the Note\'s stale trailing sections', async () => {
+    // The Note on disk carries the trailing `## Summary` / `## Key points` / `## Related`
+    // sections and an out-of-date body. The re-organize hands the organizer the Dump's
+    // verbatim content — the record — not the old rendering.
+    const dump = sourceDump();
+    const path = await seedNote(
+      makeNote({
+        source: sourceWikilink(dump, settings),
+        body: 'A stale body that must not reach the organizer.',
+        summary: 'An old summary that must not reach the organizer.',
+      }),
+    );
+    await seedDump(dump);
 
     let organizedBody: string | null = null;
     const recordingOrganizer: Organizer = {
@@ -291,9 +288,45 @@ describe('reorganizeNote — refresh the metadata against the current body (tick
       now: () => fixedNow,
     });
 
-    expect(organizedBody).toBe('The body the user actually wrote.');
+    expect(organizedBody).toContain('i keep forgetting to water the plants'); // the Dump's verbatim capture
+    expect(organizedBody).not.toContain('A stale body');
     expect(organizedBody).not.toContain('## Summary');
-    expect(organizedBody).not.toContain('An old key point');
-    expect(organizedBody).not.toContain('## Related');
+    expect(organizedBody).not.toContain('An old summary');
+  });
+
+  it('when the Note\'s Dump is gone, the body on the file is preserved and only the frontmatter is re-derived', async () => {
+    // No Dump seeded: the file's own body is all there is, so the pre-rework
+    // metadata-refresh behavior is kept for exactly that case.
+    const path = await seedNote(makeNote({ title: 'Old Title', tags: ['old'], category: 'uncategorized', summary: 'Old summary.', body: 'The body that remains.' }));
+
+    const view = await reorganizeNote(path, {
+      db,
+      settings,
+      organizer: { organize: async () => ({ ...sampleOutput, title: 'New Title', tags: ['new'], category: 'personal', summary: 'New summary.' }) },
+      hash: sha1Hex,
+      now: () => fixedNow,
+    });
+
+    expect(view!.note.title).toBe('New Title');
+    expect(view!.note.tags).toEqual(['new']);
+    expect(view!.note.summary).toBe('New summary.');
+    expect(view!.note.body).toBe('The body that remains.');
+  });
+
+  it('assigns a member Category to a legacy Note — old Notes join the colour system when touched', async () => {
+    // A legacy Note carries a free-form Category ('Hardware'); it reads as `uncategorized`.
+    const path = await seedNote(makeNote({ category: 'uncategorized' }));
+    expect((await readNote(path, { db, settings, hash: sha1Hex }))!.note.category).toBe('uncategorized');
+
+    // Re-organizing assigns a member Category from the closed set.
+    const view = await reorganizeNote(path, {
+      db,
+      settings,
+      organizer: { organize: async () => ({ ...sampleOutput, category: 'tools' }) },
+      hash: sha1Hex,
+      now: () => fixedNow,
+    });
+
+    expect(view!.note.category).toBe('tools');
   });
 });

@@ -4,19 +4,35 @@ import type { Category } from './category';
 
 export type Modality = 'text' | 'voice';
 
+/** One capture Appended into a Dump after the original (ADR-0009): the capture's full
+ *  verbatim text, and the UTC stamp the section is filed under. */
+export interface DumpAppendment {
+  stamp: string; // `<YYYY-MM-DD HH:MM:SS UTC>` — the section heading's stamp
+  text: string; // the capture's full verbatim text (original plus any Context)
+}
+
 /** A raw record of a single brain-dump. During the capture session the user may
  *  add Context, which edits the Dump while preserving the verbatim original inside
- *  it (`content`). Once the Note is saved the Dump is frozen and never changes. */
+ *  it (`content`). Once the Note is saved the Dump is frozen and never changes —
+ *  it only ever grows by an Append (ADR-0009): a Note has one Dump, and every
+ *  capture Appended to that Note is merged into the same file. */
 export interface Dump {
   id: string;
   content: string; // verbatim capture — the original, preserved inside the Dump
   context: string; // added Context during the review session; '' until added
   createdAt: number; // ms epoch
   modality: Modality;
+  /** Captures Appended into this Dump after the original. Absent until the first Append. */
+  appended?: DumpAppendment[];
+  /** Set when this Dump's capture was Appended into another Note's Dump (ADR-0009):
+   *  the wikilink of the Note that now carries the thought. The capture's own file
+   *  stays as provenance with a pointer — filed, not Stranded — and recovery counts
+   *  it as already organized rather than founding a second Note for it. */
+  appendedInto?: string;
 }
 
-/** The organized, editable artifact derived from one or more Dumps.
- *  See CONTEXT.md. Frontmatter holds the v1 schema; the body holds the
+/** The organized artifact derived from exactly one Dump (ADR-0009) — the Dump is the
+ *  record, the Note a view of it. Frontmatter holds the v1 schema; the body holds the
  *  cleaned content plus Summary/Key points/Related sections. */
 export interface Note {
   title: string;
@@ -260,6 +276,11 @@ export interface Settings {
   llmModel: string;
   llmApiKey: string;
   embedderModel: string;
+  /** The user's standing Instruction for how every Note is organized (CONTEXT.md:
+   *  Instruction) — e.g. "always write in English regardless of the dump's language".
+   *  Applied verbatim to the organizer prompt on every Organize call; never reaches the
+   *  matcher or the Related judge. Empty means no Instruction. */
+  organizeInstruction: string;
   /** The app-owned CouchDB database holding cached embeddings — a sibling of the vault
    *  database, never the vault itself (ADR-0004). */
   embeddingsDb: string;
@@ -284,4 +305,5 @@ export const DEFAULT_SETTINGS: Settings = {
   llmApiKey: '',
   embedderModel: 'openai/text-embedding-3-small',
   embeddingsDb: 'brain-dump-embeddings',
+  organizeInstruction: '',
 };

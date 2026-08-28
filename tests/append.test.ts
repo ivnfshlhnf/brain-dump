@@ -8,12 +8,13 @@ import PouchDB from 'pouchdb-core';
 import memory from 'pouchdb-adapter-memory';
 import {
   writeNote,
+  writeDump,
   matchNote,
-  appendDumpToNote,
-  refreshNoteMetadata,
   beginCapture,
   finalizeCapture,
   parseNote,
+  refreshNoteMetadata,
+  wikilink,
   type WriteResult,
 } from '../src/lib/operations';
 import { docIdForPath } from '../src/lib/livesync';
@@ -21,8 +22,11 @@ import {
   DEFAULT_SETTINGS,
   type Settings,
   type DocStore,
+  type Dump,
+  type Embedder,
   type Note,
   type Organizer,
+  type Relater,
   type OrganizeOutput,
   type Matcher,
   type Modality,
@@ -94,7 +98,181 @@ const organizer: Organizer = {
   organize: async () => sampleOutput,
 };
 
-// --- matching ------------------------------------------------------------
+/** An Organizer that records what it was asked to organize — the accumulated-Dump
+ *  assertions read its calls. */
+function recordingOrganizer(output: Partial<OrganizeOutput> = {}) {
+  const calls: Array<{ content: string; modality: Modality }> = [];
+  return {
+    calls,
+    organizer: {
+      organize: async (content: string, modality: Modality) => {
+        calls.push({ content, modality });
+        return { ...sampleOutput, ...output };
+      },
+    },
+  };
+}
+
+/** Seed the Dump file a seeded Note's `source` wikilink points at: the default ids and
+ *  capture time line up (`dumpFilename` = <stamp>-<first 6 id chars>.md), so the Note's
+ *  default `source` resolves to the returned path. */
+async function seedDump(over: Partial<Dump> = {}): Promise<string> {
+  const dump: Dump = {
+    id: 'aaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    content: 'First verbatim capture.',
+    context: '',
+    createdAt: fixedNow,
+    modality: 'text' as Modality,
+    ...over,
+  };
+  const written = await writeDump(dump, { db, settings, hash: sha1Hex });
+  return written.path;
+}
+
+// --- the append rework (ADR-0009, Seam A) ---------------------------------
+
+describe('finalizeCapture — the append rework (ADR-0009, Seam A)', () => {
+  it('merges the capture into the target Dump, then re-organizes the Note wholesale from it', async () => {
+    // ADR-0009: the Note is always the Organize of its entire Dump. Append writes the new
+    // capture into the target's one Dump as a dated verbatim section (the point of
+    // durability), then one Organize call regenerates the Note — body and title alike —
+    // from the accumulated Dump, written back at the frozen path.
+    const dumpPath = await seedDump();
+    const existingPath = await seedNote(
+      makeNote({ source: wikilink(dumpPath), body: 'Old organized body.', title: 'Old Title' }),
+    );
+
+    const { calls, organizer: reorganizer } = recordingOrganizer({
+      title: 'Plants, revisited',
+      body: 'The whole thought, re-organized.',
+    });
+
+    const session = await beginCapture('Second verbatim capture.', {
+      db,
+      settings,
+      organizer: reorganizer,
+      matcher: appendToFirstMatcher,
+      now: () => fixedNow + 1000,
+      newId: () => 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee',
+      hash: sha1Hex,
+    });
+    expect(session.match.kind).toBe('append');
+
+    const result = await finalizeCapture(session, {
+      db,
+      settings,
+      organizer: reorganizer,
+      hash: sha1Hex,
+      now: () => fixedNow + 2000,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The filename is frozen at creation — a rewritten title does not move the file.
+    expect(result.written.path).toBe(existingPath);
+
+    // The capture was merged into the target's one Dump: original intact, new capture
+    // verbatim under a dated section stamped with the *capture's* time.
+    const dumpContent = await noteContent(dumpPath);
+    expect(dumpContent).toContain('First verbatim capture.');
+    expect(dumpContent).toContain('## Appended 2026-08-21 20:30:46 UTC');
+    expect(dumpContent).toContain('Second verbatim capture.');
+
+    // Exactly one Organize over the accumulated Dump (the first call is the preview's).
+    expect(calls).toHaveLength(2);
+    expect(calls[1].content).toContain('First verbatim capture.');
+    expect(calls[1].content).toContain('Second verbatim capture.');
+    expect(calls[1].content).toContain('## Appended');
+
+    // The Note file is the organizer's output — the old body and frontmatter are gone,
+    // the new Note written in their place at the same path.
+    const content = await noteContent(existingPath);
+    expect(content).toContain('title: Plants, revisited');
+    expect(content).toContain('The whole thought, re-organized.');
+    expect(content).not.toContain('Old organized body.');
+    expect(content).not.toContain('title: Old Title');
+    // The single source wikilink survives: the Note still points at its one Dump.
+    expect(content).toContain(`source: ${wikilink(dumpPath)}`);
+  });
+
+  it('Related is recomputed on the append path and points only at Notes that exist (finding 07)', async () => {
+    // Finding 07: an Append's Related links were computed and then discarded. Here they are
+    // written into the re-organized Note — recomputed for the Note as it now stands, from
+    // documents that actually exist in the Vault.
+    const dumpPath = await seedDump();
+    const existingPath = await seedNote(makeNote({ source: wikilink(dumpPath) }));
+    // Two candidate documents: one genuinely close to the re-organized Note, one not.
+    await seedNote(makeNote({ title: 'The basil window box', body: 'Basil needs water too.', source: '[[_dumps/20260821-203045-cccccc]]' }));
+
+    const embedder: Embedder = {
+      embed: async (texts) =>
+        texts.map((t) => (t.toLowerCase().includes('plants') ? [1] : [0])),
+    };
+    const judged: string[][] = [];
+    const relater: Relater = {
+      related: async (_subject, candidates) => {
+        judged.push(candidates.map((c) => c.path));
+        return candidates.map((_, i) => i); // accept every shortlisted candidate
+      },
+    };
+
+    const session = await beginCapture('Second verbatim capture.', {
+      db,
+      settings,
+      organizer,
+      matcher: appendToFirstMatcher,
+      now: () => fixedNow + 1000,
+      newId: () => 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee',
+      hash: sha1Hex,
+    });
+    const result = await finalizeCapture(session, {
+      db,
+      settings,
+      organizer,
+      embedder,
+      relater,
+      hash: sha1Hex,
+      now: () => fixedNow + 2000,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // The judge saw the basil Note (similar enough to shortlist) but never the target itself…
+    expect(judged.length).toBeGreaterThan(0);
+    for (const candidates of judged) {
+      expect(candidates).not.toContain(existingPath);
+    }
+    // …and the rewritten Note carries the resolved links in its Related section.
+    const content = await noteContent(existingPath);
+    expect(content).toContain('- [[Brain Dump/2026-08-21-the-basil-window-box]]');
+    // The organizer's own `related` output is not what landed — the judge's is.
+    expect(content).not.toContain('- [[plants]]');
+  });
+
+  it('founding a new Note is unchanged — the preview is reused when no Context was added', async () => {
+    const { calls, organizer: reorganizer } = recordingOrganizer();
+    const session = await beginCapture('a brand new thought', {
+      db,
+      settings,
+      organizer: reorganizer,
+      matcher: newOnlyMatcher,
+      now: () => fixedNow,
+      newId: () => 'cccccccc-cccc-cccc-dddd-eeeeeeeeeeee',
+      hash: sha1Hex,
+    });
+    const result = await finalizeCapture(session, {
+      db,
+      settings,
+      organizer: reorganizer,
+      hash: sha1Hex,
+      now: () => fixedNow,
+    });
+    expect(result.ok).toBe(true);
+    // One Organize total — the preview call. Finalize reuses it (no Context added).
+    expect(calls).toHaveLength(1);
+    if (!result.ok) return;
+    expect(result.written.path.startsWith(`${settings.managedFolder}/`)).toBe(true);
+  });
+});
 
 describe('matchNote (Seam A — ticket 04)', () => {
   it('suggests append to the matched existing Note (LLM-assisted, by tags/topic)', async () => {
@@ -131,123 +309,116 @@ describe('matchNote (Seam A — ticket 04)', () => {
   });
 });
 
-// --- append + edit preservation + 409 retry ------------------------------
+// --- the append's failure semantics (ADR-0009, Seam A) --------------------
 
-describe('appendDumpToNote — where the dated section lands (finding 06)', () => {
-  it('inserts the dated section into the body, before the trailing sections', async () => {
-    // The Append path once wrote to the very end of the file, below `## Related` — which
-    // made the reader swallow the appended content into the Related list. The section joins
-    // the body instead, so Summary/Key points/Related stay the last sections on the file.
-    const path = await seedNote(makeNote());
-
-    await appendDumpToNote(makeNote({ body: 'A second thought about the plants.' }), path, {
-      db,
-      settings,
-      hash: sha1Hex,
-      now: () => fixedNow,
-    });
-
-    const content = await noteContent(path);
-    const appended = content.indexOf('## Appended 2026-08-21 20:30:45 UTC');
-    expect(appended).toBeGreaterThan(-1);
-    expect(appended).toBeLessThan(content.indexOf('## Summary'));
-    expect(appended).toBeLessThan(content.indexOf('## Related'));
-
-    // And reading it back: the append is body, the sections are intact.
-    const parsed = parseNote(content);
-    expect(parsed.body).toContain('A second thought about the plants.');
-    expect(parsed.related).toEqual(makeNote().related);
-    expect(parsed.keyPoints).toEqual(makeNote().keyPoints);
-  });
-});
-
-// --- append + edit preservation + 409 retry ------------------------------
-
-describe('appendDumpToNote (Seam A — ticket 04)', () => {
-  it('adds a new dated section to the Note body', async () => {
-    const path = await seedNote(makeNote({ body: 'Original organized body.' }));
-    const appended = makeNote({ body: 'A second thought about the plants.' });
-
-    const written: WriteResult = await appendDumpToNote(appended, path, {
-      db,
-      settings,
-      hash: sha1Hex,
-      now: () => fixedNow,
-    });
-
-    expect(written.path).toBe(path);
-    const content = await noteContent(path);
-    // The original body and the new dated section are both present.
-    expect(content).toContain('Original organized body.');
-    expect(content).toContain('## Appended 2026-08-21 20:30:45 UTC');
-    expect(content).toContain('A second thought about the plants.');
-    // The section traces back to its source Dump.
-    expect(content).toContain(`_Source: ${appended.source}_`);
-    // The appended section comes after the original body (chronological append).
-    expect(content.indexOf('Original organized body.')).toBeLessThan(
-      content.indexOf('## Appended 2026-08-21 20:30:45 UTC'),
-    );
-  });
-
-  it('never overwrites the user’s existing edits to the Note body', async () => {
-    const path = await seedNote(makeNote({ body: 'Original body.' }));
-    // The user edits the Note in Obsidian — a hand-written line in the body.
-    await directAppendLine(db, settings, path, 'A hand-written edit by the user.');
-
-    await appendDumpToNote(makeNote({ body: 'New dump body.' }), path, {
-      db,
-      settings,
-      hash: sha1Hex,
-      now: () => fixedNow,
-    });
-
-    const content = await noteContent(path);
-    expect(content).toContain('Original body.');
-    expect(content).toContain('A hand-written edit by the user.'); // the edit survived
-    expect(content).toContain('New dump body.');
-  });
-
-  it('does not refresh the Note metadata — frontmatter (title/tags/summary) is unchanged', async () => {
-    const path = await seedNote(
-      makeNote({ title: 'Original Title', tags: ['keepme'], summary: 'Original summary.', body: 'Body.' }),
-    );
-    // The appended dump organizes to a different title/tags/summary — but the append
-    // must NOT re-derive the existing Note's frontmatter (refresh is explicit).
-    await appendDumpToNote(
-      makeNote({ title: 'Different Title', tags: ['different'], summary: 'Different summary.', body: 'New body.' }),
-      path,
-      { db, settings, hash: sha1Hex, now: () => fixedNow },
+describe('finalizeCapture — append failure semantics (ADR-0009, Seam A)', () => {
+  it('a failing Organize leaves the old Note untouched; the merged Dump is saved for the retry', async () => {
+    const dumpPath = await seedDump();
+    const existingPath = await seedNote(
+      makeNote({ source: wikilink(dumpPath), body: 'Old organized body.', title: 'Old Title' }),
     );
 
-    const content = await noteContent(path);
-    expect(content).toContain('title: Original Title'); // unchanged
-    expect(content).toContain('tags: [keepme]'); // unchanged
-    expect(content).toContain('summary: Original summary.'); // unchanged
-    expect(content).not.toContain('title: Different Title');
-    expect(content).toContain('New body.'); // only the body gained a section
+    let calls = 0;
+    const failingOrganizer: Organizer = {
+      organize: async () => {
+        calls += 1;
+        if (calls > 1) throw new Error('provider down'); // the preview succeeds; the append's Organize fails
+        return sampleOutput;
+      },
+    };
+
+    const session = await beginCapture('Second verbatim capture.', {
+      db,
+      settings,
+      organizer: failingOrganizer,
+      matcher: appendToFirstMatcher,
+      now: () => fixedNow + 1000,
+      newId: () => 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee',
+      hash: sha1Hex,
+    });
+
+    const result = await finalizeCapture(session, {
+      db,
+      settings,
+      organizer: failingOrganizer,
+      hash: sha1Hex,
+      now: () => fixedNow + 2000,
+    });
+    expect(result.ok).toBe(false);
+
+    // The old Note is exactly as it was — a failed Organize never writes a half-organized Note.
+    const content = await noteContent(existingPath);
+    expect(content).toContain('title: Old Title');
+    expect(content).toContain('Old organized body.');
+    expect(content).not.toContain('The whole thought');
+
+    // The merge is the point of durability: the capture is already in the target Dump.
+    const dumpContent = await noteContent(dumpPath);
+    expect(dumpContent).toContain('Second verbatim capture.');
+    expect(dumpContent).toContain('## Appended 2026-08-21 20:30:46 UTC');
   });
 
-  it('retries on a 409 conflict: re-fetches, re-applies the append, preserves the concurrent edit', async () => {
-    const path = await seedNote(makeNote({ body: 'Original body.' }));
+  it('retrying after a mid-flight failure re-organizes without duplicating the merged section', async () => {
+    const dumpPath = await seedDump();
+    await seedNote(makeNote({ source: wikilink(dumpPath), body: 'Old organized body.' }));
+
+    let calls = 0;
+    const flakyOrganizer: Organizer = {
+      organize: async (content) => {
+        calls += 1;
+        if (calls === 1) return sampleOutput; // the preview
+        if (calls === 2) throw new Error('provider down'); // the first append attempt
+        expect(content).toContain('Second verbatim capture.'); // retry organizes the accumulated Dump
+        return { ...sampleOutput, body: 'Recovered, re-organized.' };
+      },
+    };
+
+    const session = await beginCapture('Second verbatim capture.', {
+      db,
+      settings,
+      organizer: flakyOrganizer,
+      matcher: appendToFirstMatcher,
+      now: () => fixedNow + 1000,
+      newId: () => 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee',
+      hash: sha1Hex,
+    });
+
+    const first = await finalizeCapture(session, {
+      db, settings, organizer: flakyOrganizer, hash: sha1Hex, now: () => fixedNow + 2000,
+    });
+    expect(first.ok).toBe(false);
+    if (first.ok) return;
+
+    // The retry is a fresh finalize of the same (unsaved) session — the Dump already holds
+    // the merged capture, so it must not be merged a second time.
+    const retry = await finalizeCapture(first.session, {
+      db, settings, organizer: flakyOrganizer, hash: sha1Hex, now: () => fixedNow + 3000,
+    });
+    expect(retry.ok).toBe(true);
+    if (!retry.ok) return;
+
+    const dumpContent = await noteContent(dumpPath);
+    expect(dumpContent.match(/## Appended 2026-08-21 20:30:46 UTC/g)).toHaveLength(1);
+    expect(dumpContent.match(/Second verbatim capture\./g)).toHaveLength(1);
+  });
+
+  it('a 409 on the Note rewrite retries and writes the organized Note — the Note is a view, so a concurrent hand edit is regenerated over', async () => {
+    const dumpPath = await seedDump();
+    const path = await seedNote(makeNote({ source: wikilink(dumpPath), body: 'Old organized body.' }));
     const noteMetaId = docIdForPath(path, settings);
 
-    // A DocStore whose first metadata-replace put 409s — simulating a concurrent edit
-    // landing between our read and our write. On that conflict, the concurrent edit is
-    // written directly to the underlying db (a user edit to the body + a bumped _rev).
     let conflicted = false;
     const conflictingDb: DocStore = {
       put: async (doc) => {
-        const isMetaReplace =
-          (doc as { _id?: string; type?: string; _rev?: string })._id === noteMetaId &&
-          (doc as { type?: string }).type === 'plain' &&
-          !!(doc as { _rev?: string })._rev;
-        if (isMetaReplace && !conflicted) {
-          conflicted = true;
-          await directAppendLine(db, settings, path, 'Concurrent user edit.'); // concurrent edit lands
-          const err = new Error('conflict');
-          (err as unknown as { status: number }).status = 409;
-          (err as unknown as { name: string }).name = 'conflict';
-          throw err;
+        if ((doc as { _id?: string })._id === noteMetaId && (doc as { type?: string }).type === 'plain' && (doc as { _rev?: string })._rev) {
+          if (!conflicted) {
+            conflicted = true;
+            await directAppendLine(db, settings, path, 'Concurrent user edit.');
+            const err = new Error('conflict');
+            (err as unknown as { status: number }).status = 409;
+            (err as unknown as { name: string }).name = 'conflict';
+            throw err;
+          }
         }
         return db.put(doc);
       },
@@ -255,50 +426,53 @@ describe('appendDumpToNote (Seam A — ticket 04)', () => {
       allDocs: (opts?: { include_docs?: boolean }) => db.allDocs(opts),
     };
 
-    await appendDumpToNote(makeNote({ body: 'New dump body.' }), path, {
+    const session = await beginCapture('Second verbatim capture.', {
       db: conflictingDb,
       settings,
+      organizer,
+      matcher: appendToFirstMatcher,
+      now: () => fixedNow + 1000,
+      newId: () => 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee',
       hash: sha1Hex,
-      now: () => fixedNow,
     });
+    const result = await finalizeCapture(session, {
+      db: conflictingDb, settings, organizer, hash: sha1Hex, now: () => fixedNow + 2000,
+    });
+    expect(result.ok).toBe(true);
+    expect(conflicted).toBe(true); // the retry path actually ran
 
     const content = await noteContent(path);
-    // The concurrent edit survived (not clobbered)…
-    expect(content).toContain('Concurrent user edit.');
-    // …and the append was re-applied to the fresh content.
-    expect(content).toContain('Original body.');
-    expect(content).toContain('## Appended 2026-08-21 20:30:45 UTC');
-    expect(content).toContain('New dump body.');
-    expect(conflicted).toBe(true); // proves the retry path actually ran
+    // The organized Note won: the Note is regenerated from the Dump on every Organize.
+    expect(content).toContain('I keep forgetting to water the plants.');
+    expect(content).not.toContain('Old organized body.');
+    // The Dump is the record — a concurrent edit to the *Dump* would have survived the
+    // retry (the merge re-applies to fresh content). The Note itself is a view.
   });
 
-  it('throws after exhausting conflict retries', async () => {
-    const path = await seedNote(makeNote({ body: 'Original body.' }));
-    const noteMetaId = docIdForPath(path, settings);
+  it('when the target Note has no readable Dump, the capture founds a new Note instead', async () => {
+    // A Note whose source Dump was deleted: nothing to merge into, and the capture
+    // must still file.
+    await seedNote(makeNote({ body: 'Dump-less note.' }));
 
-    // Every metadata-replace put 409s — the conflict never resolves.
-    const alwaysConflictDb: DocStore = {
-      put: async (doc) => {
-        if ((doc as { _id?: string })._id === noteMetaId && (doc as { type?: string }).type === 'plain' && (doc as { _rev?: string })._rev) {
-          const err = new Error('conflict');
-          (err as unknown as { status: number }).status = 409;
-          (err as unknown as { name: string }).name = 'conflict';
-          throw err;
-        }
-        return db.put(doc);
-      },
-      get: (id: string) => db.get(id),
-      allDocs: (opts?: { include_docs?: boolean }) => db.allDocs(opts),
-    };
+    const session = await beginCapture('a thought with nowhere to merge', {
+      db,
+      settings,
+      organizer,
+      matcher: appendToFirstMatcher,
+      now: () => fixedNow,
+      newId: () => 'eeeeeeee-eeee-cccc-dddd-eeeeeeeeeeee',
+      hash: sha1Hex,
+    });
+    expect(session.match.kind).toBe('append');
 
-    await expect(
-      appendDumpToNote(makeNote({ body: 'New dump body.' }), path, {
-        db: alwaysConflictDb,
-        settings,
-        hash: sha1Hex,
-        now: () => fixedNow,
-      }),
-    ).rejects.toThrow(/exceeded/);
+    const result = await finalizeCapture(session, {
+      db, settings, organizer, hash: sha1Hex, now: () => fixedNow,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Founded fresh rather than failing — the thought is filed.
+    expect(result.written.path.startsWith(`${settings.managedFolder}/`)).toBe(true);
+    expect(result.note.source).toContain('_dumps/');
   });
 });
 
@@ -306,7 +480,8 @@ describe('appendDumpToNote (Seam A — ticket 04)', () => {
 
 describe('capture composition (Seam A — ticket 04)', () => {
   it('begins a session matched to an existing Note, and finalizing appends to it', async () => {
-    const existingPath = await seedNote(makeNote({ body: 'Existing note body.' }));
+    const dumpPath = await seedDump();
+    const existingPath = await seedNote(makeNote({ source: wikilink(dumpPath) }));
 
     const beginDeps = {
       db,
@@ -326,7 +501,8 @@ describe('capture composition (Seam A — ticket 04)', () => {
     expect(session.preview.title).toBe('Water the plants'); // the initial Organize preview is shown
     expect(session.saved).toBe(false);
 
-    // The user confirms append — finalizing adds a dated section instead of founding a new Note.
+    // The user confirms append — finalizing merges into the target's one Dump and
+    // re-organizes the Note in place instead of founding a new one.
     const result = await finalizeCapture(session, {
       db,
       settings,
@@ -340,9 +516,12 @@ describe('capture composition (Seam A — ticket 04)', () => {
     expect(result.session.saved).toBe(true);
     expect(result.written.path).toBe(existingPath); // appended in place — no new Note file
 
+    // The capture joined the target's Dump, and the Note was rewritten from it.
+    const dumpContent = await noteContent(dumpPath);
+    expect(dumpContent).toContain('## Appended');
+    expect(dumpContent).toContain('I keep forgetting to water the plants');
     const content = await noteContent(existingPath);
-    expect(content).toContain('Existing note body.');
-    expect(content).toContain('## Appended 2026-08-21 20:30:45 UTC');
+    expect(content).toContain(`source: ${wikilink(dumpPath)}`); // still the one Dump
     // No second Note was founded in the managed folder.
     const all = await db.allDocs({ include_docs: true });
     const managedNotes = all.rows.filter(
@@ -413,17 +592,53 @@ describe('capture composition (Seam A — ticket 04)', () => {
   });
 });
 
-// --- explicit metadata refresh ------------------------------------------
+// --- explicit Re-organize (ADR-0009: the same path as an append, minus the merge) ---
 
-describe('refreshNoteMetadata (Seam A — ticket 04)', () => {
-  it('re-derives frontmatter from the body while preserving the body byte-for-byte', async () => {
+describe('refreshNoteMetadata (Seam A — the append rework)', () => {
+  it('re-organizes the Note wholesale from its Dump — title and body alike, hand edits do not survive', async () => {
+    const dumpPath = await seedDump();
+    const path = await seedNote(makeNote({ source: wikilink(dumpPath), title: 'Old Title' }));
+    // The user hand-edited the Note after it was filed — provisional, per the glossary:
+    // it lasts until the next Organize.
+    await directAppendLine(db, settings, path, 'A hand-written edit by the user.');
+
+    const { calls, organizer: refreshOrganizer } = recordingOrganizer({
+      title: 'Plant care, the whole log',
+      body: 'Regenerated from the accumulated Dump.',
+    });
+
+    await refreshNoteMetadata(path, {
+      db,
+      settings,
+      organizer: refreshOrganizer,
+      hash: sha1Hex,
+      now: () => fixedNow,
+    });
+
+    // The Organize ran against the accumulated Dump — the record, not the view.
+    expect(calls).toHaveLength(1);
+    expect(calls[0].content).toContain('First verbatim capture.');
+
+    const content = await noteContent(path);
+    // Body and title regenerated wholesale…
+    expect(content).toContain('title: Plant care, the whole log');
+    expect(content).toContain('Regenerated from the accumulated Dump.');
+    // …the hand edit did not survive (the Note is a view; the Dump is the record)…
+    expect(content).not.toContain('A hand-written edit by the user.');
+    // …and identity survives: the frozen filename, the source link, the original date.
+    expect(content).toContain(`source: ${wikilink(dumpPath)}`);
+    expect(content).toContain(`created: ${fixedNow}`);
+  });
+
+  it('when the Note\'s Dump is gone, the body on the file is preserved and only the frontmatter is re-derived', async () => {
+    // No dump file seeded — the Note's `source` points at a Dump that does not exist.
     const path = await seedNote(
-      makeNote({ title: 'Old Title', tags: ['old'], category: 'uncategorized', summary: 'Old summary.', body: 'The body the user may have edited.' }),
+      makeNote({ title: 'Old Title', summary: 'Old summary.', body: 'The body that remains.' }),
     );
 
-    const refreshOrganizer: Organizer = {
-      organize: async () => ({ ...sampleOutput, title: 'New Title', tags: ['new'], category: 'personal', summary: 'New summary.' }),
-    };
+    const { organizer: refreshOrganizer } = recordingOrganizer({
+      title: 'New Title', summary: 'New summary.',
+    });
 
     await refreshNoteMetadata(path, {
       db,
@@ -434,36 +649,29 @@ describe('refreshNoteMetadata (Seam A — ticket 04)', () => {
     });
 
     const content = await noteContent(path);
-    // Frontmatter re-derived…
-    expect(content).toContain('title: New Title');
-    expect(content).toContain('tags: [new]');
-    expect(content).toContain('category: personal');
+    expect(content).toContain('title: New Title'); // frontmatter re-derived…
     expect(content).toContain('summary: New summary.');
-    expect(content).not.toContain('title: Old Title');
-    // …but the body is preserved (the user's edits are never overwritten by a refresh).
-    expect(content).toContain('The body the user may have edited.');
+    expect(content).toContain('The body that remains.'); // …and the body preserved.
   });
 
   it('organizes once even when a 409 forces a retry (not once per retry)', async () => {
-    const path = await seedNote(makeNote({ title: 'Old Title', body: 'The body.' }));
+    const dumpPath = await seedDump();
+    const path = await seedNote(makeNote({ source: wikilink(dumpPath), title: 'Old Title' }));
     const noteMetaId = docIdForPath(path, settings);
 
-    let organizeCalls = 0;
-    const countingOrganizer: Organizer = {
-      organize: async () => {
-        organizeCalls += 1;
-        return { ...sampleOutput, title: 'New Title', tags: ['new'], category: 'personal', summary: 'New summary.' };
-      },
-    };
+    const { calls, organizer: countingOrganizer } = recordingOrganizer({
+      title: 'New Title',
+ body: 'Regenerated.',
+    });
 
-    // First metadata-replace put 409s (a concurrent edit lands), then it succeeds.
+    // First metadata-replace put 409s (a concurrent hand edit lands), then it succeeds.
     let conflicted = false;
     const conflictingDb: DocStore = {
       put: async (doc) => {
         if ((doc as { _id?: string })._id === noteMetaId && (doc as { type?: string }).type === 'plain' && (doc as { _rev?: string })._rev) {
           if (!conflicted) {
             conflicted = true;
-            await directAppendLine(db, settings, path, 'Concurrent edit.');
+            await directAppendLine(db, settings, path, 'Concurrent hand edit.');
             const err = new Error('conflict');
             (err as unknown as { status: number }).status = 409;
             (err as unknown as { name: string }).name = 'conflict';
@@ -484,13 +692,14 @@ describe('refreshNoteMetadata (Seam A — ticket 04)', () => {
       now: () => fixedNow,
     });
 
-    // One Organize per user action — the retry re-applies the cached frontmatter.
-    expect(organizeCalls).toBe(1);
+    // One Organize per user action — the rebuilt file is computed once and re-applied.
+    expect(calls).toHaveLength(1);
     expect(conflicted).toBe(true); // the retry path actually ran
     const content = await noteContent(path);
-    expect(content).toContain('title: New Title'); // re-derived frontmatter applied
-    expect(content).toContain('Concurrent edit.'); // the concurrent body edit survived
-    expect(content).toContain('The body.');
+    expect(content).toContain('title: New Title');
+    expect(content).toContain('Regenerated.');
+    // The Note is a view: the concurrent hand edit is regenerated over, not preserved.
+    expect(content).not.toContain('Concurrent hand edit.');
   });
 });
 

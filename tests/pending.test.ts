@@ -674,8 +674,9 @@ describe('Vault reconciliation', () => {
 
   it('reads a Dump back out of its file, Context and all', () => {
     const dump: Dump = { ...strandedDump, context: 'the ones older than a month' };
-    expect(parseDumpFile(dumpFileContent(dump))).toEqual(dump);
-    expect(parseDumpFile(dumpFileContent(strandedDump))).toEqual(strandedDump);
+    // `appended` round-trips too: empty until a capture is Appended (ADR-0009).
+    expect(parseDumpFile(dumpFileContent(dump))).toEqual({ ...dump, appended: [] });
+    expect(parseDumpFile(dumpFileContent(strandedDump))).toEqual({ ...strandedDump, appended: [] });
     expect(parseDumpFile('not a Dump at all')).toBeNull();
   });
 });
