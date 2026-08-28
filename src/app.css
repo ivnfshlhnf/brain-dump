@@ -1514,10 +1514,32 @@ dialog.sheet::backdrop {
   }
 }
 
+@keyframes sheet-down {
+  from {
+    transform: none;
+  }
+  to {
+    transform: translateY(100%);
+  }
+}
+
+/* The return is the rise read backwards: the sheet drops away down the same edge it came
+ * up, over the same 280ms and the same ease, so leaving feels like the reverse of arriving
+ * and not a third thing. The class is set by the app's `closeSheet()`, which holds the
+ * dialog open until the drop finishes and only then calls close() — a close() alone would
+ * leave the top layer in the same frame, and no animation could play at all. */
+dialog.sheet.sheet--closing {
+  animation: sheet-down 280ms var(--ease) forwards;
+}
+
 /* The rise is the whole idea, so without motion the sheet simply is there — no substitute
- * animation, and nothing that moves. */
+ * animation, and nothing that moves. The drop is the same: closeSheet() sees the media
+ * query and closes without waiting. */
 @media (prefers-reduced-motion: reduce) {
   dialog.sheet {
+    animation: none;
+  }
+  dialog.sheet.sheet--closing {
     animation: none;
   }
 }

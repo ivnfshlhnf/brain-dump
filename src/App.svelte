@@ -290,6 +290,40 @@
     }
   }
 
+  /** The way out, animated. A close() alone would leave the top layer in the same frame, so
+   *  the exit could never play — the drop needs the dialog held open while it runs. This
+   *  marks the sheet closing, lets `sheet-down` finish, and only then calls the real close(),
+   *  whose `close` event is still the one way out (`onSheetClose`, per sheet). Reduced motion
+   *  skips the drop entirely: the sheet simply is gone, as its rise already is. */
+  function closeSheet() {
+    if (!sheetEl?.open || sheetEl.classList.contains('sheet--closing')) return;
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      sheetEl.close();
+      return;
+    }
+    // A backgrounded tab throttles animation events, so the timer is the floor that
+    // guarantees the close still lands even if animationend never fires.
+    const el = sheetEl;
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      el.classList.remove('sheet--closing');
+      el.close();
+    };
+    el.classList.add('sheet--closing');
+    el.addEventListener('animationend', finish, { once: true });
+    setTimeout(finish, 400); // the drop runs 280ms
+  }
+
+  /** Esc, the phone's back gesture and any other platform close request arrive as `cancel`
+   *  before the close() they would trigger. Held back here, they take the same animated way
+   *  out the close control takes, instead of the frame-less one. */
+  function onSheetCancel(e: Event) {
+    e.preventDefault();
+    closeSheet();
+  }
+
   /** Open the Capture sheet. A session left unsaved by a failed commit reopens exactly where
    *  it was: the preview is still a decision the user has to make, and the Dump is still
    *  Pending behind it. */
@@ -300,7 +334,7 @@
   /** Ask the sheet to close; the work happens in `onSheetClose`, which every other way out
    *  (Esc, the back gesture) also arrives through. */
   function closeCapture() {
-    sheetEl?.close();
+    closeSheet();
   }
 
   /** The sheet closed, however it was asked to. Return to the grid, and settle the session.
@@ -384,7 +418,7 @@
 
   /** Ask the sheet to close; `onNoteSheetClose` does the work, and it is the one way out. */
   function closeNote() {
-    sheetEl?.close();
+    closeSheet();
   }
 
   /** The Note sheet closed, however it was asked to (Esc, the close control, the back
@@ -434,7 +468,7 @@
 
   /** Ask the sheet to close; `onAskSheetClose` does the work, and it is the one way out. */
   function closeAsk() {
-    sheetEl?.close();
+    closeSheet();
   }
 
   /** The Ask sheet closed, however it was asked to (Esc, the close control, the back gesture).
@@ -544,7 +578,7 @@
 
   /** Ask the sheet to close; `onSettingsSheetClose` does the work, and it is the one way out. */
   function closeSettings() {
-    sheetEl?.close();
+    closeSheet();
   }
 
   /** The Settings sheet closed, however it was asked to (Esc, the close control, the back
@@ -1302,6 +1336,7 @@
     class="sheet"
     bind:this={sheetEl}
     on:close={onSheetClose}
+    on:cancel={onSheetCancel}
     aria-label={session ? 'Review the Note before it files' : 'Capture a thought'}>
     <div class="sheet__inner">
       <div class="sheet__bar">
@@ -1453,6 +1488,7 @@
     class="sheet"
     bind:this={sheetEl}
     on:close={onNoteSheetClose}
+    on:cancel={onSheetCancel}
     aria-label="Read the Note">
     <div class="sheet__inner">
       <div class="sheet__bar">
@@ -1564,6 +1600,7 @@
     class="sheet"
     bind:this={sheetEl}
     on:close={onAskSheetClose}
+    on:cancel={onSheetCancel}
     aria-label="Ask your vault">
     <div class="sheet__inner">
       <div class="sheet__bar">
@@ -1620,6 +1657,7 @@
     class="sheet"
     bind:this={sheetEl}
     on:close={onSettingsSheetClose}
+    on:cancel={onSheetCancel}
     aria-label="Settings">
     <div class="sheet__inner">
       <div class="sheet__bar">
