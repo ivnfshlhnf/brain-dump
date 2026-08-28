@@ -1200,27 +1200,29 @@
     </button>
   </div>
 
-  <!-- The cross-cutting status strip — grid-only, never inside a sheet (ticket 09). One live
-       region, announced politely, carrying a word and never colour alone. A capture that landed
-       fades on its own; a lost connection or a rejected setting holds, and either can be cleared
-       immediately — including one the user would rather deal with later. -->
-  {#if !sheet}
-    <div
-      class="status-strip"
-      class:status-strip--idle={!strip}
-      class:status-strip--caught={strip?.kind === 'capture-confirmed'}
-      class:status-strip--connection={strip?.kind === 'connection-lost' || strip?.kind === 'connection-restored'}
-      class:status-strip--rejected={strip?.kind === 'config-rejected'}
-      aria-live="polite"
-    >
-      {#if strip}
-        <span class="status-strip__text">{strip.message}</span>
-        <button class="status-strip__dismiss" on:click={clearStrip} aria-label="Dismiss status">Dismiss</button>
-      {:else}
-        <span class="status-strip__text">all filed · nothing pending</span>
-      {/if}
-    </div>
-  {/if}
+  <!-- The cross-cutting status strip — grid-only, never seen inside a sheet (ticket 09). One
+       live region, announced politely, carrying a word and never colour alone. A capture that
+       landed fades on its own; a lost connection or a rejected setting holds, and either can be
+       cleared immediately — including one the user would rather deal with later.
+       It is always mounted: unmounting it while a sheet is open pulled its box out of the
+       column and the card grids reflowed into the space — a jump the falling sheet now shows.
+       "Never inside a sheet" holds by occlusion instead — a sheet is a full-screen opaque
+       modal, so the strip simply sits covered, its box (and the grid) unmoved. -->
+  <div
+    class="status-strip"
+    class:status-strip--idle={!strip}
+    class:status-strip--caught={strip?.kind === 'capture-confirmed'}
+    class:status-strip--connection={strip?.kind === 'connection-lost' || strip?.kind === 'connection-restored'}
+    class:status-strip--rejected={strip?.kind === 'config-rejected'}
+    aria-live="polite"
+  >
+    {#if strip}
+      <span class="status-strip__text">{strip.message}</span>
+      <button class="status-strip__dismiss" on:click={clearStrip} aria-label="Dismiss status">Dismiss</button>
+    {:else}
+      <span class="status-strip__text">all filed · nothing pending</span>
+    {/if}
+  </div>
 
   <!-- The recovery banner. It used to live on the capture surface; a Capture sheet has room
        for the field and nothing else, and this speaks for the whole app rather than for the
