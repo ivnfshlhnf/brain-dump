@@ -750,6 +750,15 @@ textarea.dump {
   color: var(--text-dim);
 }
 
+/* The version line at the foot of the Settings sheet — the same quiet mono voice as the
+   status, so it reads as a fact about the app rather than a control. */
+.version {
+  font-family: var(--mono);
+  font-size: var(--label);
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+}
+
 .checks li {
   display: flex;
   align-items: flex-start;

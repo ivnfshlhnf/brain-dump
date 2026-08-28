@@ -1,4 +1,5 @@
 /// <reference types="vitest/config" />
+import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
@@ -7,6 +8,24 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { VitePWA } from 'vite-plugin-pwa';
 
 const require = createRequire(import.meta.url);
+
+/** The version the Settings sheet shows: the commit this server was started from, and when
+ *  it came up. Evaluated once at config load — dev-server start, or build time — which is
+ *  exactly the moment "this version" begins. The phone's sheet shows the same line, so
+ *  comparing commits answers "is the PWA serving what was just built?". */
+function appVersionDefine(): Record<string, string> {
+  let commit = 'unknown';
+  try {
+    // execFileSync — a fixed argument list, no shell — for the same reason the log sink is
+    // hand-rolled: diagnostics must never be able to run anything but this.
+    commit = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: process.cwd() })
+      .toString()
+      .trim();
+  } catch {
+    // Not a git checkout (or git is unavailable): the sheet says "version unknown".
+  }
+  return { __APP_VERSION__: JSON.stringify({ commit, startedAt: Date.now() }) };
+}
 
 /** Dev-only: let the running app write its diagnostic log to the project folder.
  *
@@ -46,6 +65,7 @@ function devLogFile(logPath = 'logs/brain-dump.jsonl'): Plugin {
 }
 
 export default defineConfig({
+  define: appVersionDefine(),
   server: {
     // The dev server is reached through `tailscale serve` for PWA dogfooding on the
     // phone; Vite's DNS-rebinding guard would otherwise 403 the *.ts.net host.

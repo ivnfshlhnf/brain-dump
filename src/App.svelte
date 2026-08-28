@@ -37,6 +37,7 @@
   import { checkConnections, type HealthReport, type CheckResult } from './lib/health';
   import { createCachingEmbedder } from './lib/embedding-cache';
   import { validateProviderUrl } from './lib/config';
+  import { appVersion, versionLabel } from './lib/version';
   import {
     connectionTransition,
     configRejectedMessage,
@@ -127,6 +128,10 @@
   // stack: a sheet is a place you drop into from the grid and return from.
   let sheet: 'capture' | 'note' | 'ask' | 'settings' | null = null;
   let busy = false;
+
+  // The version line at the foot of the Settings sheet — fixed for the life of the page
+  // load, because that is what it describes: which build the phone is actually running.
+  const appVersionLabel = versionLabel(appVersion());
 
   // The Note sheet (ticket 06): the whole Note a card opens onto, read live from the Vault —
   // the dry twin of the pre-commit preview, at full length — plus the verbatim source Dump.
@@ -1890,6 +1895,12 @@
         </li>
       {/each}
     </ul>
+
+    <p class="rule-label">version</p>
+    <!-- The quiet foot of the sheet: which commit the running server is on and when it came
+         up. Compared against the machine's line, it answers "is the phone up to date?" — a
+         stale PWA shows an older commit until it is reloaded. -->
+    <p class="version">{appVersionLabel}</p>
         {#if status}<p class="status" aria-live="polite">{status}</p>{/if}
       </div>
     </div>
