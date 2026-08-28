@@ -46,6 +46,11 @@ function devLogFile(logPath = 'logs/brain-dump.jsonl'): Plugin {
 }
 
 export default defineConfig({
+  server: {
+    // The dev server is reached through `tailscale serve` for PWA dogfooding on the
+    // phone; Vite's DNS-rebinding guard would otherwise 403 the *.ts.net host.
+    allowedHosts: ['.ts.net'],
+  },
   resolve: {
     alias: {
       // PouchDB core assumes Node's `events` EventEmitter. Alias to the browser
