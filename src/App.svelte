@@ -1322,8 +1322,13 @@
       <p class="card-placeholder">Your first thought will land here.</p>
     </div>
   {:else}
-    <!-- A cold or failed cache never blocks capture: no spinner, just the grid frame. -->
-    <div class="grid"></div>
+    <!-- A cold or failed cache never blocks capture: no spinner, just the grid frame. But a
+         cold cache (the phone's first visit) also has no cards to paint, and a blank grid
+         reads as "empty" rather than "loading" — so the frame carries one quiet line in the
+         placeholder's voice, gone the moment cards paint or the read hands off. -->
+    <div class="grid">
+      <p class="card-placeholder" aria-live="polite">Reading the Vault…</p>
+    </div>
   {/if}
   </section>
   </main>
