@@ -1603,6 +1603,17 @@ dialog.sheet::backdrop {
   max-height: none;
 }
 
+/* The card in the sheet is a document, not a grid tile. `.note` carries `overflow: hidden`
+ * (the burn edge, the card corners on the grid), and an item whose overflow is not `visible`
+ * has no automatic minimum size — so as a flex item of the scrolling body it would shrink
+ * from its content height down to the body's height and clip there, the body would never
+ * overflow, and the scrollbar promised above would never appear. `flex: none` holds the card
+ * at its natural height: the body scrolls it, the bar and the footer stay put, and the long
+ * Note is seen to its end — on the committed sheet and the pre-commit preview alike. */
+.sheet__body > .note {
+  flex: none;
+}
+
 /* The footer holds the sheet's own status line above its actions, so a message about what
  * just happened sits with the control that caused it and never behind the sheet. */
 .sheet__foot {

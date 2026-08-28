@@ -64,6 +64,10 @@ _Avoid_: search, query, lookup
 Whether an input is voice or text. Applies to both Capture and Retrieve.
 _Avoid_: format, type, mode
 
+**Sheet**:
+A full-screen surface the app drops over the grid for one focused job — Capture, Ask, Note, or Settings. You drop into a Sheet and return from it; the grid is home. A Sheet is opened and closed, never visited like a place.
+_Avoid_: page, modal, screen, popup
+
 **Vault**:
 The user's entire note collection — every document they have, including all the personal notes
 the app had no hand in creating. The app reads all of it and writes into none of it except the
