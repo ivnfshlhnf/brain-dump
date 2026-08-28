@@ -1,39 +1,52 @@
 <script lang="ts">
-  import { onMount, onDestroy, tick } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { loadSettings, saveSettings } from './lib/settings';
   import { createRemoteDb, createDatabaseAdmin, createEmbeddingsDb } from './lib/db';
   import {
     captureThought,
     addContext,
     finalizeCapture,
-    refreshNoteMetadata,
     recoverPending,
     adoptInterrupted,
     retryPending,
     findStrandedDumps,
+    findDismissedDumps,
     restoreStranded,
     organizeDump,
     dumpPath,
     isStranded,
+    readGrid,
+    fileOnGrid,
+    readNote,
+    reorganizeNote,
+    citedCards,
     type CaptureSession,
+    type NoteView,
   } from './lib/operations';
   import { createIndexedDbPendingStore } from './lib/pending';
   import { createIndexedDbDismissedStore } from './lib/dismissed';
+  import { createIndexedDbCardCache } from './lib/card-cache';
+  import { hueFor, type Category } from './lib/category';
   import { retrieve } from './lib/retrieve';
   import { createOrganizer, createMatcher, createEmbedder, createAnswerer, createRelater } from './lib/llm';
   import { defaultSha1Hex } from './lib/livesync';
   import { createAutosaver } from './lib/autosave';
   import { createLog, createDevFileSink, type Log, type LogEvent } from './lib/logger';
   import { obsidianUrl, linkHref, linkText } from './lib/obsidian';
+  import { formatStamp } from './lib/format';
   import { checkConnections, type HealthReport, type CheckResult } from './lib/health';
   import { createCachingEmbedder } from './lib/embedding-cache';
   import { validateProviderUrl } from './lib/config';
   import {
+    connectionTransition,
+    configRejectedMessage,
+    type StatusMessage,
+  } from './lib/status';
+  import {
     DEFAULT_SETTINGS,
     type Settings,
-    type Citation,
     type Dump,
-    type Note,
+    type NoteCard,
     type PendingDump,
     type StrandedDump,
   } from './lib/types';
@@ -101,30 +114,48 @@
   // memory before the Capture press. Cleared the moment a Dump is captured.
   let text = readDraft();
   let status = '';
-  let view: 'capture' | 'ask' | 'config' = 'capture';
+  // The cross-cutting status strip — the app's single voice for what belongs to no card
+  // (ticket 09): a capture that landed with no Note to show, the connection going or coming
+  // back, a setting the config rules rejected. Grid-only: it never renders inside a sheet.
+  // `status` above is the per-surface local feedback each sheet/section shows for its own
+  // state (Saved Note, retrieve errors, …) — the thing the message is about.
+  let strip: StatusMessage | null = null;
+  let stripTimer: ReturnType<typeof setTimeout> | null = null;
+  // The grid is the app's only persistent surface (ticket 10). Every other surface — Capture,
+  // Note, Ask, Settings — is a sheet over it (tickets 05–08). There is no view switch left.
+  // The one open sheet, or none. Sheets do not nest, so this is a single value and not a
+  // stack: a sheet is a place you drop into from the grid and return from.
+  let sheet: 'capture' | 'note' | 'ask' | 'settings' | null = null;
   let busy = false;
+
+  // The Note sheet (ticket 06): the whole Note a card opens onto, read live from the Vault —
+  // the dry twin of the pre-commit preview, at full length — plus the verbatim source Dump.
+  let noteView: NoteView | null = null;
+  let noteLoading = false;
+  let reorganizing = false;
 
   // The in-flight capture review session: holds the captured Dump, the initial
   // Organize preview (held while Context is added), and the new-vs-append match.
   let session: CaptureSession | null = null;
   let context = '';
-  // The vault path of the last saved Note — used by the explicit Re-organize Note action.
-  let savedNotePath: string | null = null;
-  // The Note as it was actually written. The card shows this once it exists, so what you
-  // look at after the save is the document in the Vault — Related links included — and not
-  // the preview that preceded it.
-  let savedNote: Note | null = null;
+  // Hold: the user pressed a button specifically to stop the clock, so nothing may start it
+  // again behind them. It is the autosaver's existing `cancel` plus this flag — the autosave
+  // module gains no interface for it — and the only exit is the user explicitly filing.
+  let held = false;
   // Bumped on every Context edit to restart the countdown animation, which is keyed on it.
+  // Never bumped while Held: restarting the animation would draw a clock that is not running.
   let contextRevision = 0;
   // Append requires explicit user confirmation (spec: "the user confirms … with one
   // action"). The 5s autosave may finalize a 'new' decision on its own, but an 'append'
   // decision is held until the user taps Append — so the autosave no-ops an
   // unconfirmed append rather than silently appending.
   let appendConfirmed = false;
-  // Retrieve: a question over the whole vault, and the answer with its citations.
+  // Retrieve: a question over the whole vault, and the answer with its citations. The citations
+  // are shown as the same cards the grid shows (ticket 07), so the answer's sources are
+  // tappable into the Note sheet — `askCards` is that projection, built once per answer.
   let question = '';
   let answer = '';
-  let citations: Citation[] = [];
+  let askCards: NoteCard[] = [];
   let asking = false;
 
   // The durable record of every Dump that still needs Organizing. A Capture enrols here
@@ -141,6 +172,28 @@
   let reconciled = false;
   let reconciling = false;
   let organizingStranded = '';
+  // The Dumps the user has dismissed, shown in the Settings sheet so a dismissed thought stays
+  // reachable (CONTEXT.md: Dismissed). Dismissing writes nothing to the Vault — the Dump is held
+  // out of the Stranded list by the dismissed-id set, not removed — so restoring is its mirror:
+  // the id leaves the set and the Dump returns to the Stranded band on the next reconcile.
+  let dismissedDumps: StrandedDump[] = [];
+  let dismissedLoaded = false;
+  let loadingDismissed = false;
+  // The home grid (ticket 02). The grid is the road to capture, so the card read must never
+  // gate the Capture control: it paints from a device-local cache and reconciles behind it
+  // (ADR-0007). A cold, failed or empty cache shows the Capture control and an empty grid.
+  const cardCache = createIndexedDbCardCache();
+  let cards: NoteCard[] = [];
+  let cardsLoaded = false;
+  // The Vault is empty once the card cache has settled with nothing in it — the proxy Ask dims
+  // against, since retrieve can't answer from Notes that aren't there. One concept, named once.
+  $: vaultIsEmpty = cardsLoaded && cards.length === 0;
+  // The card of the Note just filed. It slots into the grid wearing the `set` ring — the
+  // receipt for a commit is the thing itself arriving, not a message about it — and goes
+  // quiet again shortly after, leaving nothing behind.
+  const WET_MS = 3000;
+  let wetPath: string | null = null;
+  let wetTimer: ReturnType<typeof setTimeout> | null = null;
   // While Dumps are Pending, retry on a timer as well as on the `online` event: a
   // capture that failed while `navigator.onLine` was already true (a flaky
   // connection, a captive portal, an LLM outage) never fires `online`, and the spec
@@ -170,11 +223,23 @@
     return line.length > 80 ? `${line.slice(0, 79)}…` : line;
   }
 
+  /** The inline `--cat-hue` custom property for a card, or '' when the Category carries no hue
+   *  (`uncategorized` — the absence of a Category is not a colour). The CSS colours the left edge
+   *  and chip only on `.card--cat`, which the template adds precisely when `hueFor` is non-null. */
+  function hueStyle(category: Category): string {
+    const h = hueFor(category);
+    return h !== null ? `--cat-hue:${h}` : '';
+  }
+
   // 5s inactivity → finalize; close → flush. saveAndFinalize always resolves
   // (it catches its own errors), so the autosaver's run never rejects.
   const autosaver = createAutosaver({ save: saveAndFinalize });
   let onBeforeUnload: (() => void) | null = null;
   let onOnline: (() => void) | null = null;
+  let onOffline: (() => void) | null = null;
+  // The connectivity the strip last announced — so `connectionTransition` can tell a real
+  // change from a no-op and the strip never becomes a heartbeat.
+  let wasOnline = true;
 
   // The store + hash deps shared by every operation call. Built per call so a
   // settings change between capture and save is picked up.
@@ -182,11 +247,108 @@
     return { db: createRemoteDb(settings), settings, hash: defaultSha1Hex, log, pending };
   }
 
-  // Autofocus the Dump whenever it mounts — on load (so the first character needs no tap to
-  // reach the field) and again after a New capture (so the next thought is one keystroke away).
-  // preventScroll keeps desktop from jumping; on mobile the keyboard rising is the point.
-  function focusOnMount(node: HTMLElement) {
-    node.focus({ preventScroll: true });
+  /** Open the grid: one Vault pass yields the Note cards AND the Stranded Dumps (ADR-0007), so
+   *  reconciliation is a property of opening the grid, not a button. The cache paints the cards
+   *  it holds before the pass completes — so the grid shows something at once and stays populated
+   *  even when the Vault is slow or unreachable — and the pass then reconciles both. The Capture
+   *  control renders regardless of how far this has got — capture friction is the one unforgivable
+   *  failure. */
+  async function enterGrid() {
+    try {
+      const result = await readGrid(
+        { ...storeDeps(), cache: cardCache, pending, dismissed },
+        (cached) => {
+          // Paint the cached cards before the Vault read completes.
+          cards = cached;
+        },
+      );
+      cards = result.cards;
+      strandedInVault = result.stranded;
+    } catch {
+      // A Vault read failure leaves whatever was painted; the grid stays usable.
+    }
+    cardsLoaded = true;
+  }
+
+  // A sheet is a native modal <dialog> opened with showModal(), so the platform supplies what
+  // a sheet has to have and this component does not hand-roll: the grid behind it goes inert
+  // (top layer), focus is trapped inside, and every platform close request — Esc, the phone's
+  // back gesture, an assistive-technology dismiss — reaches it. All of them arrive as one
+  // `close` event, so the sheet has exactly one way out and it is `onSheetClose`.
+  let sheetEl: HTMLDialogElement | null = null;
+  $: if (sheetEl && sheet && !sheetEl.open) {
+    sheetEl.showModal();
+    if (sheet === 'capture' || sheet === 'ask') {
+      // A typing sheet — Capture's Dump, Ask's question — opens to type, so the field takes
+      // focus back from the close control showModal() lands it on. On a phone that is the
+      // keyboard rising; on a desktop it is the first character needing no tap.
+      sheetEl.querySelector<HTMLTextAreaElement>('textarea')?.focus({ preventScroll: true });
+    } else {
+      // A reading sheet is for reading, not typing, so focus lands on the way out rather than
+      // the first link — the close control — the way a modal dialog conventionally does.
+      sheetEl.querySelector<HTMLButtonElement>('.sheet__close')?.focus({ preventScroll: true });
+    }
+  }
+
+  /** Open the Capture sheet. A session left unsaved by a failed commit reopens exactly where
+   *  it was: the preview is still a decision the user has to make, and the Dump is still
+   *  Pending behind it. */
+  function openCapture() {
+    sheet = 'capture';
+  }
+
+  /** Ask the sheet to close; the work happens in `onSheetClose`, which every other way out
+   *  (Esc, the back gesture) also arrives through. */
+  function closeCapture() {
+    sheetEl?.close();
+  }
+
+  /** The sheet closed, however it was asked to. Return to the grid, and settle the session.
+   *
+   *  Closing with the countdown running is the same as walking away from it: the clock was on
+   *  screen promising a save, so it is honoured now rather than leaving the thought in limbo.
+   *
+   *  Closing while Held — or with an Append the user has not confirmed — files nothing, because
+   *  both states exist precisely to say "not on your own". The Dump is already Pending, so it
+   *  appears on the grid as a Pending card and is re-surfaced on the next open. */
+  function onSheetClose() {
+    sheet = null;
+    if (!session || session.saved) return;
+    if (held || (session.match.kind === 'append' && !appendConfirmed)) {
+      autosaver.cancel();
+      endSession();
+      void refreshPending();
+      return;
+    }
+    void autosaver.flush();
+  }
+
+  /** Stop the countdown. Not a pause: the timer is cancelled, and the only thing that files
+   *  the Note afterwards is the user pressing Save. */
+  function holdCapture() {
+    if (!session || session.saved) return;
+    autosaver.cancel();
+    held = true;
+  }
+
+  /** Clear the review session's state back to a blank Capture sheet. */
+  function endSession() {
+    session = null;
+    context = '';
+    held = false;
+    appendConfirmed = false;
+    contextRevision = 0;
+  }
+
+  /** Mark a card as just filed. The ring and the slot-in are the receipt; they clear
+   *  themselves, so nothing accumulates on the grid. */
+  function markWet(path: string) {
+    wetPath = path;
+    if (wetTimer) clearTimeout(wetTimer);
+    wetTimer = setTimeout(() => {
+      wetTimer = null;
+      wetPath = null;
+    }, WET_MS);
   }
 
   // Cmd/Ctrl+Enter commits the surface you're typing in. The product's thesis is speed at
@@ -198,20 +360,237 @@
     }
   }
 
-  // On save the commit is promoted onto the card itself (the teal edge plus the "Filed to
-  // Obsidian" line). Bring the card to the top of the viewport so the peak-end frame is the
-  // filed Note, not the bottom-of-page status line that just scrolled past. Smooth, unless the
-  // user has asked motion to stop.
-  function scrollToNote() {
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    document.querySelector('.note')?.scrollIntoView({
-      behavior: reduce ? 'auto' : 'smooth',
-      block: 'start',
+  // ── The Note sheet (ticket 06) ──────────────────────────────────────────────
+  // The card was a door, so nothing the card truncated may stay truncated here: tapping a
+  // card opens the whole Note at full length, every Tag shown, the Related links followed,
+  // and the verbatim Dump kept as provenance. It is reached from the grid and returns to it.
+
+  /** Open the Note a card points at, reading it live from the Vault. The card is a door; the
+   *  sheet is the room behind it. A Note deleted between the tap and the read shows as gone
+   *  rather than throwing — the grid will reconcile it away on the next open. */
+  async function openNote(path: string) {
+    sheet = 'note';
+    status = '';
+    noteView = null;
+    noteLoading = true;
+    try {
+      noteView = await readNote(path, storeDeps());
+    } catch (e) {
+      status = `Could not read the Note: ${(e as Error).message}`;
+    } finally {
+      noteLoading = false;
+    }
+  }
+
+  /** Ask the sheet to close; `onNoteSheetClose` does the work, and it is the one way out. */
+  function closeNote() {
+    sheetEl?.close();
+  }
+
+  /** The Note sheet closed, however it was asked to (Esc, the close control, the back
+   *  gesture). Return to the grid and drop the Note view — the next open reads it fresh. */
+  function onNoteSheetClose() {
+    sheet = null;
+    noteView = null;
+  }
+
+  /** Re-organize the Note on screen: re-derive its title, Tags, summary and Category from the
+   *  current body (the user may have edited it in Obsidian), preserving the body, and paint
+   *  the refreshed Note back into the sheet. The card on the grid is now stale, so the grid is
+   *  refreshed too — this is where re-organize finally lives (ticket 05 left it with no surface). */
+  async function reorganizeCurrentNote() {
+    if (!noteView) return;
+    reorganizing = true;
+    try {
+      const view = await reorganizeNote(noteView.path, {
+        ...storeDeps(),
+        organizer: createOrganizer(settings, log),
+        now: () => Date.now(),
+      });
+      if (view) {
+        noteView = view;
+        status = `Re-organized: ${view.note.title}`;
+        void enterGrid();
+      }
+    } catch (e) {
+      status = `Could not re-organize: ${(e as Error).message}`;
+    } finally {
+      reorganizing = false;
+    }
+  }
+
+  // ── The Ask sheet (ticket 07) ───────────────────────────────────────────────
+  // Retrieve on its own full-screen surface, mirroring Capture — drop in, focus, return. The
+  // question sits at the top, the synthesized answer below it, then the Notes the answer drew on
+  // shown as the same cards the grid shows — tappable into the Note sheet, so checking an answer
+  // against the user's own words is one tap. Sheets do not nest, so tapping a cited card swaps
+  // the Ask sheet for the Note sheet (openNote sets `sheet = 'note'`, which replaces this
+  // dialog); closing the Note returns to the grid, not back here.
+
+  /** Open the Ask sheet, focusing the question the way Capture focuses the Dump. */
+  function openAsk() {
+    sheet = 'ask';
+  }
+
+  /** Ask the sheet to close; `onAskSheetClose` does the work, and it is the one way out. */
+  function closeAsk() {
+    sheetEl?.close();
+  }
+
+  /** The Ask sheet closed, however it was asked to (Esc, the close control, the back gesture).
+   *  Return to the grid; the question and answer stay in state, so reopening drops back in. */
+  function onAskSheetClose() {
+    sheet = null;
+  }
+
+  // ── The Settings sheet (ticket 08) ───────────────────────────────────────────
+  // The fourth sheet, reached from the grid and returned to it like every other. The two
+  // fieldsets, the connection checks, the Stranded reconcile and the diagnostics carry over from
+  // the old config view unchanged in substance; what is new is the home for a Dismissed Dump — the
+  // one thing that deliberately has no card. Dismissing is a note to self, never destructive, so a
+  // Dismissed Dump must not sit on the grid but must stay reachable, here, restorable to the
+  // Stranded band. The sheet writes nothing to the Vault on the user's behalf — nothing here fires
+  // a Vault write silently. Save persists the device-local settings, not the Vault, and the new
+  // Dismiss/Restore-dismissed touch only the device-local dismissed set. The carried-over Stranded
+  // actions (Organize, Restore-deleted) do write to the Vault, but only at an explicit button
+  // press — the user filing or un-deleting a thought — never automatically.
+
+  /** Open the Settings sheet, focusing the close control the way a reading sheet does. */
+  function openSettings() {
+    sheet = 'settings';
+  }
+
+  // ── Keyboard shortcuts (ticket 10) ───────────────────────────────────────────
+  // The grid is the home, and the sheets are reached from it by pointer or by a
+  // single letter: c → Capture, a → Ask, s → Settings. They fire only on the home
+  // surface — never while a sheet is open, never while a modifier is held (so the
+  // browser keeps Cmd+S, Cmd+A, …), and never while the user is typing in a field.
+  // Chords (⌘K → Ask, ⌘, → Settings) are added on top: they fire even from a
+  // focused field, because a chord never conflicts with typing a plain letter.
+  function onShortcutKey(e: KeyboardEvent) {
+    if (sheet) return;
+    const key = e.key.toLowerCase();
+    // Chords first — they work anywhere on the home, including inside a field.
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
+      if (key === 'k') { e.preventDefault(); if (!vaultIsEmpty) openAsk(); }
+      else if (key === ',') { e.preventDefault(); openSettings(); }
+      return;
+    }
+    // Bare c/a/s fire only at rest: no modifier, not while typing in a field.
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    const el = document.activeElement;
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el as HTMLElement)?.isContentEditable) return;
+    if (key === 'c') { e.preventDefault(); openCapture(); }
+    else if (key === 'a') { if (!vaultIsEmpty) { e.preventDefault(); openAsk(); } }
+    else if (key === 's') { e.preventDefault(); openSettings(); }
+  }
+
+  // ── Roving-tabindex grid navigation (branch 3) ────────────────────────────────
+  // Only the `.card--door` notes participate — Pending/Stranded cards carry their own
+  // action buttons and stay out of the roving set. The first door is the one tab stop
+  // (tabindex 0); the rest are -1, so Tab enters the grid once and the Arrow keys move
+  // that single stop across it. Arrows clamp at the grid edges (no wrap); the column
+  // count is read from the resolved grid template. The roving index resets to the
+  // first door whenever the grid's children change (a filed Note slots in, a reconcile
+  // drops a card) — the grid is the home, and the home re-anchors on change.
+  function rovingGrid(node: HTMLElement) {
+    let doors: HTMLElement[] = [];
+    let active = 0;
+
+    function relayout() {
+      doors = [...node.querySelectorAll<HTMLElement>('.card--door')];
+      if (active >= doors.length) active = 0;
+      doors.forEach((d, i) => (d.tabIndex = i === active ? 0 : -1));
+    }
+    function columnCount() {
+      const tmpl = getComputedStyle(node).gridTemplateColumns.trim();
+      if (!tmpl || tmpl === 'none') return 1;
+      return tmpl.split(/\s+/).length;
+    }
+    function onkeydown(e: KeyboardEvent) {
+      const door = (e.target as HTMLElement)?.closest('.card--door') as HTMLElement | null;
+      if (!door || !doors.includes(door)) return;
+      const i = doors.indexOf(door);
+      const c = columnCount();
+      let next = i;
+      if (e.key === 'ArrowRight') next = i + 1;
+      else if (e.key === 'ArrowLeft') next = i - 1;
+      else if (e.key === 'ArrowDown') next = i + c;
+      else if (e.key === 'ArrowUp') next = i - c;
+      else return;
+      e.preventDefault();
+      next = Math.max(0, Math.min(next, doors.length - 1));
+      if (next !== i) {
+        active = next;
+        doors.forEach((d, j) => (d.tabIndex = j === active ? 0 : -1));
+        doors[active].focus();
+      }
+    }
+
+    node.addEventListener('keydown', onkeydown);
+    relayout();
+    const mo = new MutationObserver(() => {
+      active = 0;
+      relayout();
     });
+    mo.observe(node, { childList: true });
+    return {
+      destroy() {
+        node.removeEventListener('keydown', onkeydown);
+        mo.disconnect();
+      },
+    };
+  }
+
+  /** Ask the sheet to close; `onSettingsSheetClose` does the work, and it is the one way out. */
+  function closeSettings() {
+    sheetEl?.close();
+  }
+
+  /** The Settings sheet closed, however it was asked to (Esc, the close control, the back
+   *  gesture). Return to the grid. A Dismissed Dump the user restored mid-session is already back
+   *  on the Stranded band — `restoreDismissed` re-derived it — so the grid is current. */
+  function onSettingsSheetClose() {
+    sheet = null;
+  }
+
+  /** List the Dumps the user has dismissed — `findDismissedDumps` inverts `findStrandedDumps`'s
+   *  exclusion, so each carries the reason it was stranded for. The Vault is the only thing that
+   *  knows what a dismissed Dump is, so this reads it (the way "Find stranded Dumps" does). */
+  async function showDismissed() {
+    loadingDismissed = true;
+    try {
+      dismissedDumps = await findDismissedDumps({ ...storeDeps(), dismissed });
+      dismissedLoaded = true;
+    } catch (e) {
+      status = `Could not read the Vault: ${(e as Error).message}`;
+    } finally {
+      loadingDismissed = false;
+    }
+  }
+
+  /** Restore a Dismissed Dump: the id leaves the dismissed set, so the next reconcile no longer
+   *  excludes it and the Dump returns to the Stranded band. Writes nothing to the Vault — the
+   *  thought was never gone, only held out of the list. */
+  async function restoreDismissed(stranded: StrandedDump) {
+    try {
+      await dismissed.restore(stranded.dump.id);
+      dismissedDumps = dismissedDumps.filter((d) => d.dump.id !== stranded.dump.id);
+      status = 'Restored — the Dump is back on the Stranded band.';
+      // Re-derive the Stranded list so the grid (and the Stranded section) show it again.
+      await findStranded();
+    } catch (e) {
+      status = `Could not restore: ${(e as Error).message}`;
+    }
   }
 
   onMount(async () => {
+    wasOnline = navigator.onLine;
     settings = await loadSettings();
+    // The grid is the surface the app opens on, so its read starts immediately. It never gates
+    // the Capture control, which renders regardless of how far the read has got.
+    void enterGrid();
+
     // beforeunload can't await promises, so flush is best-effort: the Dump was
     // already persisted at capture, so if the close-time save doesn't land the
     // Note is generated from the surviving Dump later (the save-failure path).
@@ -235,8 +614,22 @@
     // Reconnect recovers Pending Dumps automatically — they become Notes with no user
     // intervention, which is the promise: you do not file anything, the app files
     // everything it took.
-    onOnline = () => void recover();
+    onOnline = () => {
+      // A restored connection resolves a held "connection lost" — `connectionTransition`
+      // emits restored only when it actually changed, so the strip is not a heartbeat.
+      applyConnection(true);
+      void recover();
+      // A restored connection may have recovered Dumps into Notes on another device — refresh
+      // the grid, the one persistent surface underneath any open sheet.
+      void enterGrid();
+    };
     window.addEventListener('online', onOnline);
+    // Going offline is the other half of the cross-cutting connection voice. The message comes
+    // from the operation layer (`connectionTransition`); the browser event only triggers it.
+    onOffline = () => {
+      applyConnection(false);
+    };
+    window.addEventListener('offline', onOffline);
     // Anything still marked in-flight belongs to a session that ended — nothing survived
     // this reload that could still be organizing it. Done once, at start, never on the
     // retry timer, which runs while a capture may genuinely be in flight.
@@ -250,9 +643,48 @@
   onDestroy(() => {
     if (onBeforeUnload) window.removeEventListener('beforeunload', onBeforeUnload);
     if (onOnline) window.removeEventListener('online', onOnline);
+    if (onOffline) window.removeEventListener('offline', onOffline);
+    if (wetTimer) clearTimeout(wetTimer);
+    if (stripTimer) clearTimeout(stripTimer);
     stopRetrying();
     if (session && !session.saved) void autosaver.flush();
   });
+
+  // ── The status strip (ticket 09) ─────────────────────────────────────────────
+  // The one cross-cutting voice, fed by the operation layer. A capture that landed with no
+  // Note fades on its own; a lost connection or a rejected setting holds until cleared or
+  // resolved. Every message carries a word — colour is never the sole signal.
+  function setStatus(message: StatusMessage | null) {
+    if (stripTimer) {
+      clearTimeout(stripTimer);
+      stripTimer = null;
+    }
+    if (!message) {
+      strip = null;
+      return;
+    }
+    strip = message;
+    // The capture confirmation is the only kind that fades — the thought is safe, and the
+    // receipt (the Pending card) is already on the grid. The other two hold for a reason.
+    if (message.kind === 'capture-confirmed') {
+      stripTimer = setTimeout(() => {
+        strip = null;
+        stripTimer = null;
+      }, 6000);
+    }
+  }
+  /** Dismiss the strip immediately — including a message the user would rather deal with later. */
+  function clearStrip() {
+    setStatus(null);
+  }
+  /** Announce a connectivity change on the strip and remember it, so `connectionTransition`
+   *  can tell a real change from a no-op (the strip is not a heartbeat). Shared by the
+   *  `online`/`offline` listeners, which add their own side effects after it. */
+  function applyConnection(next: boolean) {
+    const m = connectionTransition(wasOnline, next);
+    if (m) setStatus(m);
+    wasOnline = next;
+  }
 
   async function captureDump() {
     busy = true;
@@ -274,24 +706,23 @@
           clearDraft();
           void refreshPending();
         },
+        // The strip is fed by the operation: captureThought emits `capture-confirmed` itself
+        // when a capture lands with no Note, so the message's source is the operation layer.
+        onStatus: setStatus,
       });
 
-      // Pending with no preview: the Dump is safe and no review session opens. A capture
-      // that failed while online says so — and names the error — rather than claiming the
-      // user is offline.
+      // Pending with no preview: the Dump is safe and no review session opens. The strip was
+      // already set by the operation's `onStatus` (capture-confirmed), and the Pending card is
+      // the receipt — so there is nothing to keep the sheet open for.
       if (outcome.kind === 'pending') {
         await refreshPending();
-        status =
-          outcome.reason === 'offline'
-            ? `Captured — ${outcome.message}.`
-            : `Captured — ${outcome.message}. Capture failed: ${outcome.error?.message}`;
+        closeCapture();
         return;
       }
 
       session = outcome.session;
       context = '';
-      savedNotePath = null;
-      savedNote = null;
+      held = false;
       contextRevision = 0;
       appendConfirmed = false;
       // Arm the 5s inactivity timer at capture, so a Dump with no added Context
@@ -313,8 +744,12 @@
     if (!session || session.saved) return;
     try {
       session = await addContext(session, context, storeDeps());
-      autosaver.schedule();
-      contextRevision += 1;
+      // Held means the clock is stopped and stays stopped: typing must not start it again
+      // behind the user, which is the whole point of the button they pressed.
+      if (!held) {
+        autosaver.schedule();
+        contextRevision += 1;
+      }
     } catch (e) {
       status = `Error: ${(e as Error).message}`;
     }
@@ -335,21 +770,35 @@
         relater: createRelater(settings, log),
         now: () => Date.now(),
       });
+      const appended = session.match.kind === 'append';
+      const appendedTo = session.match.suggestion?.title;
       session = result.session;
       await refreshPending();
       if (result.ok) {
-        savedNotePath = result.written.path;
-        savedNote = result.note;
-        status =
-          session.match.kind === 'append'
-            ? `Appended to: ${session.match.suggestion?.title ?? result.note.title}`
-            : `Saved Note: ${result.note.title}`;
-        // The commit now lives on the card (teal edge + "Filed to Obsidian" line); bring it
-        // into view so the last frame is the filed Note, not the status line that scrolled past.
-        await tick();
-        scrollToNote();
+        // Back to the grid, with the card the commit produced already on it. The card comes
+        // from the Note in hand rather than a second Vault read: the receipt must not cost
+        // the capture path a full-Vault round trip.
+        cards = await fileOnGrid(
+          cards,
+          { note: result.note, path: result.written.path, appended },
+          cardCache,
+        );
+        cardsLoaded = true;
+        markWet(result.written.path);
+        status = appended
+          ? `Appended to: ${appendedTo ?? result.note.title}`
+          : `Saved Note: ${result.note.title}`;
+        // Closed through the dialog, so the browser tears the sheet out of the top layer and
+        // hands focus back to the grid itself. `onSheetClose` returns without touching the
+        // session — it is saved — so the session is settled here.
+        closeCapture();
+        endSession();
       } else {
-        // The Dump persists; the Note will be generated from it later.
+        // The Dump persists; the Note will be generated from it later. Whether the save came
+        // from the timer firing or from a flush, no timer is armed afterwards — so the
+        // countdown really has stopped, and the sheet says Held rather than redrawing an edge
+        // that is draining towards nothing.
+        held = true;
         status = `Save failed — Dump kept: ${result.error.message}`;
       }
     } catch (e) {
@@ -367,36 +816,17 @@
   // Override the match decision to 'new' — the user declines the append suggestion
   // and chooses to found a fresh Note instead. Reschedules the autosave and restarts the
   // countdown edge, which was held while the append waited: now that a save will actually
-  // happen on its own, the clock runs honestly from full.
+  // happen on its own, the clock runs honestly from full. Unless the user pressed Hold — a
+  // stopped clock stays stopped whatever else they decide.
   function chooseNewNote() {
     if (!session || session.saved) return;
     session = { ...session, match: { kind: 'new' } };
     appendConfirmed = false;
-    contextRevision += 1;
-    autosaver.schedule();
-    status = 'Will save as a new Note.';
-  }
-
-  // Explicit, user-triggered re-organize — re-runs Organize on the saved Note's body to
-  // re-derive its title/tags/summary/category. Never automatic; the append itself never
-  // refreshes. (The button reads "Re-organize Note"; "metadata" is the internal name only.)
-  async function refreshMetadata() {
-    if (!savedNotePath) return;
-    busy = true;
-    try {
-      await refreshNoteMetadata(savedNotePath, {
-        db: createRemoteDb(settings),
-        settings,
-        organizer: createOrganizer(settings, log),
-        hash: defaultSha1Hex,
-        now: () => Date.now(),
-      });
-      status = `Re-organized: ${savedNotePath}`;
-    } catch (e) {
-      status = `Re-organize failed: ${(e as Error).message}`;
-    } finally {
-      busy = false;
+    if (!held) {
+      contextRevision += 1;
+      autosaver.schedule();
     }
+    status = held ? 'Will save as a new Note when you file it.' : 'Will save as a new Note.';
   }
 
   // Read the Pending records and arm or disarm the retry timer to match them. A failure
@@ -534,7 +964,7 @@
   async function askQuestion() {
     asking = true;
     answer = '';
-    citations = [];
+    askCards = [];
     try {
       const result = await retrieve(question, {
         ...storeDeps(),
@@ -542,7 +972,10 @@
         answerer: createAnswerer(settings, log),
       });
       answer = result.answer;
-      citations = result.citations;
+      // The citations are shown as the same cards the grid shows — projected from the cited
+      // Notes through the same `toCard` — so a source is a recognizable, tappable card, not a
+      // link. A Note deleted between the answer and this read is simply dropped.
+      askCards = await citedCards(result.citations, storeDeps());
     } catch (e) {
       status = `Retrieve failed: ${(e as Error).message}`;
     } finally {
@@ -565,8 +998,10 @@
   async function saveConfig() {
     const problem = validateProviderUrl(settings.llmProvider);
     if (problem) {
+      // The rejection shows locally on the Settings form (the thing it is about) AND on the
+      // cross-cutting strip, where it holds until resolved by a good save or cleared.
       status = problem.message;
-      // Both: the code is what a tool matches on, the message is what a human reads.
+      setStatus(configRejectedMessage(problem));
       log({
         level: 'error',
         op: 'config',
@@ -577,6 +1012,9 @@
     }
     await saveSettings(settings);
     status = 'Settings saved';
+    // A successful save resolves a held rejection — the setting the strip was complaining
+    // about is now accepted. Other strip kinds (a lost connection) are left alone.
+    if (strip?.kind === 'config-rejected') setStatus(null);
     log({
       op: 'config',
       message: 'settings saved',
@@ -635,212 +1073,560 @@
 <!-- The masthead is a sibling of <main>, not a child of it: a <header> only becomes a `banner`
      landmark when nothing like <main> stands between it and the body, so nesting it cost the
      page its one other landmark. The wrapper div carries the column. -->
+<!-- A Note card is a door: the whole card opens the Note sheet (ticket 06). The title is no
+     longer a link to Obsidian — that door moves into the sheet, where the full Note is — so the
+     card reads as one thing to press, not a label with a link inside. A real <button> cannot
+     hold an <h3>/<p> (flow content), so the card is an article with the button role and full
+     keyboard handling — the accessible clickable-card pattern — rather than an invalid button.
+     Declared at the template root so the grid (inside .page) and the Ask sheet's citations
+     (a sibling of .page) share one snippet — a citation card is the same card the grid shows
+     (ticket 07). -->
+{#snippet noteCard(card: NoteCard)}
+  <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
+  <article
+    class="card card--door"
+    class:card--cat={hueFor(card.category) !== null}
+    class:card--wet={wetPath === card.path}
+    style={hueStyle(card.category)}
+    role="button"
+    tabindex="0"
+    aria-label={`Open ${card.title || 'Untitled'}`}
+    on:click={() => openNote(card.path)}
+    on:keydown={(e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openNote(card.path);
+      }
+    }}>
+    <p class="card__category">{card.category}</p>
+    <h3 class="card__title">{card.title || 'Untitled'}</h3>
+    {#if card.summary}
+      <p class="card__summary">{card.summary}</p>
+    {/if}
+    {#if card.tags.length}
+      <p class="card__tags">
+        {#each card.tags.slice(0, 3) as tag}<span class="card__tag">#{tag}</span>{/each}
+        {#if card.tags.length > 3}<span class="card__tag-more">+{card.tags.length - 3} more</span>{/if}
+      </p>
+    {/if}
+    <p class="card__date">{formatStamp(card.createdAt)}</p>
+  </article>
+{/snippet}
+
+{#snippet strandedRowHead(s: StrandedDump)}
+  <!-- The row head every stranded list shares — which thought, when, and why it stranded — so the
+       Stranded list and the Dismissed list draw it the same way. The reason cascade lives here once,
+       not in each list: a Dump nobody filed, a deleted Note, a Note Obsidian won't write, or both
+       gone. The action buttons differ per list and stay in the caller. -->
+  <a class="vault-link stranded-when" href={obsidianUrl(settings.vaultName, dumpPath(s.dump, settings))}>
+    {new Date(s.dump.createdAt).toLocaleString()}
+  </a>
+  <span class="stranded-text">
+    {firstLine(s.dump.content)}
+    <br />
+    <span class="detail">
+      {#if s.reason === 'unfiled'}
+        never became a Note
+      {:else if s.reason === 'note-deleted'}
+        its Note was deleted — {s.notePath}
+      {:else if s.reason === 'note-unreadable'}
+        its Note exists but Obsidian will not write it — {s.notePath}
+      {:else}
+        the Dump and its Note were both deleted
+      {/if}
+    </span>
+  </span>
+{/snippet}
+
+<svelte:window on:keydown={onShortcutKey} />
+
 <div class="page">
   <header class="masthead">
-    <h1 class="wordmark">brain-dump</h1>
-    <nav>
-      <button
-        class:on={view === 'capture'}
-        aria-current={view === 'capture' ? 'page' : undefined}
-        on:click={() => (view = 'capture')}>capture</button>
-      <button
-        class:on={view === 'ask'}
-        aria-current={view === 'ask' ? 'page' : undefined}
-        on:click={() => (view = 'ask')}>ask</button>
-      <button
-        class:on={view === 'config'}
-        aria-current={view === 'config' ? 'page' : undefined}
-        on:click={() => (view = 'config')}>settings</button>
-    </nav>
+    <h1 class="wordmark"><b>brain</b>·dump</h1>
+    <button class="masthead__gear" on:click={openSettings} aria-label="settings" title="Settings (⌘, or s)">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+      </svg>
+    </button>
   </header>
 
   <main>
-  {#if view === 'capture'}
-    <section class="surface">
-    <!-- Four states, kept distinct on purpose. Collapsing them into one "waiting" line
-         would restore the ambiguity that caused finding 02: the user could not tell a
-         Dump being worked on from one nothing was happening to. Stranded outranks the
-         rest — it is the app admitting it broke its promise. -->
-    {#if strandedRecords.length}
-      <p class="status err" aria-live="polite">
-        {strandedRecords.length === 1
-          ? "1 Dump couldn't be Organized"
-          : `${strandedRecords.length} Dumps couldn't be Organized`}: {strandedRecords[0].lastError}
-      </p>
-      <div class="actions"><button on:click={() => retryStranded()}>Retry</button></div>
-    {:else if recoveringCount}
-      <p class="status" aria-live="polite">
-        Organizing {recoveringCount === 1 ? '1 Dump' : `${recoveringCount} Dumps`} left from your last session…
-      </p>
-    {:else if retryingCount}
-      <p class="status" aria-live="polite">
-        {retryingCount === 1 ? "1 Dump couldn't be Organized" : `${retryingCount} Dumps couldn't be Organized`} —
-        trying again shortly.
-      </p>
-    {:else if offlineCount}
-      <p class="status" aria-live="polite">
-        {offlineCount === 1
-          ? '1 Dump saved — it will be Organized'
-          : `${offlineCount} Dumps saved — they will be Organized`} when you're back online.
-      </p>
-    {:else if inFlightCount}
-      <p class="status" aria-live="polite">Organizing your Dump…</p>
-    {/if}
-    {#if pendingError}<p class="status err" aria-live="polite">{pendingError}</p>{/if}
+  <section class="surface grid-surface">
+  <!-- The two stacked controls are the grid's primary nav (DESIGN.md): the dashed Catch entry
+       point — the one heavy dashed stroke, the door into the whole product — and the crisp Ask
+       beside it, dimmed when an empty Vault has nothing to answer from. Both read as fields to
+       write into, not buttons to press. -->
+  <div class="controls">
+    <button type="button" class="ctl ctl-catch" on:click={openCapture} title="Catch a thought (c)">
+      <span>Catch a thought…</span><span class="plus" aria-hidden="true">+</span>
+    </button>
+    <button type="button" class="ctl ctl-ask" on:click={openAsk} disabled={vaultIsEmpty} title={vaultIsEmpty ? 'Ask needs a Note to answer from' : 'Ask your notes (⌘K or a)'}>
+      <span>Ask your notes…</span><span class="kbd" aria-hidden="true">⌘K</span>
+    </button>
+  </div>
 
-    {#if !session}
-      <!-- The Dump is the product, not a form field: set in the content face, at content size,
-           and named for assistive tech without a visible label — a label above it would make
-           it a form control, which is the one thing it must not look like. Every other field
-           in the app carries its label on screen; this one carries it in the name. -->
-      <textarea
-        class="dump"
-        use:focusOnMount
-        bind:value={text}
-        on:input={persistDraft}
-        on:keydown={(e) => commitOnModEnter(e, captureDump, busy || !text.trim())}
-        aria-label="Dump — what are you thinking?"
-        placeholder="What are you thinking?"
-        disabled={busy}></textarea>
-      <div class="actions">
-        <button class="primary" on:click={captureDump} disabled={busy || !text.trim()}>
-          {busy ? 'Capturing…' : 'Capture'}
-        </button>
-      </div>
-    {:else}
-      {@const shown = savedNote ?? session.preview}
-      <!-- The whole Note, not a summary of it. Before the save this is the preview; after it
-           this is the document in the Vault. You are approving a Note, so you are shown one. -->
-      <article class="note" class:committed={session.saved}>
-        {#key contextRevision}
-          <div class="burn" class:burn--held={session.match.kind === 'append' && !appendConfirmed}></div>
-        {/key}
-
-        <p class="eyebrow">
-          {#if session.saved && savedNotePath}
-            <span class="filed-mark">Filed to Obsidian</span><br>
-            <a class="vault-link" href={obsidianUrl(settings.vaultName, savedNotePath)}>{savedNotePath}</a>
-          {:else if session.match.kind === 'new'}
-            New Note
-          {:else}
-            Append to <span class="keep-case">&ldquo;{session.match.suggestion?.title ?? 'an existing Note'}&rdquo;</span>
-          {/if}
-        </p>
-
-        <h2>{shown.title}</h2>
-
-        <dl class="meta">
-          {#if shown.tags.length}
-            <dt>tags</dt>
-            <dd>{shown.tags.join('  ')}</dd>
-          {/if}
-          {#if shown.category}
-            <dt>category</dt>
-            <dd>{shown.category}</dd>
-          {/if}
-        </dl>
-
-        {#if shown.body}
-          <div class="note-body">{shown.body}</div>
-        {/if}
-
-        {#if shown.summary}
-          <p class="rule-label">summary</p>
-          <p>{shown.summary}</p>
-        {/if}
-
-        {#if shown.keyPoints.length}
-          <p class="rule-label">key points</p>
-          <ul>{#each shown.keyPoints as point}<li>{point}</li>{/each}</ul>
-        {/if}
-
-        <p class="rule-label">related</p>
-        {#if shown.related.length}
-          <ul class="links">{#each shown.related as link}<li><a class="vault-link" href={linkHref(settings.vaultName, link)}>{linkText(link)}</a></li>{/each}</ul>
-        {:else if session.saved}
-          <p class="pending">No Note in the Vault was close enough to link.</p>
-        {:else}
-          <p class="pending">Links are found when the Note is saved.</p>
-        {/if}
-      </article>
-
-      {#if session.match.kind === 'append' && !session.saved}
-        <!-- Confirm new-vs-append with one action: keep the append, or override to a new Note -->
-        <div class="actions">
-          <button class="primary" on:click={confirmAppend}>Append</button>
-          <button on:click={chooseNewNote}>Save as new Note</button>
-        </div>
+  <!-- The cross-cutting status strip — grid-only, never inside a sheet (ticket 09). One live
+       region, announced politely, carrying a word and never colour alone. A capture that landed
+       fades on its own; a lost connection or a rejected setting holds, and either can be cleared
+       immediately — including one the user would rather deal with later. -->
+  {#if !sheet}
+    <div
+      class="status-strip"
+      class:status-strip--idle={!strip}
+      class:status-strip--caught={strip?.kind === 'capture-confirmed'}
+      class:status-strip--connection={strip?.kind === 'connection-lost' || strip?.kind === 'connection-restored'}
+      class:status-strip--rejected={strip?.kind === 'config-rejected'}
+      aria-live="polite"
+    >
+      {#if strip}
+        <span class="status-strip__text">{strip.message}</span>
+        <button class="status-strip__dismiss" on:click={clearStrip} aria-label="Dismiss status">Dismiss</button>
+      {:else}
+        <span class="status-strip__text">all filed · nothing pending</span>
       {/if}
-
-      <label class="context-field">
-        add context
-        <textarea
-          bind:value={context}
-          on:input={onContextInput}
-          on:keydown={(e) => commitOnModEnter(
-            e,
-            () => autosaver.flush(),
-            // The context field only renders with a session; the !session guard is for the
-            // type checker, not the runtime — it makes an absent session a no-op rather than
-            // a null deref. Matches the "Save now" visibility rule from the harden pass.
-            !session || session.saved || (session.match.kind === 'append' && !appendConfirmed),
-          )}
-          disabled={session.saved}></textarea>
-      </label>
-      <p class="hint">
-        {#if session.saved}
-          Dump frozen. Your verbatim original is kept inside it.
-        {:else if session.match.kind === 'append' && !appendConfirmed}
-          Append waits for your confirmation — it won’t save on its own. Your verbatim original is kept.
-        {:else}
-          Saves 5 seconds after you stop typing. Your verbatim original is kept.
-        {/if}
-      </p>
-
-      <div class="actions">
-        {#if session.match.kind !== 'append' || appendConfirmed}
-          <!-- "Save now" forces the autosave. It is only honest where a save will actually
-               happen — an unconfirmed append no-ops, so on that path the decision buttons
-               above (Append / Save as new Note) are the save, and this one is absent. -->
-          <button on:click={() => autosaver.flush()} disabled={session.saved}>Save now</button>
-        {/if}
-        {#if session.saved && savedNotePath}
-          <!-- Explicit re-organize — never automatic -->
-          <button on:click={refreshMetadata} disabled={busy}>Re-organize Note</button>
-        {/if}
-        <button on:click={() => { session = null; savedNote = null; autosaver.cancel(); }}>New capture</button>
-      </div>
-    {/if}
-    </section>
-  {:else if view === 'ask'}
-    <section class="surface">
-    <label class="ask">
-      ask your vault
-      <textarea
-        bind:value={question}
-        on:keydown={(e) => commitOnModEnter(e, askQuestion, asking || !question.trim())}
-        placeholder="What did I think about…"
-        disabled={asking}></textarea>
-    </label>
-    <div class="actions">
-      <button class="primary" on:click={askQuestion} disabled={asking || !question.trim()}>
-        {asking ? 'Reading your vault…' : 'Ask'}
-      </button>
     </div>
-    {#if answer}
-      <section class="answer">
-        <p>{answer}</p>
-        {#if citations.length}
-          <p class="rule-label">sources</p>
-          <ul class="sources">
-            {#each citations as c}<li><a class="vault-link" href={obsidianUrl(settings.vaultName, c.path)}>{c.title}</a></li>{/each}
-          </ul>
-        {/if}
-      </section>
-    {/if}
-    </section>
+  {/if}
+
+  <!-- The recovery banner. It used to live on the capture surface; a Capture sheet has room
+       for the field and nothing else, and this speaks for the whole app rather than for the
+       thought being typed, so it belongs out here. Four states, kept distinct on purpose:
+       collapsing them into one "waiting" line would restore the ambiguity that caused
+       finding 02 — the user could not tell a Dump being worked on from one nothing was
+       happening to. Stranded outranks the rest; it is the app admitting it broke its
+       promise. Ticket 09 added the separate cross-cutting `.status-strip` below for the
+       card-less kinds (capture landed, connection, settings rejected); this banner stays
+       the voice for the Pending/Stranded Dumps themselves — recovery state, which belongs
+       to those Dumps and not to the strip. -->
+  {#if strandedRecords.length}
+    <p class="status err" aria-live="polite">
+      {strandedRecords.length === 1
+        ? "1 Dump couldn't be Organized"
+        : `${strandedRecords.length} Dumps couldn't be Organized`}: {strandedRecords[0].lastError}
+    </p>
+    <div class="actions"><button on:click={() => retryStranded()}>Retry</button></div>
+  {:else if recoveringCount}
+    <p class="status" aria-live="polite">
+      Organizing {recoveringCount === 1 ? '1 Dump' : `${recoveringCount} Dumps`} left from your last session…
+    </p>
+  {:else if retryingCount}
+    <p class="status" aria-live="polite">
+      {retryingCount === 1 ? "1 Dump couldn't be Organized" : `${retryingCount} Dumps couldn't be Organized`} —
+      trying again shortly.
+    </p>
+  {:else if offlineCount}
+    <p class="status" aria-live="polite">
+      {offlineCount === 1
+        ? '1 Dump saved — it will be Organized'
+        : `${offlineCount} Dumps saved — they will be Organized`} when you're back online.
+    </p>
+  {:else if inFlightCount}
+    <p class="status" aria-live="polite">Organizing your Dump…</p>
+  {/if}
+  {#if pendingError}<p class="status err" aria-live="polite">{pendingError}</p>{/if}
+
+  <!-- One grid, three bands. Pending and Stranded pin to the top ahead of the Notes (which
+       follow reverse-chronologically), pinning within the one grid so cards stay uniform and no
+       row is left half-empty (spec: the band is an ordering, not a second grid). An open card
+       is hue-less — state and Category never compete for the same signal. -->
+  {#if pendingRecords.length || strandedInVault.length || cards.length}
+    <div class="grid" use:rovingGrid>
+      {#each pendingRecords as r (r.dump.id)}
+        <!-- Pending: captured, not yet a Note. Dashed and hue-less, no actions (recovery is
+             automatic). -->
+        <article class="card card--open card--pending">
+          <p class="card__category">Pending</p>
+          <h3 class="card__title card__title--raw">{firstLine(r.dump.content)}</h3>
+          {#if r.lastError}
+            <p class="card__summary">{r.lastError}</p>
+          {/if}
+          <p class="card__date">{formatStamp(r.dump.createdAt)}</p>
+        </article>
+      {/each}
+      {#each strandedInVault as s (s.dump.id)}
+        <!-- Stranded: a Note was never written, or the one written is gone. Same open card,
+             stranded-edged, carrying the reason and the two things the user can do — Retry and
+             Dismiss — right where they found it. -->
+        <article class="card card--open card--stranded">
+          <p class="card__category">Stranded</p>
+          <h3 class="card__title card__title--raw">{firstLine(s.dump.content)}</h3>
+          <p class="card__summary">
+            {#if s.reason === 'unfiled'}
+              never became a Note
+            {:else if s.reason === 'note-deleted'}
+              its Note was deleted — {s.notePath}
+            {:else if s.reason === 'note-unreadable'}
+              its Note exists but Obsidian will not write it — {s.notePath}
+            {:else}
+              the Dump and its Note were both deleted
+            {/if}
+          </p>
+          <div class="card__actions">
+            {#if s.reason === 'unfiled'}
+              <button on:click={() => organizeStranded(s.dump)} disabled={!!organizingStranded}>
+                {organizingStranded === s.dump.id ? 'Retrying…' : 'Retry'}
+              </button>
+            {:else}
+              <button on:click={() => restoreDeleted(s)} disabled={!!organizingStranded}>
+                {organizingStranded === s.dump.id ? 'Retrying…' : 'Retry'}
+              </button>
+            {/if}
+            <button on:click={() => dismissStranded(s)} disabled={!!organizingStranded}>Dismiss</button>
+          </div>
+          <p class="card__date">{formatStamp(s.dump.createdAt)}</p>
+        </article>
+      {/each}
+      {#each cards as card (card.path)}
+        {@render noteCard(card)}
+      {/each}
+    </div>
+  {:else if cardsLoaded}
+    <!-- An empty Vault is calm, not broken: show where the first card will land. -->
+    <div class="grid">
+      <p class="card-placeholder">Your first thought will land here.</p>
+    </div>
   {:else}
-    <section class="surface">
+    <!-- A cold or failed cache never blocks capture: no spinner, just the grid frame. -->
+    <div class="grid"></div>
+  {/if}
+  </section>
+  </main>
+</div>
+
+{#if sheet === 'capture'}
+  <!-- The Capture sheet. A full-screen surface over the grid, and the whole of it: one field
+       and nothing competing with it while the thought comes out. Once Organize has run the
+       field yields to the whole Note — not a summary standing in for it — with the countdown
+       riding its top edge, and committing drops the user back on the grid with the card. -->
+  <dialog
+    class="sheet"
+    bind:this={sheetEl}
+    on:close={onSheetClose}
+    aria-label={session ? 'Review the Note before it files' : 'Capture a thought'}>
+    <div class="sheet__inner">
+      <div class="sheet__bar">
+        <p class="sheet__title">{session ? 'before it files' : 'catch a thought'}</p>
+        <button class="sheet__close" on:click={closeCapture}>close</button>
+      </div>
+
+      <div class="sheet__body">
+        {#if !session}
+          <!-- The Dump is the product, not a form field: set in the content face, at content
+               size, and named for assistive tech without a visible label — a label above it
+               would make it a form control, which is the one thing it must not look like.
+               Every other field in the app carries its label on screen; this one carries it
+               in the name. -->
+          <textarea
+            class="dump"
+            bind:value={text}
+            on:input={persistDraft}
+            on:keydown={(e) => commitOnModEnter(e, captureDump, busy || !text.trim())}
+            aria-label="Dump — what are you thinking?"
+            placeholder="What are you thinking?"
+            disabled={busy}></textarea>
+        {:else}
+          <!-- The whole Note, before it is committed. You are approving a Note, so you are
+               shown one — every field of it, at full length. -->
+          <!-- The raw thought above what it became: the verbatim original, kept and quoted in
+               the serif voice so the user's own words stay distinct from the organized Note
+               below. The same box appears on the committed Note sheet (DESIGN.md). -->
+          <div class="your-words">
+            <p class="your-words__label">your original words</p>
+            <p class="your-words__text">{session.dump.content}</p>
+          </div>
+          <article class="note">
+            {#key contextRevision}
+              <div class="burn" class:burn--held={held || (session.match.kind === 'append' && !appendConfirmed)}></div>
+            {/key}
+
+            <p class="eyebrow">
+              {#if session.match.kind === 'new'}
+                New Note
+              {:else}
+                Append to <span class="keep-case">&ldquo;{session.match.suggestion?.title ?? 'an existing Note'}&rdquo;</span>
+              {/if}
+            </p>
+
+            <h2>{session.preview.title}</h2>
+
+            <dl class="meta">
+              {#if session.preview.tags.length}
+                <dt>tags</dt>
+                <dd>{session.preview.tags.join('  ')}</dd>
+              {/if}
+              {#if session.preview.category !== 'uncategorized'}
+                <dt>category</dt>
+                <dd>{session.preview.category}</dd>
+              {/if}
+            </dl>
+
+            {#if session.preview.body}
+              <div class="note-body">{session.preview.body}</div>
+            {/if}
+
+            {#if session.preview.summary}
+              <p class="rule-label">summary</p>
+              <p>{session.preview.summary}</p>
+            {/if}
+
+            {#if session.preview.keyPoints.length}
+              <p class="rule-label">key points</p>
+              <ul>{#each session.preview.keyPoints as point}<li>{point}</li>{/each}</ul>
+            {/if}
+
+            <p class="rule-label">related</p>
+            {#if session.preview.related.length}
+              <ul class="links">{#each session.preview.related as link}<li><a class="vault-link" href={linkHref(settings.vaultName, link)}>{linkText(link)}</a></li>{/each}</ul>
+            {:else}
+              <p class="pending">Links are found when the Note is saved.</p>
+            {/if}
+          </article>
+
+          <label class="context-field">
+            add context
+            <textarea
+              bind:value={context}
+              on:input={onContextInput}
+              on:keydown={(e) => commitOnModEnter(
+                e,
+                () => autosaver.flush(),
+                // The context field only renders with a session; the !session guard is for the
+                // type checker, not the runtime — it makes an absent session a no-op rather
+                // than a null deref. Matches the "Save now" visibility rule below.
+                !session || (session.match.kind === 'append' && !appendConfirmed),
+              )}></textarea>
+          </label>
+          <p class="hint">
+            {#if session.match.kind === 'append' && !appendConfirmed}
+              Append waits for your confirmation — it won’t save on its own. Your verbatim original is kept.
+            {:else if held}
+              Held — the countdown is stopped and won’t restart. It saves when you say so.
+            {:else}
+              Saves 5 seconds after you stop typing. Your verbatim original is kept.
+            {/if}
+          </p>
+        {/if}
+      </div>
+
+      <div class="sheet__foot">
+        {#if status}<p class="status" aria-live="polite">{status}</p>{/if}
+        <div class="actions">
+          {#if !session}
+            <button class="primary" on:click={captureDump} disabled={busy || !text.trim()}>
+              {busy ? 'Capturing…' : 'Capture'}
+              <span class="primary__sub">save the raw thought</span>
+            </button>
+          {:else if session.match.kind === 'append' && !appendConfirmed}
+            <!-- The app files and the user signs once: the suggested Append is the primary
+                 action, and founding a new Note stays available as the quiet override. Nothing
+                 files until one of them is pressed. -->
+            <button class="primary" on:click={confirmAppend}>
+              Append
+              <span class="primary__sub">add to the matched note</span>
+            </button>
+            <button on:click={chooseNewNote}>Save as new Note</button>
+          {:else}
+            <!-- "Save now" forces the autosave, and after a Hold it is the only thing that
+                 files the Note. It is only shown where a save will actually happen — an
+                 unconfirmed append no-ops, so on that path the two buttons above are the save. -->
+            <button class="primary" on:click={() => autosaver.flush()}>
+              Save now
+              <span class="primary__sub">file to the vault</span>
+            </button>
+            {#if !held}
+              <button on:click={holdCapture}>Hold</button>
+            {/if}
+          {/if}
+        </div>
+      </div>
+    </div>
+  </dialog>
+{/if}
+
+{#if sheet === 'note'}
+  <!-- The Note sheet. The dry twin of the pre-commit preview, at full length: the card was a
+       door, so nothing it truncated stays truncated here. Every Tag wraps rather than hiding
+       behind `+N more`; the body, the key points and the Related links are shown in full; the
+       verbatim Dump is the user's original words, kept as provenance behind the organized
+       thought; and the eyebrow is the filing stamp plus the door back into the Vault. -->
+  <dialog
+    class="sheet"
+    bind:this={sheetEl}
+    on:close={onNoteSheetClose}
+    aria-label="Read the Note">
+    <div class="sheet__inner">
+      <div class="sheet__bar">
+        <p class="sheet__title">the note</p>
+        <button class="sheet__close" on:click={closeNote}>close</button>
+      </div>
+
+      <div class="sheet__body">
+        {#if noteLoading}
+          <p class="pending">Reading the Note…</p>
+        {:else if noteView}
+          <article class="note committed">
+            <!-- The filing stamp and the door back into the Vault: the path is an obsidian://
+                 link, so "open it where editing happens" is one tap. -->
+            <p class="eyebrow">
+              <span class="filed-mark">Filed</span>
+              <span class="eyebrow__sep" aria-hidden="true">·</span>
+              <a class="vault-link" href={obsidianUrl(settings.vaultName, noteView.path)}>{noteView.path}</a>
+            </p>
+
+            <h2>{noteView.note.title || 'Untitled'}</h2>
+
+            <dl class="meta">
+              {#if noteView.note.tags.length}
+                <!-- All the Tags, wrapping — the card showed three and a count; the sheet shows
+                     every one. -->
+                <dt>tags</dt>
+                <dd>{noteView.note.tags.join('  ')}</dd>
+              {/if}
+              {#if noteView.note.category !== 'uncategorized'}
+                <dt>category</dt>
+                <dd>{noteView.note.category}</dd>
+              {/if}
+            </dl>
+
+            {#if noteView.note.body}
+              <div class="note-body">{noteView.note.body}</div>
+            {/if}
+
+            {#if noteView.note.summary}
+              <p class="rule-label">summary</p>
+              <p>{noteView.note.summary}</p>
+            {/if}
+
+            {#if noteView.note.keyPoints.length}
+              <p class="rule-label">key points</p>
+              <ul>{#each noteView.note.keyPoints as point}<li>{point}</li>{/each}</ul>
+            {/if}
+
+            <p class="rule-label">related</p>
+            {#if noteView.note.related.length}
+              <ul class="links">
+                {#each noteView.note.related as link}
+                  <li><a class="vault-link" href={linkHref(settings.vaultName, link)}>{linkText(link)}</a></li>
+                {/each}
+              </ul>
+            {:else}
+              <p class="pending">No related documents.</p>
+            {/if}
+
+            {#if noteView.dump}
+              <!-- The verbatim Dump: the user's original words, kept and reachable but not the
+                   headline. The same dashed provenance box as the capture preview; Context, if
+                   the capture added any, follows it. -->
+              <div class="your-words">
+                <p class="your-words__label">your original words</p>
+                <p class="your-words__text">{noteView.dump.content}</p>
+              </div>
+              {#if noteView.dump.context}
+                <p class="rule-label">context</p>
+                <div class="verbatim">{noteView.dump.context}</div>
+              {/if}
+            {/if}
+          </article>
+        {:else}
+          <!-- The Note was deleted between the tap and the read (Obsidian's own sync can do it).
+               The grid reconciles it away on the next open; here it simply is gone. -->
+          <p class="pending">This Note is no longer in your Vault.</p>
+        {/if}
+      </div>
+
+      <div class="sheet__foot">
+        {#if status}<p class="status" aria-live="polite">{status}</p>{/if}
+        <div class="actions">
+          {#if noteView}
+            <!-- Re-organize re-derives the metadata from the current body — the user may have
+                 edited the Note in Obsidian — and is the one place that action surfaces. -->
+            <button on:click={reorganizeCurrentNote} disabled={reorganizing}>
+              {reorganizing ? 'Re-organizing…' : 'Re-organize'}
+            </button>
+            <!-- The trailing ghost door back into the Vault (DESIGN.md): the eyebrow already
+                 links the path; this is the quiet, right-aligned way out for the reader who is
+                 done. -->
+            <a class="btn-ghost" href={obsidianUrl(settings.vaultName, noteView.path)}>open in obsidian →</a>
+          {/if}
+        </div>
+      </div>
+    </div>
+  </dialog>
+{/if}
+
+{#if sheet === 'ask'}
+  <!-- The Ask sheet. Retrieve on its own surface, mirroring Capture — drop in, focus, return.
+       The question sits at the top, the synthesized answer below it, then the Notes the answer
+       drew on shown as the same cards the grid shows. A cited card taps through into the Note
+       sheet: openNote sets `sheet = 'note', which swaps this dialog for the Note sheet (sheets do
+       not nest), and closing the Note returns to the grid. -->
+  <dialog
+    class="sheet"
+    bind:this={sheetEl}
+    on:close={onAskSheetClose}
+    aria-label="Ask your vault">
+    <div class="sheet__inner">
+      <div class="sheet__bar">
+        <p class="sheet__title">ask</p>
+        <button class="sheet__close" on:click={closeAsk}>close</button>
+      </div>
+
+      <div class="sheet__body">
+        <label class="ask">
+          ask your vault
+          <textarea
+            bind:value={question}
+            on:keydown={(e) => commitOnModEnter(e, askQuestion, asking || !question.trim())}
+            placeholder="What did I think about…"
+            disabled={asking}></textarea>
+        </label>
+        <div class="actions">
+          <button class="primary" on:click={askQuestion} disabled={asking || !question.trim()}>
+            {asking ? 'Reading your vault…' : 'Ask'}
+            <span class="primary__sub">search your vault</span>
+          </button>
+        </div>
+
+        {#if answer}
+          <section class="answer">
+            <p>{answer}</p>
+            {#if askCards.length}
+              <!-- The Notes the answer drew on, as the same cards the grid shows — a source is a
+                   recognizable, tappable card, not a link, so checking the answer against the
+                   user's own words is one tap into the Note sheet. -->
+              <p class="rule-label">sources</p>
+              <div class="citations">
+                {#each askCards as card (card.path)}
+                  {@render noteCard(card)}
+                {/each}
+              </div>
+            {/if}
+          </section>
+        {/if}
+      </div>
+    </div>
+  </dialog>
+{/if}
+
+{#if sheet === 'settings'}
+  <!-- The Settings sheet (ticket 08) — the fourth sheet, reached from the grid and returned to it
+       like every other. The two fieldsets, the connection checks, the Stranded reconcile and the
+       diagnostics carry over from the old config view unchanged in substance; what is new is the
+       home for a Dismissed Dump — the one thing that deliberately has no card. Dismiss/Restore touch
+       only the device-local dismissed set, never the Vault: dismissing is a note to self, and
+       restoring returns the Dump to the Stranded band because the next reconcile no longer
+       excludes it. -->
+  <dialog
+    class="sheet"
+    bind:this={sheetEl}
+    on:close={onSettingsSheetClose}
+    aria-label="Settings">
+    <div class="sheet__inner">
+      <div class="sheet__bar">
+        <p class="sheet__title">settings</p>
+        <button class="sheet__close" on:click={closeSettings}>close</button>
+      </div>
+      <div class="sheet__body">
     <!-- Twelve fields are two decisions: where the notes live, and which model does the
          work. Grouped under the same ruled labels the rest of this surface already uses. -->
     <fieldset class="field-group">
@@ -864,7 +1650,10 @@
     </fieldset>
 
     <div class="actions">
-      <button class="primary" on:click={saveConfig}>Save settings</button>
+      <button class="primary" on:click={saveConfig}>
+        Save settings
+        <span class="primary__sub">commit both fieldsets</span>
+      </button>
     </div>
 
     <p class="rule-label">connection</p>
@@ -949,24 +1738,7 @@
         <ul class="stranded">
           {#each strandedInVault as s (s.dump.id)}
             <li>
-              <a class="vault-link stranded-when" href={obsidianUrl(settings.vaultName, dumpPath(s.dump, settings))}>
-                {new Date(s.dump.createdAt).toLocaleString()}
-              </a>
-              <span class="stranded-text">
-                {firstLine(s.dump.content)}
-                <br />
-                <span class="detail">
-                  {#if s.reason === 'unfiled'}
-                    never became a Note
-                  {:else if s.reason === 'note-deleted'}
-                    its Note was deleted — {s.notePath}
-                  {:else if s.reason === 'note-unreadable'}
-                    its Note exists but Obsidian will not write it — {s.notePath}
-                  {:else}
-                    the Dump and its Note were both deleted
-                  {/if}
-                </span>
-              </span>
+              {@render strandedRowHead(s)}
               {#if s.reason === 'unfiled'}
                 <button on:click={() => organizeStranded(s.dump)} disabled={!!organizingStranded}>
                   {organizingStranded === s.dump.id ? 'Organizing…' : 'Organize'}
@@ -989,6 +1761,36 @@
       {/if}
     {/if}
 
+    <p class="rule-label">dismissed dumps</p>
+    <p class="hint">
+      A Dismissed Dump is a thought you saw in the Stranded list and decided not to file. Dismissing
+      writes nothing to the Vault — the Dump stays exactly where it is, and is held out of the
+      Stranded list rather than removed. Restoring one puts it back on the Stranded band: the Dump
+      was never gone, only silenced.
+    </p>
+    <div class="actions">
+      <button on:click={showDismissed} disabled={loadingDismissed}>
+        {loadingDismissed ? 'Reading the Vault…' : 'Show dismissed Dumps'}
+      </button>
+    </div>
+    {#if dismissedLoaded}
+      {#if dismissedDumps.length}
+        <!-- The same shape as the Stranded list — which thought, and why it stranded — so the
+             user recognizes what restoring would put back. Restore is the mirror of Dismiss: the
+             id leaves the dismissed set and the Dump returns to the Stranded band. -->
+        <ul class="stranded">
+          {#each dismissedDumps as s (s.dump.id)}
+            <li>
+              {@render strandedRowHead(s)}
+              <button on:click={() => restoreDismissed(s)}>Restore</button>
+            </li>
+          {/each}
+        </ul>
+      {:else}
+        <p class="hint">No dismissed Dumps — every thought you set aside is filed or gone.</p>
+      {/if}
+    {/if}
+
     <p class="rule-label">diagnostics</p>
     <p class="hint">
       The last {logEvents.length} events, newest first. In dev these are also appended to
@@ -1008,9 +1810,8 @@
         </li>
       {/each}
     </ul>
-    </section>
-  {/if}
-
-  {#if status}<p class="status" aria-live="polite">{status}</p>{/if}
-  </main>
-</div>
+        {#if status}<p class="status" aria-live="polite">{status}</p>{/if}
+      </div>
+    </div>
+  </dialog>
+{/if}

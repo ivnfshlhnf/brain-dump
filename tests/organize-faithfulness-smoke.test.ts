@@ -16,6 +16,7 @@
 //   npx vitest run tests/organize-faithfulness-smoke.test.ts
 import { it, expect } from 'vitest';
 import { createOrganizer } from '../src/lib/llm';
+import { CATEGORIES } from '../src/lib/category';
 import { DEFAULT_SETTINGS, type Settings } from '../src/lib/types';
 
 const RUN = process.env.LLM_SMOKE === '1';
@@ -85,6 +86,31 @@ it.skipIf(!RUN)(
       }
     }
     expect(invented, 'no run should invent content beyond the Dump').toHaveLength(0);
+  },
+  90_000,
+);
+
+// Ticket 04, acceptance #10 — the Organize prompt now enumerates the five named Category members
+// and asks for exactly one. The deterministic guard in tests/llm-provider.test.ts checks the
+// PROMPT carries that enumeration; this test drives the REAL model to confirm the enumeration
+// actually steers it onto the closed set — every run returns one of the five named members, not
+// free text. (parseOrganizeOutput coerces any stray reply to `uncategorized`, so a run that
+// returns `uncategorized` means the model did NOT pick a member — that is the failure this test
+// catches: the prompt failed to constrain the model.) A fake organizer cannot exercise this.
+//
+//   set -a && source .env && set +a
+//   npx vitest run tests/organize-faithfulness-smoke.test.ts
+it.skipIf(!RUN)(
+  'ticket 04: Organize returns a named Category member (real model)',
+  async () => {
+    const organizer = createOrganizer(settingsFromEnv());
+    for (let i = 0; i < RUNS; i++) {
+      const out = await organizer.organize(DUMP, 'text');
+      // out.category is already coerced by parseOrganizeOutput, so `uncategorized` here means the
+      // model returned a non-member — the prompt did not steer it onto the set. Assert a NAMED
+      // member is returned every run.
+      expect(CATEGORIES, `run ${i + 1} returned "${out.category}", not a named member`).toContain(out.category);
+    }
   },
   90_000,
 );

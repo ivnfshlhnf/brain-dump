@@ -5,7 +5,7 @@
 import type { Dump, PendingDump } from './types';
 
 const DB_NAME = 'brain-dump';
-const VERSION = 4; // v1: settings; v2: + outbox; v3: outbox entries become PendingDump records; v4: + dismissed
+const VERSION = 5; // v1: settings; v2: + outbox; v3: outbox→PendingDump; v4: + dismissed; v5: + note-cards
 
 export const SETTINGS_STORE = 'settings';
 /** The Pending store. The *key* is still `outbox` — the name it was created under in v2 —
@@ -16,6 +16,9 @@ export const PENDING_STORE = 'outbox';
  *  rather than a `reason` on a Pending record: a Dismissed Dump is not Pending — no Note
  *  is coming for it — and CONTEXT.md keeps those two words apart. */
 export const DISMISSED_STORE = 'dismissed';
+/** The home grid's card projection, cached device-local so the grid paints before the Vault
+ *  read completes (ADR-0007). Disposable — rebuilt from the Vault in one pass when absent. */
+export const CARD_CACHE_STORE = 'note-cards';
 
 /** Open the app database, creating any missing object stores. Opened per operation
  *  rather than cached, so a store handle never outlives the connection it holds. */
@@ -28,6 +31,7 @@ export function openAppDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(SETTINGS_STORE)) db.createObjectStore(SETTINGS_STORE);
       if (!db.objectStoreNames.contains(PENDING_STORE)) db.createObjectStore(PENDING_STORE);
       if (!db.objectStoreNames.contains(DISMISSED_STORE)) db.createObjectStore(DISMISSED_STORE);
+      if (!db.objectStoreNames.contains(CARD_CACHE_STORE)) db.createObjectStore(CARD_CACHE_STORE);
       if (event.oldVersion >= 2 && event.oldVersion < 3) migrateBareDumps(req.transaction);
     };
     req.onsuccess = () => resolve(req.result);

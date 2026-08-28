@@ -117,7 +117,7 @@ describe('organizeDump (Seam A)', () => {
   const sampleOutput: OrganizeOutput = {
     title: 'Water the plants',
     tags: ['home', 'plants'],
-    category: 'Home',
+    category: 'personal',
     summary: 'A reminder to water the plants.',
     keyPoints: ['Water the plants regularly'],
     related: ['[[plants]]'],
@@ -176,7 +176,7 @@ describe('organizeDump (Seam A)', () => {
     expect(file).toContain('tags: [home, plants]');
     expect(file).toContain(`created: ${fixedNow}`);
     expect(file).toContain('modality: text');
-    expect(file).toContain('category: Home');
+    expect(file).toContain('category: personal');
     expect(file).toContain('summary: A reminder to water the plants.');
     // Body is the cleaned content, then the structured sections.
     expect(file).toContain('I keep forgetting to water the plants.');
@@ -221,7 +221,7 @@ describe('capture review flow (Seam A — ticket 03)', () => {
   const sampleOutput: OrganizeOutput = {
     title: 'Water the plants',
     tags: ['home', 'plants'],
-    category: 'Home',
+    category: 'personal',
     summary: 'A reminder to water the plants.',
     keyPoints: ['Water the plants regularly'],
     related: ['[[plants]]'],

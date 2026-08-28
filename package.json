@@ -8,11 +8,12 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "svelte-check && vite build",
+    "build": "svelte-check && node scripts/check-tokens.mjs && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "svelte-check --tsconfig ./tsconfig.json"
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json",
+    "check:tokens": "node scripts/check-tokens.mjs"
   },
   "dependencies": {
     "events": "^3.3.0",

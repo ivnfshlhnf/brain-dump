@@ -28,7 +28,7 @@ const settings: Settings = { ...DEFAULT_SETTINGS, dumpsFolder: '_dumps', managed
 const sampleOutput: OrganizeOutput = {
   title: 'Water the plants',
   tags: ['home', 'plants'],
-  category: 'Home',
+  category: 'personal',
   summary: 'A reminder to water the plants.',
   keyPoints: ['Water the plants regularly'],
   related: ['[[plants]]'],
@@ -136,5 +136,30 @@ describe('autosave timing (Seam A — ticket 03)', () => {
 
     await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
     expect(await noteWritten('water-the-plants-with-context')).toBe(false);
+  });
+
+  // --- Hold (ticket 05) ---------------------------------------------------
+  // Hold is this cancel plus a UI state, and nothing more: the autosave module gains no new
+  // interface for it. What Hold promises is that the clock, once stopped, never starts again
+  // on its own — so the only thing that may write the Note after a cancel is the user
+  // explicitly filing it.
+
+  it('after cancel, time alone never files the Note — only an explicit flush does', async () => {
+    const session = await sessionWithContext();
+    const a = createAutosaver({ save: saveOf(session) });
+    a.schedule();
+    a.cancel(); // the user pressed Hold
+
+    // Far past the window, several windows over: a stopped clock stays stopped.
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 10);
+    expect(await noteWritten('water-the-plants-with-context')).toBe(false);
+
+    await a.flush(); // the user explicitly files
+    expect(await noteWritten('water-the-plants-with-context')).toBe(true);
+  });
+
+  it('exposes exactly schedule, flush and cancel — Hold adds no interface (#12)', () => {
+    const a = createAutosaver({ save: async () => {} });
+    expect(Object.keys(a).sort()).toEqual(['cancel', 'flush', 'schedule']);
   });
 });

@@ -14,6 +14,7 @@
 // with the separately configured embedder model. Provider/models/key are confirmed at
 // config time. (See ADR-0003 for why v1 is OpenAI-compatible rather than Ollama-native.)
 import { noopLog, type Log } from './logger';
+import { toCategory, CATEGORIES } from './category';
 import type {
   Modality,
   Organizer,
@@ -208,7 +209,7 @@ function buildOrganizePrompt(content: string, modality: Modality): string {
     'no markdown fences — with exactly these fields:',
     '- title: short title (string)',
     '- tags: lowercase one-word tags (array of strings)',
-    '- category: one category (string)',
+    `- category: exactly one of: ${CATEGORIES.join(', ')} (lowercase string)`,
     '- summary: one-sentence summary (string)',
     '- keyPoints: concise bullets (array of strings)',
     '- related: Obsidian wikilinks or URLs, empty if none (array of strings)',
@@ -285,7 +286,9 @@ function parseOrganizeOutput(raw: string): OrganizeOutput {
   return {
     title: str(json.title),
     tags: strArray(json.tags),
-    category: str(json.category),
+    // Coerce the model's reply into the closed set — a non-member or a blank becomes
+    // `uncategorized`, an ordinary member, not an error (ticket 04; spec.md §Category).
+    category: toCategory(str(json.category)),
     summary: str(json.summary),
     keyPoints: strArray(json.keyPoints),
     related: strArray(json.related),

@@ -1,19 +1,29 @@
-/* Brain-dump — the design system.
+/* Brain-dump — the Rolodex design system. DESIGN.md is the authority for what follows.
  *
- * The app is a press: it takes something molten (a Dump — verbatim, unstructured) and sets
- * it into something permanent (a Note in the Vault). State is therefore the material, and
- * exactly two accents carry it:
+ * The view is a self-sorting grid of cards on a near-neutral ground (#15161b, dark leading;
+ * warm paper #faf9f7 paired). Two ideas hold the visual world together.
  *
- *   ember — uncommitted. The Dump, the preview, the five-second countdown.
- *   set   — in the Vault. The saved path, Related links, Ask citations.
+ * One Voice. A single blue accent (#6ea8d8 dark / #3a5a8a light) is the only state colour, and
+ * it is budgeted to ≤10% of any screen — a focus ring, a primary button, the "+N more" pointer,
+ * the burn countdown while a Note is still wet. Two further hues are permitted only where their
+ * state already has a word: `filed` green for the capture-confirmed strip and the committed burn
+ * endpoint, `stranded` red for the rejected strip and a Stranded card's edge. They never appear
+ * where their word does not.
  *
- * Neither colour appears anywhere it does not mean that. If you reach for ember as
- * decoration, the system is broken.
+ * Category is not decoration. Colour also carries Category — one hue per member, derived by
+ * golden angle — but that hue appears in exactly two places: a card's 1px left edge and its
+ * category chip. Nowhere else. A card has no other border; the rest of it is open, so the grid
+ * reads as one quiet field. Tags are neutral mono and carry no hue.
  *
- * Two faces, no third. The machine speaks in mono (labels, tags, paths, wikilinks,
- * frontmatter keys); your thought is set in serif (the Dump you type, titles, bodies,
- * summaries). The contrast is the idea: the scaffolding is the app's job, the thought is
- * yours.
+ * Two voices, no third. The machine scans in mono (labels, tags, paths, wikilinks, dates,
+ * frontmatter keys); your thought reads in serif — the words you captured, titles, bodies,
+ * summaries. The type system encodes whose words these are, not how finished they are, so a raw
+ * Dump on a Pending card is already set in the serif it will keep as a Note.
+ *
+ * State is the only thing that lifts. A card rests on a hairline shadow; the diffuse shadow is
+ * reserved for the hover a door invites — never decoration on the resting page. The wet-to-dry
+ * countdown (accent → filed) carries over from the Field Notebook; the palette that named it
+ * did not.
  *
  * Fonts are self-hosted, not fetched from a CDN — this is an offline-capable PWA with an
  * offline outbox, and a webfont request is exactly what fails when the app matters most.
@@ -44,95 +54,185 @@
 }
 
 :root {
-  /* Raw values, kept separate from the resolved tokens so a pair can be recombined and so
-   * the no-light-dark() fallback below has something to switch. */
-  --ground-light: oklch(97% 0.008 240);
-  --ground-dark: oklch(21% 0.028 235);
-  --raised-light: oklch(100% 0 0);
-  --raised-dark: oklch(25% 0.03 235);
-  --text-light: oklch(28% 0.02 240);
-  --text-dark: oklch(92% 0.012 230);
-  --dim-light: oklch(52% 0.02 240);
-  --dim-dark: oklch(70% 0.018 230);
-  --rule-light: oklch(76% 0.013 240);
-  --rule-dark: oklch(40% 0.02 235);
-  --ember-light: oklch(54% 0.15 55);
-  --ember-dark: oklch(75% 0.15 65);
-  --set-light: oklch(52% 0.09 195);
-  --set-dark: oklch(72% 0.09 195);
-  --alarm-light: oklch(52% 0.19 25);
-  --alarm-dark: oklch(74% 0.16 25);
+  /* Raw values, kept separate from the resolved tokens so the no-light-dark() fallback below
+   * has something to switch. Dark is the default (dark leads; light follows the system);
+   * DESIGN.md states the dark set and a paired light set. Five light values — --rule,
+   * --rule-soft, --dashed, --accent-ink, --stranded-tx — are not in DESIGN.md and are derived
+   * to sit on the warm paper ground (#faf9f7). The four state colours are in oklch as DESIGN.md
+   * gives them; the neutrals are in hex, as DESIGN.md gives them. */
+  --ground-light: #faf9f7;
+  --ground-dark: #15161b;
+  --surface-light: #ffffff;
+  --surface-dark: #1e2026;
+  --surface-2-light: #f2f1ee;
+  --surface-2-dark: #16181d;
+  --sheet-light: #ffffff;
+  --sheet-dark: #101116;
+  --rule-light: #e2ded8;
+  --rule-dark: #23252d;
+  --rule-soft-light: #d4d0ca;
+  --rule-soft-dark: #2a2d36;
+  --dashed-light: #c4c0ba;
+  --dashed-dark: #393c46;
+  --text-light: #2a2a2a;
+  --text-dark: #e4e4e8;
+  --text-mid-light: #6a6a6a;
+  --text-mid-dark: #9a9aa4;
+  --text-dim-light: #737373;
+  --text-dim-dark: #888a93;
+  --text-faint-light: #a0a0a0;
+  --text-faint-dark: #5a5c66;
+  --accent-light: #3a5a8a;
+  --accent-dark: #6ea8d8;
+  --accent-ink-light: #ffffff;
+  --accent-ink-dark: #0c0d10;
+  --filed-light: #22745a;
+  --filed-dark: #56a890;
+  --stranded-light: #c0392b;
+  --stranded-dark: #d65a4a;
+  --stranded-tx-light: #c0392b;
+  --stranded-tx-dark: #e09a8e;
+  --pending-light: #9a9a8e;
+  --pending-dark: #64656d;
 
-  /* The card's weight on the page: a tight close shadow + a soft far one, both with an
-   * offset (a zero-offset halo is decoration, not depth). Dark mode sits the card on a
-   * darker, wider, more present shadow — the ground is already dark, so the cast has to
-   * reach further and dig deeper to read as lift rather than vanish into the page. */
-  --shadow-card-light:
-    0 1px 2px oklch(28% 0.02 240 / 0.1),
-    0 8px 22px oklch(28% 0.02 240 / 0.08);
-  --shadow-card-dark:
-    0 2px 5px oklch(0% 0 0 / 0.7),
-    0 16px 40px oklch(0% 0 0 / 0.55);
+  /* Shadows cannot ride light-dark() (it resolves to a <color>, not a list), so the shadow
+   * tokens switch via prefers-color-scheme. Resting is a 1px hairline lift; the hover lift is
+   * the only diffuse shadow and is applied on card hover (State-Only Lift Rule). */
+  --shadow-card-light: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-card-dark: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-lift-light: 0 4px 12px rgba(0, 0, 0, 0.12);
+  --shadow-lift-dark: 0 4px 12px rgba(0, 0, 0, 0.25);
 
-  --ground: var(--ground-light);
-  --raised: var(--raised-light);
-  --text: var(--text-light);
-  --dim: var(--dim-light);
-  --rule: var(--rule-light);
-  --ember: var(--ember-light);
-  --set: var(--set-light);
-  --alarm: var(--alarm-light);
-  --shadow-card: var(--shadow-card-light);
+  /* Dark leads (DESIGN.md: "Dark by default"). The resolved tokens default to the dark values;
+   * light is the override the system opts into. The light-dark() block below carries the same
+   * intent for browsers that support it. */
+  --ground: var(--ground-dark);
+  --surface: var(--surface-dark);
+  --surface-2: var(--surface-2-dark);
+  --sheet: var(--sheet-dark);
+  --rule: var(--rule-dark);
+  --rule-soft: var(--rule-soft-dark);
+  --dashed: var(--dashed-dark);
+  --text: var(--text-dark);
+  --text-mid: var(--text-mid-dark);
+  --text-dim: var(--text-dim-dark);
+  --text-faint: var(--text-faint-dark);
+  --accent: var(--accent-dark);
+  --accent-ink: var(--accent-ink-dark);
+  --filed: var(--filed-dark);
+  --stranded: var(--stranded-dark);
+  --stranded-tx: var(--stranded-tx-dark);
+  --pending: var(--pending-dark);
+  --shadow-card: var(--shadow-card-dark);
+  --shadow-lift: var(--shadow-lift-dark);
 
-  @media (prefers-color-scheme: dark) {
-    --ground: var(--ground-dark);
-    --raised: var(--raised-dark);
-    --text: var(--text-dark);
-    --dim: var(--dim-dark);
-    --rule: var(--rule-dark);
-    --ember: var(--ember-dark);
-    --set: var(--set-dark);
-    --alarm: var(--alarm-dark);
-    --shadow-card: var(--shadow-card-dark);
+  @media (prefers-color-scheme: light) {
+    --ground: var(--ground-light);
+    --surface: var(--surface-light);
+    --surface-2: var(--surface-2-light);
+    --sheet: var(--sheet-light);
+    --rule: var(--rule-light);
+    --rule-soft: var(--rule-soft-light);
+    --dashed: var(--dashed-light);
+    --text: var(--text-light);
+    --text-mid: var(--text-mid-light);
+    --text-dim: var(--text-dim-light);
+    --text-faint: var(--text-faint-light);
+    --accent: var(--accent-light);
+    --accent-ink: var(--accent-ink-light);
+    --filed: var(--filed-light);
+    --stranded: var(--stranded-light);
+    --stranded-tx: var(--stranded-tx-light);
+    --pending: var(--pending-light);
+    --shadow-card: var(--shadow-card-light);
+    --shadow-lift: var(--shadow-lift-light);
   }
 
+  /* NOTE: --shadow-card / --shadow-lift are deliberately absent below. light-dark() resolves to
+   * a <color>, so it cannot carry a shadow *list*; wrapping one made the token invalid at every
+   * use site and silently dropped the shadow from every card. The prefers-color-scheme switch
+   * above is the right mechanism for a non-colour token. */
   @supports (color: light-dark(white, black)) {
     --ground: light-dark(var(--ground-light), var(--ground-dark));
-    --raised: light-dark(var(--raised-light), var(--raised-dark));
-    --text: light-dark(var(--text-light), var(--text-dark));
-    --dim: light-dark(var(--dim-light), var(--dim-dark));
+    --surface: light-dark(var(--surface-light), var(--surface-dark));
+    --surface-2: light-dark(var(--surface-2-light), var(--surface-2-dark));
+    --sheet: light-dark(var(--sheet-light), var(--sheet-dark));
     --rule: light-dark(var(--rule-light), var(--rule-dark));
-    --ember: light-dark(var(--ember-light), var(--ember-dark));
-    --set: light-dark(var(--set-light), var(--set-dark));
-    --alarm: light-dark(var(--alarm-light), var(--alarm-dark));
-    --shadow-card: light-dark(var(--shadow-card-light), var(--shadow-card-dark));
+    --rule-soft: light-dark(var(--rule-soft-light), var(--rule-soft-dark));
+    --dashed: light-dark(var(--dashed-light), var(--dashed-dark));
+    --text: light-dark(var(--text-light), var(--text-dark));
+    --text-mid: light-dark(var(--text-mid-light), var(--text-mid-dark));
+    --text-dim: light-dark(var(--text-dim-light), var(--text-dim-dark));
+    --text-faint: light-dark(var(--text-faint-light), var(--text-faint-dark));
+    --accent: light-dark(var(--accent-light), var(--accent-dark));
+    --accent-ink: light-dark(var(--accent-ink-light), var(--accent-ink-dark));
+    --filed: light-dark(var(--filed-light), var(--filed-dark));
+    --stranded: light-dark(var(--stranded-light), var(--stranded-dark));
+    --stranded-tx: light-dark(var(--stranded-tx-light), var(--stranded-tx-dark));
+    --pending: light-dark(var(--pending-light), var(--pending-dark));
   }
 
-  /* Native UI — scrollbars, form controls, the canvas — follows the user's system setting. */
-  color-scheme: light dark;
-  accent-color: var(--ember);
+  /* Category colour (ADR-0008; spec.md §Category). A member's hue is its index in CATEGORIES,
+   * stepped by the golden angle — it arrives per card as the inline custom property `--cat-hue`.
+   * Only the lightness/chroma are per-scheme; the hue is the one thing that differs card to card.
+   * DESIGN.md fixes these at oklch(0.66 0.12 h) dark / oklch(0.48 0.13 h) light; light chips drop
+   * to a translucent tint. Unlike the tokens above, these can't use `light-dark()` — its
+   * arguments are `<color>` values, and the hue is per-card, so the per-scheme parts are bare
+   * lightness/chroma numbers composed with the inline hue inside `oklch()`. The `@media
+   * (prefers-color-scheme: light)` block switches them (dark leads; light follows the system).
+   * `uncategorized` sets no `--cat-hue`, so the neutral fallbacks apply — the absence of a
+   * Category is not a colour. */
+  --cat-edge-l: 66%;
+  --cat-edge-c: 0.12;
+  --cat-chip-bg-l: 32%;
+  --cat-chip-bg-c: 0.05;
+  --cat-chip-text-l: 80%;
+  --cat-chip-text-c: 0.13;
+  @media (prefers-color-scheme: light) {
+    --cat-edge-l: 48%;
+    --cat-edge-c: 0.13;
+    --cat-chip-bg-l: 94%;
+    --cat-chip-text-l: 40%;
+  }
+
+  /* Native UI — scrollbars, form controls, the canvas — follows the user's system setting.
+   * Dark is listed first: with no system preference the canvas is dark (dark leads). */
+  color-scheme: dark light;
+  accent-color: var(--accent);
 
   --serif: 'Newsreader', Georgia, 'Times New Roman', serif;
   --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
-  --text-xs: 0.6875rem;
-  --text-sm: 0.8125rem;
-  --text-base: 1rem;
-  --text-lg: 1.125rem;
-  --text-dump: clamp(1.15rem, 1rem + 0.9vw, 1.4rem);
-  --text-title: clamp(1.4rem, 1.1rem + 1.4vw, 1.9rem);
+  /* Type scale — DESIGN.md §Typography. Role tokens, not size steps: serif reads (display,
+   * headline, capture, body, answer), mono scans (label). The scale is deliberately tight. */
+  --display: 1.3rem;
+  --headline: 1.15rem;
+  --capture: 1.25rem;
+  --body: 0.86rem;
+  --answer: 0.95rem;
+  --label: 0.7rem;
 
-  --s1: 0.25rem;
+  /* Spacing — a loose scale, applied by feel (DESIGN.md). s6/s7 are off-ladder larger steps. */
+  --s1: 0.2rem;
   --s2: 0.5rem;
-  --s3: 0.75rem;
-  --s4: 1rem;
-  --s5: 1.5rem;
+  --s3: 0.7rem;
+  --s4: 0.85rem;
+  --s5: 1rem;
   --s6: 2rem;
   --s7: 3rem;
 
+  /* Radius ladder — DESIGN.md §Shapes. Corners climb a small scale; nothing is pill-shaped. */
+  --r-xs: 3px;
+  --r-sm: 5px;
+  --r-md: 7px;
+  --r-lg: 8px;
+  --r-xl: 9px;
+  --r-2xl: 10px;
+  --r-3xl: 11px;
+  --radius: var(--r-xs);
+  --radius-card: var(--r-3xl);
+
   --measure: 34rem;
-  --radius: 3px;
-  --radius-card: 4px; /* a second, larger step for stacked stock — cards are not controls */
   --speed: 140ms; /* the 120–160ms tactility band; state changes resolve in one beat */
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1); /* exponential ease-out — motion from rest */
   --autosave: 5s; /* AUTOSAVE_DELAY_MS — the countdown must agree with autosave.ts */
@@ -159,7 +259,7 @@ body {
 
 ::selection {
   /* A wash, not a fill: the words stay Graphite and readable through it. */
-  background: color-mix(in oklab, var(--ember), transparent 78%);
+  background: color-mix(in oklab, var(--accent), transparent 78%);
 }
 
 :root {
@@ -168,13 +268,13 @@ body {
 
 input,
 textarea {
-  caret-color: var(--ember);
+  caret-color: var(--accent);
 }
 
 /* The placeholder is the most-read text on the arrival screen ("What are you thinking?"),
  * so it takes a known token rather than the browser's own fade, which lands under 4.5:1. */
 ::placeholder {
-  color: var(--dim);
+  color: var(--text-dim);
   opacity: 1; /* Firefox fades placeholders by default; the token already carries the level. */
 }
 
@@ -183,12 +283,13 @@ textarea {
  * no article/aside/main/nav/section stands between it and the body, and a plain wrapper div
  * does not. Landmark navigation now offers banner + main instead of main alone. */
 .page {
-  /* The notebook is one column, capped at the reading measure. border-box lets the column
-   * fill the viewport height (min-height below) without its padding pushing the page past
-   * 100dvh; max-width adds the side margins back on top of --measure, so the reading line
-   * stays at 34rem rather than measure-minus-padding. */
+  /* The home is the grid, and the grid is an index, so the page is the grid's wider
+   * column — 60rem, the width `.page.wide` gave the grid when it sat beside the Field
+   * Notebook's narrow reading measure. The notebook and its measure are gone (ticket 10);
+   * the sheets carry their own measure. border-box lets the column fill the viewport
+   * height (min-height below) without its padding pushing the page past 100dvh. */
   box-sizing: border-box;
-  max-width: calc(var(--measure) + var(--s4) * 2);
+  max-width: 60rem;
   margin: 0 auto;
   min-height: 100vh;
   min-height: 100dvh;
@@ -218,24 +319,15 @@ main {
   min-height: 0;
 }
 
-/* Each view is one surface. When the surface's content is shorter than the viewport it
- * centers in the space below the masthead — the capture Dump is the product, so it lands
- * where the eye arrives, not at the top with empty ground beneath. When the content is
- * taller (settings, the whole Note) it flows from the top and scrolls. auto margins, not
- * justify-content: center, so a tall surface never clips its own top; the margins collapse
- * to 0 once the content overflows. The status line lives outside every surface, so it sinks
- * to the bottom of the page body. */
+/* The one surface is the grid. It is a list, so it flows from the top — the centring the
+ * old single-composition surfaces (capture/ask/settings as full pages) used, sitting the
+ * short Dump where the eye arrives, went with them when they became sheets. A sheet that
+ * needs to centre its contents does so itself. */
 .surface {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: var(--s4);
-}
-.surface > :first-child {
-  margin-top: auto;
-}
-.surface > :last-child {
-  margin-bottom: auto;
 }
 
 /* The machine's voice: every label, tag, path, wikilink and status line. */
@@ -292,11 +384,11 @@ p {
   margin: 0;
 }
 
-/* ── Masthead and tabs ───────────────────────────────────────────────── */
+/* ── Masthead ─────────────────────────────────────────────────────────── */
 
 .masthead {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: var(--s4);
   padding-bottom: var(--s3);
@@ -305,56 +397,48 @@ p {
 
 .wordmark {
   font-family: var(--mono);
-  font-size: var(--text-sm);
+  font-size: var(--label);
   font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: lowercase;
-  color: var(--dim);
+  letter-spacing: 0.04em;
+  color: var(--text-mid);
 }
 
-nav {
-  display: flex;
-  gap: var(--s3);
+/* `brain` reads in full ink; `·dump` stays mid — the word is one mark in two voices, the dot a
+ * literal middle-dot (DESIGN.md §Navigation). */
+.wordmark b {
+  color: var(--text);
+  font-weight: 500;
 }
 
-nav button {
+/* The settings gear: the one control that lives in the masthead. An icon, not a tab — the
+ * masthead carries the wordmark and the way to settings, and nothing else. Strokes take the
+ * dim voice at rest and rise to ink on hover/focus, like the close controls on the sheets. */
+.masthead__gear {
   appearance: none;
   background: none;
   border: 0;
-  padding: var(--s2) var(--s2);
-  font-size: var(--text-sm);
-  letter-spacing: 0.04em;
-  color: var(--dim);
+  padding: var(--s1);
+  display: inline-flex;
+  color: var(--text-dim);
   cursor: pointer;
-  /* The active indicator is a text underline, not a box-edge border, so it stays tight
-   * under the label while the padding grows the touch box — a tab is text, and the line
-   * belongs to the text, not to the box. */
-  text-decoration: underline;
-  text-decoration-color: transparent;
-  text-underline-offset: 4px;
-  text-decoration-thickness: 2px;
-  transition: color var(--speed) var(--ease), text-decoration-color var(--speed) var(--ease);
+  transition: color var(--speed) var(--ease);
 }
 
-nav button:hover {
+.masthead__gear:hover,
+.masthead__gear:focus-visible {
   color: var(--text);
-}
-
-nav button.on {
-  color: var(--text);
-  text-decoration-color: var(--ember);
 }
 
 /* ── Controls ────────────────────────────────────────────────────────── */
 
 button {
-  font-size: var(--text-sm);
+  font-size: var(--label);
   letter-spacing: 0.02em;
   padding: var(--s2) var(--s4);
   color: var(--text);
-  background: var(--raised);
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
+  background: transparent;
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--r-lg);
   cursor: pointer;
   box-sizing: border-box;
   /* Nothing moves silently: every state a control can be in resolves over one beat,
@@ -367,7 +451,7 @@ button {
 }
 
 button:hover:not(:disabled) {
-  border-color: var(--dim);
+  border-color: var(--text-dim);
 }
 
 button:active:not(:disabled) {
@@ -377,37 +461,54 @@ button:active:not(:disabled) {
 /* A disabled control is absent, not broken: it takes its own colour treatment — desaturated
  * and dropped to the page — rather than a flat opacity fade that reads as half-rendered. */
 button:disabled {
-  color: var(--dim);
+  color: var(--text-dim);
   background: var(--ground);
   border-color: var(--rule);
   cursor: not-allowed;
 }
 
 button.primary {
-  color: var(--ground);
-  background: var(--ember);
-  border-color: var(--ember);
-  font-weight: 500;
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+  border-radius: var(--r-xl);
+  font-family: var(--mono);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
-/* The committing action, deactivated: the ink is washed out toward pencil, not dimmed to a
- * ghost. The label stays light so it still reads, only the fill loses its conviction.
+/* The two-line primary (DESIGN.md §Buttons): an uppercase mono label is the one committed
+ * action, and a serif italic sub-label names what it actually does — the label scans, the
+ * sub reads. The sub sits below at --label size, dropped to 0.7 so it reads as a gloss on the
+ * label, not a second headline. Secondary buttons stay single-label sentence-case. */
+.primary__sub {
+  display: block;
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: var(--label);
+  text-transform: none;
+  letter-spacing: 0;
+  opacity: 0.7;
+  margin-top: 0.06rem;
+}
+
+/* The committing action, deactivated: the accent is washed out toward text-dim, not dimmed
+ * to a ghost. The label stays light so it still reads, only the fill loses its conviction.
  *
- * Mixed in oklab, never oklch. oklch interpolates the *hue angle*, and ember and pencil sit
- * on opposite sides of the wheel (55° vs 240°), so the shorter arc between them runs through
- * colours that are in neither: `in oklch` resolved this fill to hue 336° — plum — in light,
- * and hue 139° — green — in dark. That put two invented accents on the most-pressed control
- * in the app, in its resting state, in flat breach of the two-inks rule. oklab is
- * rectangular, so there is no arc to travel: the hue stays ember's own (54°/67°) and only the
- * chroma drains, which is what "washed out" was always supposed to mean. */
+ * Mixed in oklab. The accent (blue) and text-dim (a slightly-blue grey) are close in hue, so
+ * the arc oklch would travel between them is short — but oklab is kept for consistency with
+ * the rest of the system, and only the chroma drains. The One Voice Rule still holds: no
+ * second accent is invented, the fill just loses its saturation. */
 button.primary:disabled {
-  background: color-mix(in oklab, var(--ember), var(--dim) 45%);
-  border-color: color-mix(in oklab, var(--ember), var(--dim) 45%);
-  color: var(--ground);
+  background: color-mix(in oklab, var(--accent), var(--text-dim) 45%);
+  border-color: color-mix(in oklab, var(--accent), var(--text-dim) 45%);
+  color: var(--accent-ink);
 }
 
 :focus-visible {
-  outline: 2px solid var(--ember);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -415,21 +516,21 @@ label {
   display: flex;
   flex-direction: column;
   gap: var(--s1);
-  font-size: var(--text-xs);
+  font-size: var(--label);
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--dim);
+  color: var(--text-dim);
 }
 
 input,
 select,
 textarea {
   font-family: var(--mono);
-  font-size: var(--text-sm);
+  font-size: var(--label);
   color: var(--text);
-  background: var(--raised);
+  background: var(--surface-2);
   border: 1px solid var(--rule);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   padding: var(--s2);
   box-sizing: border-box;
   width: 100%;
@@ -481,16 +582,43 @@ input[type='checkbox'] {
  * reads "form control" rather than "page to write on". */
 textarea.dump {
   font-family: var(--serif);
-  font-size: var(--text-dump);
+  font-size: var(--capture);
   line-height: 1.5;
   min-height: 9rem;
   padding: var(--s3);
 }
 
 .hint {
-  font-size: var(--text-xs);
+  font-size: var(--label);
   letter-spacing: 0.02em;
-  color: var(--dim);
+  color: var(--text-dim);
+}
+
+/* The trailing ghost door — a quiet way out, not a commit. Transparent over the sheet, a hair
+ * rule, mid text; reaching for it lifts to ink. Right-aligned against the row's commit button
+ * with margin-left:auto so it sits in the corner DESIGN.md line 340 names. It is an <a>, not a
+ * <button>, so it carries its own padding/radius/transition rather than inheriting the button
+ * base, but keeps the 44px touch floor. */
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: var(--s2) var(--s4);
+  font-family: var(--mono);
+  font-size: var(--label);
+  letter-spacing: 0.02em;
+  color: var(--text-mid);
+  background: transparent;
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--r-lg);
+  text-decoration: none;
+  cursor: pointer;
+  margin-left: auto;
+  transition: color var(--speed) var(--ease), border-color var(--speed) var(--ease);
+}
+.btn-ghost:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
 }
 
 .actions {
@@ -510,13 +638,80 @@ textarea.dump {
 
 .status {
   font-family: var(--mono);
-  font-size: var(--text-xs);
+  font-size: var(--label);
   letter-spacing: 0.03em;
-  color: var(--dim);
+  color: var(--text-dim);
 }
 
 .status.err {
-  color: var(--alarm);
+  color: var(--stranded);
+}
+
+/* ── The status strip (ticket 09) — grid-only, one cross-cutting voice ─── */
+
+.status-strip {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin: var(--s3) 0 0;
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-xl);
+  font-family: var(--mono);
+  font-size: var(--label);
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+  background: var(--surface);
+}
+
+/* The three kinds the strip carries (DESIGN.md status line). The word is always the signal; the
+ * tint only gives the eye a place to land — never colour alone.
+ *   caught      — a capture landed. filed tint + border, fades on its own (~3s).
+ *   connection  — lost or restored. a dashed neutral; holds until cleared.
+ *   rejected    — a settings rejection. stranded tint + border; holds until cleared. */
+.status-strip--caught {
+  background: color-mix(in oklab, var(--filed), var(--surface) 86%);
+  border-color: color-mix(in oklab, var(--filed), var(--rule) 45%);
+}
+.status-strip--connection {
+  border: 1px dashed var(--dashed);
+  background: var(--surface);
+}
+.status-strip--rejected {
+  background: color-mix(in oklab, var(--stranded), var(--surface) 86%);
+  border-color: color-mix(in oklab, var(--stranded), var(--rule) 45%);
+}
+
+/* Idle is the absence of state: no chrome, no Dismiss, just the word centered in text-dim
+ * (DESIGN.md §Status line). It reads as quiet, not as a thing to act on. */
+.status-strip--idle {
+  justify-content: center;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.status-strip__text {
+  flex: 1 1 auto;
+}
+
+.status-strip__dismiss {
+  flex: 0 0 auto;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  color: var(--text-dim);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  background: none;
+}
+
+.status-strip__dismiss:hover,
+.status-strip__dismiss:focus-visible {
+  color: var(--text);
 }
 
 /* ── Diagnostics and health checks ───────────────────────────────────── */
@@ -526,7 +721,7 @@ textarea.dump {
   list-style: none;
   padding: 0;
   margin: var(--s2) 0 0;
-  font-size: var(--text-xs);
+  font-size: var(--label);
 }
 
 .diagnostics {
@@ -548,11 +743,11 @@ textarea.dump {
 
 .diagnostics li.err,
 .checks li.err {
-  color: var(--alarm);
+  color: var(--stranded);
 }
 
 .diagnostics .detail {
-  color: var(--dim);
+  color: var(--text-dim);
 }
 
 .checks li {
@@ -614,18 +809,18 @@ textarea.dump {
 /* ── The Note ────────────────────────────────────────────────────────────
  *
  * The signature. A Note card carries its own state on its top edge, and the edge only moves
- * when the move is honest. While a new Note is uncommitted the edge is an ember hairline
+ * when the move is honest. While a new Note is uncommitted the edge is an accent hairline
  * burning down over the autosave window, so the card *is* the clock — a save really will
  * fire at the end. An unconfirmed append never autosaves, so on that path the edge is held:
  * static, full, wet, not burning (the hint states the reason in words). When the Note reaches
- * the Vault the edge stops, fills back to full, and cross-fades to `set`. That wet→dry
+ * the Vault the edge stops, fills back to full, and cross-fades to `filed`. That wet→dry
  * cross-fade is the only moment of drama in the app, and it happens exactly where the
  * meaning is — molten to permanent.
  */
 
 .note {
   position: relative;
-  background: var(--raised);
+  background: var(--surface-2);
   border: 1px solid var(--rule);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
@@ -640,7 +835,7 @@ textarea.dump {
   position: absolute;
   inset: 0 0 auto;
   height: 2px;
-  background: var(--ember);
+  background: var(--accent);
   transform-origin: left center;
   animation: burn-down var(--autosave) linear forwards;
   transition: background-color var(--speed) var(--ease);
@@ -666,7 +861,7 @@ textarea.dump {
  * That cross-fade is the one moment worth animating — molten to permanent — and it happens
  * exactly where the meaning is. */
 .note.committed .burn {
-  background: var(--set);
+  background: var(--filed);
   animation: none;
   transform: scaleX(1);
   transition: background-color 260ms var(--ease), transform 260ms var(--ease);
@@ -686,18 +881,25 @@ textarea.dump {
 }
 
 .eyebrow {
-  font-size: var(--text-xs);
+  font-size: var(--label);
   font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--ember);
+  color: var(--accent);
 }
 
 .note.committed .eyebrow {
-  color: var(--set);
+  color: var(--filed);
   text-transform: none;
   letter-spacing: 0.02em;
   word-break: break-all;
+  /* The stamp and the path are two things, not one word. The gap is structural rather than a
+   * space in the template: the markup once rendered "FILEDBrain Dump/2026-…" because the
+   * whitespace between the two elements was collapsed away. */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--s2);
 }
 
 /* The pending eyebrow is an uppercase machine marking — but the appended Note's title is a
@@ -720,7 +922,7 @@ textarea.dump {
  * underline at rest, underline on hover so the link says "follow me" only when reached for.
  * Visited stays Dry: a followed link is not a different state here. */
 .vault-link {
-  color: var(--set);
+  color: var(--filed);
   text-decoration: none;
   word-break: break-all;
 }
@@ -729,14 +931,13 @@ textarea.dump {
   text-underline-offset: 2px;
 }
 .vault-link:visited {
-  color: var(--set);
+  color: var(--filed);
 }
 
 /* Doors are meant to be walked through: the saved path, a Related link and a citation are
  * each a 44px touch target, not a 13px line of text. The eyebrow's inline path link keeps
  * its inline flow; only the stacked lists grow. */
-.note .links .vault-link,
-.answer .sources .vault-link {
+.note .links .vault-link {
   display: flex;
   align-items: center;
   min-height: 44px;
@@ -754,7 +955,7 @@ textarea.dump {
 
 .note h2 {
   font-family: var(--serif);
-  font-size: var(--text-title);
+  font-size: var(--display);
   font-weight: 400;
 }
 
@@ -762,12 +963,12 @@ textarea.dump {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: var(--s1) var(--s3);
-  font-size: var(--text-xs);
+  font-size: var(--label);
   letter-spacing: 0.02em;
 }
 
 .meta dt {
-  color: var(--dim);
+  color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
@@ -779,7 +980,7 @@ textarea.dump {
 
 .note-body {
   font-family: var(--serif);
-  font-size: var(--text-base);
+  font-size: var(--body);
   white-space: pre-wrap;
   overflow-wrap: break-word;
 }
@@ -790,10 +991,10 @@ textarea.dump {
   display: flex;
   align-items: center;
   gap: var(--s3);
-  font-size: var(--text-xs);
+  font-size: var(--label);
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--dim);
+  color: var(--text-dim);
 }
 
 .rule-label::after {
@@ -815,15 +1016,56 @@ textarea.dump {
   list-style: none;
   padding: 0;
   font-family: var(--mono);
-  font-size: var(--text-sm);
-  color: var(--set);
+  font-size: var(--label);
+  color: var(--filed);
   word-break: break-all;
 }
 
 .note .pending {
   font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--dim);
+  font-size: var(--label);
+  color: var(--text-dim);
+}
+
+/* The verbatim Dump — the user's original words, kept as provenance behind the organized
+ * thought. Mono and dim: it is the record, not a second version of the headline above it, and
+ * pre-wrap keeps the capture's own line breaks rather than reflowing them. */
+.note .verbatim {
+  font-family: var(--mono);
+  font-size: var(--label);
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* "your original words" — the dashed provenance box. The raw thought sits above what it became:
+ * a mono label marks it, the words themselves read in serif italic (the user's voice, quoted and
+ * kept, never re-organized). The one dashed stroke after Catch; the same box in the capture
+ * preview and on the committed Note, so the original reads consistently before and after filing
+ * (DESIGN.md). `--surface-2` lifts it a half-step off the sheet without spending an edge. */
+.your-words {
+  background: var(--surface-2);
+  border: 1px dashed var(--dashed);
+  border-radius: var(--r-xl);
+  padding: var(--s2) var(--s3);
+  margin-bottom: var(--s3);
+}
+.your-words__label {
+  font-family: var(--mono);
+  font-size: var(--label);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  margin: 0 0 var(--s1);
+}
+.your-words__text {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: var(--capture);
+  color: var(--text-mid);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  margin: 0;
 }
 
 .context-field {
@@ -840,7 +1082,7 @@ textarea.dump {
  * Vault" on a border that carries no state. The depth says "stacked"; the ink stays with the
  * citations, where it is true. */
 .answer {
-  background: var(--raised);
+  background: var(--surface);
   border: 1px solid var(--rule);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
@@ -848,20 +1090,7 @@ textarea.dump {
   display: flex;
   flex-direction: column;
   gap: var(--s3);
-  font-size: var(--text-base);
-}
-
-.answer .sources {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--s1);
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  color: var(--set);
-  word-break: break-all;
+  font-size: var(--answer);
 }
 
 /* ── Stranded Dumps ──────────────────────────────────────────────────────
@@ -876,7 +1105,7 @@ textarea.dump {
   list-style: none;
   padding: 0;
   margin: var(--s2) 0 0;
-  font-size: var(--text-xs);
+  font-size: var(--label);
 }
 
 .stranded li {
@@ -888,7 +1117,7 @@ textarea.dump {
 }
 
 .stranded li.err {
-  color: var(--alarm);
+  color: var(--stranded);
 }
 
 .stranded-when {
@@ -903,9 +1132,511 @@ textarea.dump {
 }
 
 .stranded .detail {
-  color: var(--dim);
+  color: var(--text-dim);
 }
 
 .stranded button {
   flex: none;
+}
+
+/* ── The grid (ticket 02; ADR-0007) ──────────────────────────────────────
+ *
+ * The home. Cards carry the two-ink system the rest of the app speaks: serif for the
+ * thought (title, summary), mono for the scaffolding (category, tags, date); Category
+ * hue arrived with ticket 04. The page is the grid's own 60rem column (see `.page`); the
+ * Field Notebook's narrow reading measure is gone, kept only inside the sheets.
+ */
+
+/* The grid flows from the top rather than centring like the capture surface — it is a list,
+ * not a single composed thing, and a tall grid must not clip its own top. */
+.grid-surface > :first-child {
+  margin-top: 0;
+}
+.grid-surface > :last-child {
+  margin-bottom: 0;
+}
+
+/* ── The grid controls ────────────────────────────────────────────────── */
+
+/* Two stacked full-width controls (Catch / Ask) are the grid's primary nav (DESIGN.md). They
+ * read as fields to write into, not buttons to press: the dashed Catch is the one heavy dashed
+ * stroke in the system — "the entry point for the whole product" — and the crisp Ask sits below
+ * it. The label takes the mid voice at rest; reaching for either lifts it to ink and turns the
+ * border to the accent. */
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.ctl {
+  width: 100%;
+  text-align: left;
+  border-radius: var(--r-3xl);
+  padding: var(--s3) var(--s4);
+  min-height: 44px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--s2);
+  font-family: var(--mono);
+  font-size: var(--label);
+  color: var(--text-mid);
+  background: var(--surface);
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: border-color var(--speed) var(--ease), color var(--speed) var(--ease);
+}
+
+/* Catch a thought: the 1.5px dashed inviting border — the only heavy dashed stroke. The `+` is
+ * the accent, the one warm signal that this is the way in. */
+.ctl-catch {
+  border: 1.5px dashed var(--dashed);
+}
+.ctl-catch:hover:not(:disabled),
+.ctl-catch:focus-visible:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.ctl-catch .plus {
+  color: var(--accent);
+  font-size: var(--capture);
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* Ask your notes: a crisp solid border, the ⌘K hint as a mono chip on the right. Dimmed when the
+ * Vault is empty — an empty Vault answers nothing. */
+.ctl-ask {
+  border: 1px solid var(--rule);
+}
+.ctl-ask:hover:not(:disabled),
+.ctl-ask:focus-visible:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.ctl-ask:disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+.ctl .kbd {
+  font-family: var(--mono);
+  font-size: var(--label);
+  color: var(--accent);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  padding: 0.05rem 0.3rem;
+  line-height: 1;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--s3);
+}
+
+/* Below the card floor, two equal columns: the cards stay legible and the grid never drops to a
+ * single lonesome column. */
+@media (max-width: 35rem) {
+  .grid {
+    grid-template-columns: 1fr 1fr;
+    gap: var(--s2);
+  }
+}
+
+/* The Notes an answer cited. Not the home grid: these are a handful of cards inside a 620px
+ * sheet, read in order rather than scanned as a field, so they stack full-width instead of
+ * splitting the sheet into tracks too narrow to hold a title. */
+.citations {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+/* A grid card is floored at a full card's height so a row of them shares one height. Out of the
+ * grid that floor is just dead space between the tags and the date, so a cited card sizes to its
+ * own content. */
+.citations .card {
+  min-height: 0;
+}
+
+/* A card is stock resting on the page: the same surface, radius and shadow as a Note,
+ * so the grid reads as one quiet field. Uniform height comes from a clamped 2-line summary and
+ * the date pinned to the bottom — the same rule DESIGN.md sets for the finished grid. */
+.card {
+  background: var(--surface);
+  /* A card's identity is a single 1px left edge in its Category hue (set via `.card--cat` +
+   * the inline `--cat-hue`). No other border — DESIGN.md has an explicit Don't on a thicker
+   * edge, and the rest of the card is open, so the grid reads as one quiet field. */
+  border-left: 1px solid var(--rule);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: var(--s3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-width: 0;
+  /* A row of cards shares one height via stretch + the date pinned to the foot; a lone card on
+   * the last row has no taller sibling to stretch to, so floor it at a full card's height
+   * (category + two-line title + two-line summary + tags + date) to keep the grid uniform. */
+  min-height: 12rem;
+  transition: transform var(--speed) var(--ease), box-shadow var(--speed) var(--ease);
+}
+
+/* A Note card is a door into the full Note (ticket 06): the whole card opens the sheet, so it
+ * reads as something to press, and the keyboard gets a focus ring the way a control does. The
+ * dashed `.card--open` cards (Pending, Stranded) are not doors — their own action buttons are. */
+.card--door {
+  cursor: pointer;
+}
+.card--door:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* A door lifts when reached for (State-Only Lift Rule): the resting card carries only a hairline
+ * shadow, and the diffuse shadow is reserved for the hover/active state — the only place a shadow
+ * is allowed to decorate. Gated behind hover capability so touch never gets a stuck-up card, and
+ * the lift is dropped entirely under reduced motion (the hairline shadow still conveys the state). */
+@media (hover: hover) {
+  .card--door:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lift);
+  }
+}
+@media (hover: hover) and (prefers-reduced-motion: reduce) {
+  .card--door:hover {
+    transform: none;
+  }
+}
+
+/* A member-Category card: its left edge takes the member's hue. `--cat-hue` is set inline per
+ * card; the lightness/chroma are per scheme. `uncategorized` (and the dashed Pending/Stranded
+ * cards) set no `--cat-hue`, so they keep the neutral `--rule` edge above. */
+.card--cat {
+  border-left-color: oklch(var(--cat-edge-l) var(--cat-edge-c) var(--cat-hue));
+}
+
+/* The Category chip: a fit-content chip, mono lowercase. Neutral by default — the same quiet
+ * treatment a Tag gets — so `uncategorized` and the Pending/Stranded status labels carry no hue
+ * (the absence of a Category is not a colour). A member card colours the chip with its hue. */
+.card__category {
+  font-family: var(--mono);
+  font-size: var(--label);
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.1rem 0.42rem;
+  border-radius: var(--r-xs);
+  background: transparent;
+  margin: 0;
+}
+
+/* A member-Category chip: tinted with the member's hue (`--cat-hue` inline). The background is a
+ * low-chroma wash of the hue; the text is a higher-chroma version — legible in both schemes. */
+.card--cat .card__category {
+  background: oklch(var(--cat-chip-bg-l) var(--cat-chip-bg-c) var(--cat-hue));
+  color: oklch(var(--cat-chip-text-l) var(--cat-chip-text-c) var(--cat-hue));
+}
+
+.card__title {
+  font-family: var(--serif);
+  font-size: var(--headline);
+  font-weight: 500;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.card__title a {
+  color: var(--text);
+  text-decoration: none;
+  /* `.vault-link` breaks long paths anywhere; a title is prose, so wrap at word boundaries and
+   * only break a single over-long word if it would otherwise overflow the card. */
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+.card__title a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.card__summary {
+  font-family: var(--serif);
+  font-size: var(--body);
+  color: var(--text-mid);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card__tags {
+  font-family: var(--mono);
+  font-size: var(--label);
+  color: var(--text-dim);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s1) var(--s2);
+  margin: 0;
+}
+
+/* A Tag is neutral mono (DESIGN.md): a surface-2 fill, mid text, the same 3px radius as the
+ * Category chip. It never carries hue — that is Category's only job. */
+.card__tag {
+  background: var(--surface-2);
+  color: var(--text-mid);
+  border-radius: var(--r-xs);
+  padding: 0.1rem 0.42rem;
+}
+
+/* "+N more" is the one warm signal in the tag row: it points at something, so it takes the accent
+ * rather than sitting with the neutral chips. */
+.card__tag-more {
+  color: var(--accent);
+}
+
+/* Pinned to the foot of the card so a row of cards shares one height. */
+.card__date {
+  font-family: var(--mono);
+  font-size: var(--label);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  margin-top: auto;
+}
+
+/* An open thought — a Pending or Stranded Dump — is not yet stock resting on the page. It is raw
+ * scaffolding the app owes the user a Note for, so it sits on a quieter surface-2 fill with no
+ * resting shadow: visually distinct from the solid Note card, which is a finished thought. The
+ * kind sets its own left edge below; the rest of the card stays open like a filed one. */
+.card--open {
+  background: var(--surface-2);
+  box-shadow: none;
+}
+
+/* Pending: captured, not yet a Note — a dashed neutral edge, the same dashed rule the Capture
+ * field uses to say "in progress". Recovery is automatic, so it carries no action and no hue. */
+.card--pending {
+  border-left: 2px dashed var(--dashed);
+}
+
+/* Stranded: a Note that was never written, or one that's gone. A solid stranded edge — the one
+ * place the stranded red rides — so the thing the user can act on is what carries the signal. */
+.card--stranded {
+  border-left: 1px solid var(--stranded);
+}
+
+/* A Stranded card's Category label rides the stranded tint, the same word-with-color rule the
+ * status strip uses: the word "Stranded" is the signal, the tint only gives it a place to land. */
+.card--stranded .card__category {
+  color: var(--stranded-tx);
+}
+
+/* The raw capture words are set in serif — the same face the capture field uses. The type system
+ * encodes whose words these are (the user's, in serif), not how finished they are, so a Dump on a
+ * Pending card reads in the same voice as the Note it will become (Q4). */
+.card__title--raw {
+  font-family: var(--serif);
+  font-size: var(--headline);
+  font-weight: 400;
+  line-height: 1.3;
+}
+
+/* A Stranded card's actions sit at the foot, above the date — the two things the user can do,
+ * where they found the thought. */
+.card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1) var(--s2);
+}
+
+/* An empty Vault shows where the first card will land, rather than an error or a blank screen.
+ * A dashed slot the width of the grid — the same inviting border the Capture field uses to say
+ * "write here", sized to the grid so it reads as a place a card will occupy. */
+.card-placeholder {
+  grid-column: 1 / -1;
+  border: 2px dashed var(--dashed);
+  border-radius: var(--radius-card);
+  padding: var(--s5);
+  margin: 0;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: var(--label);
+  color: var(--text-dim);
+}
+
+/* ── Sheets ──────────────────────────────────────────────────────────────
+ *
+ * The grid is the constant; every focused moment is a full-screen sheet you drop into and
+ * return from. A sheet is a native modal <dialog> opened with showModal(), so the platform
+ * supplies what a sheet has to have: it sits in the top layer over the grid, the grid behind
+ * it is inert, focus is trapped inside, and Esc — or a phone's back gesture — closes it.
+ *
+ * It rises rather than fades. The gesture is the meaning: the grid stays where it is and the
+ * sheet comes up over it, so returning is a way back down to something that never moved.
+ */
+
+dialog.sheet {
+  /* Reset the UA dialog: centred auto margins, a fit-content box, a border and a padding all
+   * belong to a dialog that interrupts. A sheet does not interrupt; it takes the screen. */
+  position: fixed;
+  inset: 0;
+  max-width: none;
+  max-height: none;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: var(--ground);
+  color: var(--text);
+  overflow: hidden; /* the body scrolls, not the sheet — the bar and the footer stay put */
+  overscroll-behavior: contain;
+  animation: sheet-up 280ms var(--ease);
+}
+
+/* The grid is opaque behind an opaque sheet, so the backdrop is only ever seen during the
+ * rise. A wash of the page's own ink keeps that moment from flashing white. */
+dialog.sheet::backdrop {
+  background: oklch(0% 0 0 / 0.4);
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+/* The rise is the whole idea, so without motion the sheet simply is there — no substitute
+ * animation, and nothing that moves. */
+@media (prefers-reduced-motion: reduce) {
+  dialog.sheet {
+    animation: none;
+  }
+}
+
+/* The sheet's own column: the same reading measure and the same safe-area margins the page
+ * uses, so a thought is set to the same width whether it is being typed or read. */
+.sheet__inner {
+  box-sizing: border-box;
+  height: 100%;
+  max-width: calc(var(--measure) + var(--s4) * 2);
+  margin: 0 auto;
+  padding:
+    max(var(--s5), env(safe-area-inset-top))
+    max(var(--s4), env(safe-area-inset-right))
+    max(var(--s7), env(safe-area-inset-bottom))
+    max(var(--s4), env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+/* The bar carries the sheet's name and the way out, and nothing else — it is the masthead's
+ * rule read again one level down. */
+.sheet__bar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s4);
+  padding-bottom: var(--s3);
+  border-bottom: 1px solid var(--rule);
+}
+
+.sheet__title {
+  font-family: var(--mono);
+  font-size: var(--label);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  margin: 0;
+}
+
+/* The way out is text, like the nav tabs, not a boxed control: leaving is not a commitment. */
+.sheet__close {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: var(--s2);
+  margin: calc(var(--s2) * -1);
+  font-size: var(--label);
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color var(--speed) var(--ease);
+}
+
+.sheet__close:hover {
+  color: var(--text);
+}
+
+/* The body takes the height the bar and the footer leave, so the Dump fills the sheet rather
+ * than sitting in a short box with dead space beneath it. */
+.sheet__body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  min-height: 0;
+  overflow-y: auto;
+  /* A scroll container clips anything drawn outside its content box, and a focus ring is
+   * drawn outside (`outline-offset: 2px`) — so without this the Dump's ring is shaved off on
+   * every edge. The padding gives the ring its 2px back and the negative margin gives the
+   * space back to the layout, so the body's contents still line up with the bar's rule. */
+  padding: 3px;
+  margin: -3px;
+}
+
+/* One field and nothing else: in the sheet the Dump grows to take everything the bar and the
+ * footer do not, so the page really is the input. The 60vh ceiling every textarea carries is
+ * lifted here — it exists so a growing field cannot push the commit button off a scrolling
+ * page, and the sheet pins its footer instead, so the cap would only leave dead space. */
+.sheet__body > textarea.dump {
+  flex: 1 1 auto;
+  max-height: none;
+}
+
+/* The footer holds the sheet's own status line above its actions, so a message about what
+ * just happened sits with the control that caused it and never behind the sheet. */
+.sheet__foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+/* The card of the Note just filed. It slots in wearing the accent ring — the receipt for a
+ * commit is the thing itself arriving on the grid, not a message about it — and the ring
+ * clears itself a moment later, so nothing accumulates. */
+.card--wet {
+  /* A ring, not a drop shadow: the filed card is not lifted off the page, it is marked as
+   * having reached the Vault, so it takes the accent on its own edge. Written as a standalone
+   * box-shadow rather than composed with `var(--shadow-card)` — the wet state is a ring (the
+   * State-Only Lift Rule), not a lift, so it does not borrow the resting shadow. */
+  box-shadow: 0 0 0 2px var(--accent) inset;
+  animation: slot-in 420ms var(--ease);
+}
+
+@keyframes slot-in {
+  from {
+    transform: translateY(-8px) scale(0.985);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* Without motion the ring alone says it: the card is there, and it is the filed one. */
+@media (prefers-reduced-motion: reduce) {
+  .card--wet {
+    animation: none;
+  }
 }

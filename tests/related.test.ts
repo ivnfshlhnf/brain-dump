@@ -42,7 +42,7 @@ const organizer: Organizer = {
   organize: async (content) => ({
     title: 'Watering the plants',
     tags: ['plants'],
-    category: 'home',
+    category: 'personal',
     summary: 'A note about plants.',
     keyPoints: ['water them'],
     related: [], // Organize cannot know this — the whole point of the feature

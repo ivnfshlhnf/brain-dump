@@ -7,18 +7,24 @@ import type {
   Modality,
   Note,
   NoteCandidate,
+  Citation,
   Organizer,
   Matcher,
   DismissedStore,
+  NoteCard,
+  NoteCardCache,
   PendingDump,
   PendingStore,
   StrandedDump,
   StrandedReason,
   Settings,
 } from './types';
-import { writeFile, modifyFile, readVaultFiles, restoreFile } from './livesync';
+import { toCategory, type Category } from './category';
+import { writeFile, modifyFile, readVaultFiles, restoreFile, type VaultFile } from './livesync';
 import { noopLog, type Log } from './logger';
+import { noopStatus, captureConfirmedMessage, type OnStatus } from './status';
 import { findRelated, type RelatedDeps } from './related';
+import { wikilinkTarget } from './obsidian';
 
 /** The `## Context` block appended after the verbatim original, when Context exists. */
 function contextBlock(ctx: string): string {
@@ -451,7 +457,7 @@ export interface ParsedFrontmatter {
   title: string;
   tags: string[];
   summary: string;
-  category: string;
+  category: Category;
   created: number;
   modality: Modality;
   source: string;
@@ -489,10 +495,77 @@ export function parseFrontmatter(content: string): ParsedFrontmatter {
     title: fields.title ?? '',
     tags,
     summary: fields.summary ?? '',
-    category: fields.category ?? '',
+    // Coerce the raw frontmatter string into the closed set. A free-form Category on an existing
+    // Note (the Vault holds 'Bug Report', 'Hardware', …) reads as `uncategorized` here — the file
+    // is never rewritten, only corrected when the user re-organizes (ticket 04; spec.md §Category).
+    category: toCategory(fields.category ?? ''),
     created: Number(fields.created ?? 0),
     modality: fields.modality === 'voice' ? 'voice' : 'text',
     source: fields.source ?? '',
+  };
+}
+
+/** Split the post-frontmatter body into the cleaned content and the three trailing
+ *  sections `noteFileContent` appends — Summary, Key points, Related.
+ *
+ *  The sections are searched from the end, so a `##` heading the organized body
+ *  happens to use cannot steal the section boundary: the genuine sections are the
+ *  last ones, written in order by `noteFileContent`. A missing section simply yields
+ *  an empty list (the body grows to absorb it), so a Note missing its `## Related`
+ *  block still reads — Related is empty, the rest is body. */
+function splitNoteBody(raw: string): { body: string; keyPoints: string[]; related: string[] } {
+  const relIdx = raw.lastIndexOf('\n## Related\n');
+  const kpIdx = relIdx >= 0 ? raw.lastIndexOf('\n## Key points\n', relIdx) : raw.lastIndexOf('\n## Key points\n');
+  const sumEnd = kpIdx >= 0 ? kpIdx : relIdx >= 0 ? relIdx : raw.length;
+  const sumIdx = raw.lastIndexOf('\n## Summary\n', sumEnd);
+
+  // Everything before the first trailing section is the cleaned body. When no section
+  // is present (a hand-edited Note, a personal note read by mistake) the whole raw body
+  // is the body — nothing is lost.
+  const bodyEnd = sumIdx >= 0 ? sumIdx : kpIdx >= 0 ? kpIdx : relIdx >= 0 ? relIdx : raw.length;
+  // `splitFrontmatter` leaves the frontmatter separator's trailing newline at the head of
+  // the body; strip leading newlines so the organized content is what the sheet shows, not
+  // the blank line that separated it from the frontmatter.
+  const body = raw.slice(0, bodyEnd).replace(/^\n+/, '').trimEnd();
+
+  /** The content of a trailing section: everything after its header line, list bullets
+   *  stripped, blank lines dropped. */
+  const sectionList = (from: number, to: number, header: string): string[] =>
+    raw
+      .slice(from, to)
+      .slice(raw.indexOf(header, from) - from + header.length)
+      .split('\n')
+      .map((line) => line.replace(/^\s*-\s?/, '').trim())
+      .filter(Boolean);
+
+  const keyPoints = kpIdx >= 0 ? sectionList(kpIdx, relIdx >= 0 ? relIdx : raw.length, '## Key points') : [];
+  const related = relIdx >= 0 ? sectionList(relIdx, raw.length, '## Related') : [];
+  return { body, keyPoints, related };
+}
+
+/** Reconstruct the full Note a file holds — the inverse of `noteFileContent`. The
+ *  frontmatter yields title/tags/category/summary/created/modality/source; the body is
+ *  split back into the cleaned content, the key points and the Related links. This is
+ *  what the Note sheet shows: the dry twin of the pre-commit preview, at full length.
+ *
+ *  Tolerant, like `parseFrontmatter`: a file with no frontmatter still reads (every
+ *  field defaults), so a hand-edited Note or a personal note read by mistake degrades
+ *  to its body rather than throwing. */
+export function parseNote(content: string): Note {
+  const fm = parseFrontmatter(content);
+  const { body: raw } = splitFrontmatter(content);
+  const { body, keyPoints, related } = splitNoteBody(raw);
+  return {
+    title: fm.title,
+    tags: fm.tags,
+    createdAt: fm.created,
+    modality: fm.modality,
+    source: fm.source,
+    category: fm.category,
+    summary: fm.summary,
+    body,
+    keyPoints,
+    related,
   };
 }
 
@@ -510,6 +583,170 @@ export async function readNoteCandidates(
     const fm = parseFrontmatter(file.content);
     return { path: file.path, title: fm.title, tags: fm.tags, summary: fm.summary };
   });
+}
+
+// --- The home grid's projection (ticket 02; ADR-0007) ---------------------
+// The grid paints a card per Note. Everything a card needs is already in a Note's frontmatter
+// and already parsed above; only the projection is new. `category` is the closed-set Category
+// coerced in `parseFrontmatter` — the grid derives a hue from it (ticket 04); `uncategorized`
+// carries no hue.
+
+/** Project one managed-folder file to a card. */
+function toCard(file: VaultFile): NoteCard {
+  const fm = parseFrontmatter(file.content);
+  return {
+    path: file.path,
+    title: fm.title,
+    category: fm.category,
+    summary: fm.summary,
+    tags: fm.tags,
+    createdAt: fm.created,
+  };
+}
+
+/** Project a list of managed-folder files to cards, newest-first. The grid's combined read
+ *  hands `toCards` the live managed files it filters out of a managed+dumps pass; the caller is
+ *  responsible for handing only the files it wants carded. */
+function toCards(files: VaultFile[]): NoteCard[] {
+  return files
+    .map(toCard)
+    .sort((a, b) => b.createdAt - a.createdAt || a.path.localeCompare(b.path));
+}
+
+/** Write the projection back to the disposable cache, swallowing a failure: the cache is not the
+ *  source of truth, and a failed write costs only the next paint. Awaited so a resolved call has
+ *  durably stored the cards (a caller that reads the cache straight after sees them). */
+async function safeWrite(cache: NoteCardCache | undefined, cards: NoteCard[]): Promise<void> {
+  if (!cache) return;
+  try {
+    await cache.write(cards);
+  } catch {
+    // A failed write costs only the next paint — the cache is not the source of truth.
+  }
+}
+
+/** Store deps plus the grid's device-local companions: the card cache (paint before the Vault
+ *  read completes) and the Pending/Dismissed stores (Dumps in either are excluded from the
+ *  Stranded list — they are known, or the user has chosen to stop hearing about them). All
+ *  optional; omit them and the grid reads the Vault alone, reporting every unreferenced Dump. */
+export interface GridDeps extends StoreDeps {
+  cache?: NoteCardCache;
+  pending?: PendingStore;
+  dismissed?: DismissedStore;
+}
+
+/** The grid's reconciled state from one open: the authoritative Note cards and the Stranded
+ *  Dumps, both from the one Vault pass. Cards painted early from a warm cache (via `paint`) are
+ *  superseded by these once the pass completes — or kept as-is if the pass fails. */
+export interface GridResult {
+  cards: NoteCard[];
+  stranded: StrandedDump[];
+}
+
+/** Read the grid's whole state — Note cards and Stranded Dumps — in one Vault pass
+ *  (ADR-0007 / acceptance #2). Cache-first: when the cache holds cards, `paint` is called with
+ *  them *before* the Vault read completes, so the grid shows something the moment it opens and
+ *  stays populated even when the Vault is slow or unreachable. The pass then reconciles to the
+ *  authoritative cards (a Note deleted by Obsidian's own sync disappears; a Stranded Dump
+ *  appears) and refreshes the cache; if the pass fails, the painted cached cards are kept and
+ *  an empty Stranded list is returned rather than throwing — the grid stays usable, and the next
+ *  open retries.
+ *
+ *  A cold or unreadable cache skips the early paint and falls straight through to the pass. The
+ *  cache is disposable — a cache read failure never reaches the caller, because capture must
+ *  never be gated on a cache that can be lost. The Stranded list always comes from the pass,
+ *  since it is not cached. */
+export async function readGrid(
+  deps: GridDeps,
+  paint?: (cards: NoteCard[]) => void,
+): Promise<GridResult> {
+  const pendingIds = new Set(
+    (deps.pending ? await deps.pending.list() : []).map((r) => r.dump.id),
+  );
+  const dismissedIds = new Set(deps.dismissed ? await deps.dismissed.list() : []);
+
+  // Warm cache: paint the cached cards before the Vault read completes, then reconcile. A cache
+  // read failure is disposable — treat it as cold and read the Vault.
+  if (deps.cache) {
+    let cached: NoteCard[] | null = null;
+    try {
+      const listed = await deps.cache.list();
+      if (listed.length) cached = listed;
+    } catch {
+      /* disposable cache — fall through to the Vault read */
+    }
+    if (cached) {
+      paint?.(cached);
+      try {
+        const vault = await readVaultForGrid(deps, pendingIds, dismissedIds);
+        await safeWrite(deps.cache, vault.cards); // keep the cache fresh against the authoritative read
+        return { cards: vault.cards, stranded: vault.stranded };
+      } catch {
+        // The Vault read failed — keep the cards the paint already showed. Stranded is unknown
+        // this open; the grid stays usable and the next open retries.
+        return { cards: cached, stranded: [] };
+      }
+    }
+  }
+
+  // Cold / empty / failed cache: one Vault pass yields both, and fills the cache for next time.
+  const vault = await readVaultForGrid(deps, pendingIds, dismissedIds);
+  await safeWrite(deps.cache, vault.cards);
+  return { cards: vault.cards, stranded: vault.stranded };
+}
+
+/** A Note the user has just committed, as the grid needs to know it: the Note the commit
+ *  produced, where it landed in the Vault, and whether it Appended to an existing Note or
+ *  founded a new one. */
+export interface FiledNote {
+  note: Note;
+  path: string;
+  appended: boolean;
+}
+
+/** The grid's cards with a just-committed Note folded in, without reading the Vault again.
+ *
+ *  Committing returns the user to the grid with the new card at the top, and the card comes
+ *  from the Note the commit already produced: the grid is the road to capture, so the capture
+ *  path must not pay for a full-Vault round trip to show its own receipt. That shortcut is only
+ *  safe because the projection here is the projection `toCard` derives from the same Note's
+ *  frontmatter — asserted in tests/cards.test.ts against a real Vault read.
+ *
+ *  A new Note is prepended rather than sorted in. The card is a receipt, so it goes where the
+ *  user will look for it; a Dump captured days ago and filed today would sort further down, and
+ *  the next home read restores strict newest-first order anyway.
+ *
+ *  An Append writes a dated section into an existing Note and leaves its frontmatter untouched,
+ *  so that Note's card is unchanged and stays exactly where it already is — folding the appended
+ *  content in would overwrite the card of the Note that received it with the card of the fragment
+ *  it received.
+ *
+ *  The cache is refreshed to match, so the fold survives a restart and the grid does not paint
+ *  a stale set of cards before the next Vault read reconciles. A failed cache write costs only
+ *  the next paint. */
+export async function fileOnGrid(
+  cards: NoteCard[],
+  filed: FiledNote,
+  cache?: NoteCardCache,
+): Promise<NoteCard[]> {
+  const next = filed.appended
+    ? cards
+    : [cardForNote(filed.note, filed.path), ...cards.filter((c) => c.path !== filed.path)];
+  await safeWrite(cache, next);
+  return next;
+}
+
+/** Project a Note the app just wrote to its grid card. The counterpart of `toCard`, which
+ *  projects the same Note read back out of the Vault — the two must agree field for field. */
+function cardForNote(note: Note, path: string): NoteCard {
+  return {
+    path,
+    title: note.title,
+    category: note.category,
+    summary: note.summary,
+    tags: note.tags,
+    createdAt: note.createdAt,
+  };
 }
 
 /** Match a new Dump's preview against the existing Notes: LLM-assisted, by
@@ -606,7 +843,11 @@ export async function refreshNoteMetadata(
     async (current) => {
       if (frontmatter === null) {
         const fm = parseFrontmatter(current);
-        const { body } = splitFrontmatter(current);
+        // The organizer re-derives metadata against the *current body* — the user's content,
+        // not the trailing `## Summary` / `## Key points` / `## Related` sections this file
+        // itself appends. Strip them so a refresh isn't coloured by its own stale metadata.
+        const { body: raw } = splitFrontmatter(current);
+        const { body } = splitNoteBody(raw);
         const out = await deps.organizer.organize(body, fm.modality);
         frontmatter = noteFrontmatter({
           title: out.title,
@@ -625,6 +866,88 @@ export async function refreshNoteMetadata(
     { mtime: deps.now(), hash: deps.hash, settings: deps.settings },
   );
   return { path: notePath, metadataId, chunkId };
+}
+
+// --- The Note sheet (ticket 06) ------------------------------------------
+// The grid's card is a door, not a dead end: tapping it opens the whole Note — the dry
+// twin of the pre-commit preview, at full length. Everything the card truncated (Tags,
+// the body, the Related links) is shown here untruncated, plus the one thing the card never
+// held: the verbatim Dump the Note was organized from, kept as provenance the user can reach
+// but not the headline.
+
+/** The full Note as the Note sheet shows it: the reconstructed Note, where it is filed in the
+ *  Vault, and the verbatim source Dump (the user's original words, plus any Context they added).
+ *  `dump` is null when the source Dump is gone — the Note still reads, provenance and all that
+ *  survived. */
+export interface NoteView {
+  note: Note;
+  path: string;
+  dump: Dump | null;
+}
+
+/** Read one Note out of the Vault as the Note sheet needs it: the full reconstructed Note, its
+ *  filed path, and the verbatim source Dump. The Note is read live (a deleted Note is gone, not
+ *  shown), and the source Dump is fetched by following the Note's `source` wikilink back to the
+ *  Dumps folder — `null` when that Dump no longer exists.
+ *
+ *  A single-file read: `readVaultFiles` filters by path before any chunk is fetched, so this is
+ *  one metadata scan plus the one Note's chunk, not a full-Vault pass. */
+export async function readNote(path: string, deps: StoreDeps): Promise<NoteView | null> {
+  const files = await readVaultFiles(deps.db, (p) => p === path);
+  const file = files.find((f) => f.path === path);
+  if (!file) return null; // the Note is gone — deleted, or never at that path
+  const note = parseNote(file.content);
+  const dump = note.source ? await readSourceDump(note.source, deps) : null;
+  return { note, path, dump };
+}
+
+/** Read the verbatim Dump a Note's `source` wikilink points at. The wikilink drops the `.md`
+ *  extension, so both the bare target and the `.md` path are matched. Returns null when the
+ *  Dump is gone or not a Dump (a personal note linked by hand, say). */
+async function readSourceDump(source: string, deps: StoreDeps): Promise<Dump | null> {
+  const target = wikilinkTarget(source);
+  const files = await readVaultFiles(deps.db, (p) => p === target || p === `${target}.md`);
+  const file = files.find((f) => !f.deleted);
+  if (!file) return null;
+  return parseDumpFile(file.content);
+}
+
+/** Re-organize an existing Note: re-derive the frontmatter (title/tags/category/summary) from
+ *  the current body, preserving the body byte-for-byte, then read the refreshed Note back. The
+ *  sheet's re-organize action is the one place this surfaces (ticket 05 left it with no surface);
+ *  the operation is `refreshNoteMetadata` plus a re-read, so the sheet can paint the new metadata
+ *  without a second call. */
+export interface ReorganizeDeps extends RefreshDeps {}
+
+export async function reorganizeNote(path: string, deps: ReorganizeDeps): Promise<NoteView | null> {
+  await refreshNoteMetadata(path, deps);
+  return readNote(path, deps);
+}
+
+// --- The Ask sheet (ticket 07) --------------------------------------------
+// Retrieve answers a question and cites the Notes it drew on; the Ask sheet shows those
+// citations as the same cards the grid shows, tappable into the Note sheet. A citation carries
+// only a path, a title and a wikilink — not the Category, Tags and summary a card needs — so the
+// cited Notes are read and projected through the same `toCard` the grid uses. The projection is
+// identical by construction (`toCard` over the same Note's frontmatter), so a citation card is a
+// grid card, and the only new thing is the order: citations follow the answer, not the grid's
+// newest-first order.
+
+/** Project the Notes a Retrieve answer cited to the grid-identical cards the Ask sheet shows.
+ *
+ *  The cards follow citation order — the user reads the answer top-to-bottom into its sources —
+ *  not the grid's newest-first order. A Note deleted between the answer and this read is dropped
+ *  rather than shown as a dead card: `readVaultFiles` excludes soft-deleted docs by default, so a
+ *  gone citation is simply absent. A single narrowed read fetches only the cited paths. */
+export async function citedCards(
+  citations: Citation[],
+  deps: StoreDeps,
+): Promise<NoteCard[]> {
+  if (!citations.length) return [];
+  const paths = new Set(citations.map((c) => c.path));
+  const files = await readVaultFiles(deps.db, (p) => paths.has(p));
+  const byPath = new Map(files.map((f) => [f.path, f] as const));
+  return citations.map((c) => byPath.get(c.path)).filter((f): f is VaultFile => !!f).map(toCard);
 }
 
 
@@ -686,6 +1009,11 @@ export interface PendingCaptureDeps extends BeginCaptureDeps {
    *  responsibility, and leaving the text in the box invites the user to press Capture
    *  again, which is exactly how three identical Dumps reached the Vault in finding 02. */
   onPending?: (dump: Dump) => void;
+  /** Feeds the cross-cutting status strip (ticket 09). The operation emits a `capture-confirmed`
+   *  message here when a capture lands with no card to show it — offline, or failed while
+   *  online — so the strip's source is the operation layer, assertable at this seam. A capture
+   *  that opens a review session emits nothing: the Note on screen is the receipt. */
+  onStatus?: OnStatus;
 }
 
 /** Capture a thought whether or not there is a connection.
@@ -714,6 +1042,7 @@ export async function captureThought(
   };
 
   const log = deps.log ?? noopLog;
+  const onStatus = deps.onStatus ?? noopStatus;
   log({ op: 'capture', message: 'capture started', detail: { dumpId: dump.id, chars: content.length } });
 
   const online = deps.isOnline();
@@ -727,6 +1056,7 @@ export async function captureThought(
   deps.onPending?.(dump);
 
   if (!online) {
+    onStatus(captureConfirmedMessage('offline', OFFLINE_CAPTURE_MESSAGE));
     return { kind: 'pending', dump, reason: 'offline', message: OFFLINE_CAPTURE_MESSAGE };
   }
 
@@ -752,6 +1082,7 @@ export async function captureThought(
       message: 'capture failed online — Dump left Pending for retry',
       detail: { dumpId: dump.id, error: (error as Error).message },
     });
+    onStatus(captureConfirmedMessage('capture-failed', CAPTURE_RETRY_MESSAGE, error as Error));
     return {
       kind: 'pending',
       dump,
@@ -1007,13 +1338,23 @@ interface VaultState {
   brokenRefs: Map<string, { path: string; deleted: boolean }>;
 }
 
-async function readVaultState(deps: StoreDeps): Promise<VaultState> {
+/** Read every managed Note and every Dump — the documents reconciliation and the grid both
+ *  care about — including soft-deleted ones. One read shared by `readVaultState` and the grid's
+ *  `readVaultForGrid`, so the grid's single pass yields both the cards and the Stranded list
+ *  (ADR-0007). */
+async function readReconcileFiles(deps: StoreDeps): Promise<VaultFile[]> {
   const { managedFolder, dumpsFolder } = deps.settings;
-  const files = await readVaultFiles(
+  return readVaultFiles(
     deps.db,
     (path) => path.startsWith(`${managedFolder}/`) || path.startsWith(`${dumpsFolder}/`),
     { includeDeleted: true },
   );
+}
+
+/** Build the reconciliation view of the Vault from already-read files. Pure, so the grid can
+ *  derive its Stranded list from the same files it builds cards from, without a second read. */
+function buildVaultState(files: VaultFile[], settings: Settings): VaultState {
+  const { managedFolder, dumpsFolder } = settings;
 
   const dumps = new Map<string, { dump: Dump; deleted: boolean }>();
   for (const file of files) {
@@ -1033,6 +1374,73 @@ async function readVaultState(deps: StoreDeps): Promise<VaultState> {
   return { dumps, referenced, brokenRefs };
 }
 
+async function readVaultState(deps: StoreDeps): Promise<VaultState> {
+  return buildVaultState(await readReconcileFiles(deps), deps.settings);
+}
+
+/** Every Dump in `state` that no live Note cites and that `include` admits — the Stranded
+ *  thoughts (CONTEXT.md), or, with the predicate inverted, the Dismissed ones. Pure: the reason
+ *  cascade (`dump-deleted` > `unfiled` > `note-deleted` > `note-unreadable`), the `notePath`
+ *  spread, the membership test, and the oldest-first sort. The log stays with the caller —
+ *  `findStrandedDumps` / `findDismissedDumps` for the Settings flow, the grid otherwise — because
+ *  it is a property of *running* a reconciliation, not of *deriving* the list. */
+function deriveStranded(
+  state: VaultState,
+  include: (dumpId: string) => boolean,
+): StrandedDump[] {
+  const { dumps, referenced, brokenRefs } = state;
+  const stranded: StrandedDump[] = [];
+  for (const [path, { dump, deleted }] of dumps) {
+    const link = wikilink(path);
+    // A live Note cites it: filed, whatever else is true.
+    if (referenced.has(link)) continue;
+    if (!include(dump.id)) continue;
+    const broken = brokenRefs.get(link);
+    // The Dump's own deletion outranks its Note's: restoring the Note alone would leave
+    // the thought itself out of the Vault.
+    const reason: StrandedReason = deleted
+      ? 'dump-deleted'
+      : !broken
+        ? 'unfiled'
+        : broken.deleted
+          ? 'note-deleted'
+          : 'note-unreadable';
+    stranded.push({ dump, reason, ...(broken ? { notePath: broken.path } : {}) });
+  }
+  return stranded.sort(
+    (a, b) => a.dump.createdAt - b.dump.createdAt || a.dump.id.localeCompare(b.dump.id),
+  );
+}
+
+/** The membership a Stranded list keeps: a Dump that is neither Pending (known — recovery is
+ *  handling it) nor Dismissed (the user set it aside). The mirror of `findDismissedDumps`'s
+ *  `(id) => dismissedIds.has(id)`, named once so the grid pass and the Settings reconcile share one
+ *  shape instead of two inline copies of the same predicate. */
+function notExcluded(pendingIds: Set<string>, dismissedIds: Set<string>): (id: string) => boolean {
+  return (id) => !pendingIds.has(id) && !dismissedIds.has(id);
+}
+
+/** One Vault pass yields the grid's Note cards AND its Stranded Dumps (ADR-0007 / acceptance #2).
+ *  The cards are the live managed files projected through `toCards` (matching the 02 projection:
+ *  unreadable Notes still carded, soft-deleted ones excluded); the Stranded list is
+ *  `deriveStranded` over the same state. `pendingIds` and `dismissedIds` are passed in already
+ *  resolved, so the grid's caller — which has the device-local stores — decides exclusion. */
+export async function readVaultForGrid(
+  deps: StoreDeps,
+  pendingIds: Set<string>,
+  dismissedIds: Set<string>,
+): Promise<{ cards: NoteCard[]; stranded: StrandedDump[] }> {
+  const files = await readReconcileFiles(deps);
+  const state = buildVaultState(files, deps.settings);
+  const cards = toCards(
+    files.filter(
+      (f) => f.path.startsWith(`${deps.settings.managedFolder}/`) && !f.deleted,
+    ),
+  );
+  const stranded = deriveStranded(state, notExcluded(pendingIds, dismissedIds));
+  return { cards, stranded };
+}
+
 export interface ReconcileDeps extends StoreDeps {
   /** Optional. Dumps already in the Pending store are excluded from the result: they are
    *  known, and recovery is about to deal with them. Omit it and every unreferenced Dump in
@@ -1050,36 +1458,18 @@ export interface ReconcileDeps extends StoreDeps {
  *  Dumps already in the Pending store are excluded: they are known, and recovery is
  *  about to deal with them. Oldest first. */
 export async function findStrandedDumps(deps: ReconcileDeps): Promise<StrandedDump[]> {
-  const { dumps, referenced, brokenRefs } = await readVaultState(deps);
+  const state = await readVaultState(deps);
   const records = deps.pending ? await deps.pending.list() : [];
-  const known = new Set(records.map((r) => r.dump.id));
-  const dismissed = new Set(deps.dismissed ? await deps.dismissed.list() : []);
-
-  const stranded: StrandedDump[] = [];
-  for (const [path, { dump, deleted }] of dumps) {
-    const link = wikilink(path);
-    // A live Note cites it: filed, whatever else is true.
-    if (referenced.has(link)) continue;
-    if (known.has(dump.id) || dismissed.has(dump.id)) continue;
-    const broken = brokenRefs.get(link);
-    // The Dump's own deletion outranks its Note's: restoring the Note alone would leave
-    // the thought itself out of the Vault.
-    const reason: StrandedReason = deleted
-      ? 'dump-deleted'
-      : !broken
-        ? 'unfiled'
-        : broken.deleted
-          ? 'note-deleted'
-          : 'note-unreadable';
-    stranded.push({ dump, reason, ...(broken ? { notePath: broken.path } : {}) });
-  }
+  const pendingIds = new Set(records.map((r) => r.dump.id));
+  const dismissedIds = new Set(deps.dismissed ? await deps.dismissed.list() : []);
+  const stranded = deriveStranded(state, notExcluded(pendingIds, dismissedIds));
 
   (deps.log ?? noopLog)({
     op: 'reconcile',
     message: 'Vault reconciled',
     detail: {
-      dumps: dumps.size,
-      referenced: referenced.size,
+      dumps: state.dumps.size,
+      referenced: state.referenced.size,
       stranded: stranded.length,
       byReason: stranded.reduce<Record<string, number>>(
         (acc, s) => ({ ...acc, [s.reason]: (acc[s.reason] ?? 0) + 1 }),
@@ -1087,9 +1477,23 @@ export async function findStrandedDumps(deps: ReconcileDeps): Promise<StrandedDu
       ),
     },
   });
-  return stranded.sort(
-    (a, b) => a.dump.createdAt - b.dump.createdAt || a.dump.id.localeCompare(b.dump.id),
-  );
+  return stranded;
+}
+
+/** The Dumps the user has dismissed — the thoughts they saw in the Stranded list and decided not
+ *  to file (CONTEXT.md: Dismissed). This is `deriveStranded` with the membership inverted: where
+ *  `findStrandedDumps` *excludes* dismissed ids, this *includes* only them, so the Settings sheet
+ *  can list the dismissed thoughts and offer Restore. Each carries the reason it was stranded for,
+ *  so the user can tell what restoring would put back.
+ *
+ *  Dismissing writes nothing to the Vault, so a Dump listed here is exactly where it was — still
+ *  unreferenced and still readable. A dismissed Dump a live Note has since cited (filed after the
+ *  dismissal) is not listed: it is no longer stranded-shaped, and restoring it would strand
+ *  nothing. */
+export async function findDismissedDumps(deps: ReconcileDeps): Promise<StrandedDump[]> {
+  const state = await readVaultState(deps);
+  const dismissedIds = new Set(deps.dismissed ? await deps.dismissed.list() : []);
+  return deriveStranded(state, (id) => dismissedIds.has(id));
 }
 
 /** Undo the deletion that stranded a Dump: bring back the Note, and the Dump too when it
