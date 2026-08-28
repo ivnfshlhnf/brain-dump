@@ -512,8 +512,22 @@ export function parseFrontmatter(content: string): ParsedFrontmatter {
  *  happens to use cannot steal the section boundary: the genuine sections are the
  *  last ones, written in order by `noteFileContent`. A missing section simply yields
  *  an empty list (the body grows to absorb it), so a Note missing its `## Related`
- *  block still reads — Related is empty, the rest is body. */
-function splitNoteBody(raw: string): { body: string; keyPoints: string[]; related: string[] } {
+ *  block still reads — Related is empty, the rest is body.
+ *
+ *  But "last in the file" stopped being proof of section membership when the Append
+ *  path wrote its dated sections to the very end of the file, *below* `## Related`
+ *  (finding 06) — files in the Vault still carry that layout. So a section's content
+ *  runs only as far as its bullets run: the first non-bullet line ends it, and
+ *  whatever follows is folded back into the body — an `## Appended …` journal section
+ *  is the user's content, never a Related link, and never lost to the sheet. */
+function splitNoteBody(raw: string): {
+  body: string;
+  keyPoints: string[];
+  related: string[];
+  /** Where the body ends in `raw` — the boundary the Append path inserts a new dated
+   *  section at, so writer and reader agree on what the trailing sections are. */
+  bodyEnd: number;
+} {
   const relIdx = raw.lastIndexOf('\n## Related\n');
   const kpIdx = relIdx >= 0 ? raw.lastIndexOf('\n## Key points\n', relIdx) : raw.lastIndexOf('\n## Key points\n');
   const sumEnd = kpIdx >= 0 ? kpIdx : relIdx >= 0 ? relIdx : raw.length;
@@ -528,19 +542,44 @@ function splitNoteBody(raw: string): { body: string; keyPoints: string[]; relate
   // the blank line that separated it from the frontmatter.
   const body = raw.slice(0, bodyEnd).replace(/^\n+/, '').trimEnd();
 
-  /** The content of a trailing section: everything after its header line, list bullets
-   *  stripped, blank lines dropped. */
-  const sectionList = (from: number, to: number, header: string): string[] =>
-    raw
-      .slice(from, to)
-      .slice(raw.indexOf(header, from) - from + header.length)
-      .split('\n')
-      .map((line) => line.replace(/^\s*-\s?/, '').trim())
-      .filter(Boolean);
+  /** The bullet list of a trailing section, with where the list stops: blank lines between
+   *  bullets are tolerated, the first non-bullet line ends the section, and `end` is the
+   *  offset that first non-bullet line starts at (`to` when the list runs to the section's
+   *  edge). */
+  const sectionScan = (
+    from: number,
+    to: number,
+    header: string,
+  ): { items: string[]; end: number } => {
+    const start = raw.indexOf(header, from);
+    if (start < 0) return { items: [], end: to };
+    const lines = raw.slice(start + header.length, to).split('\n');
+    const items: string[] = [];
+    let end = start + header.length;
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t) {
+        end += line.length + 1;
+        continue;
+      }
+      if (!t.startsWith('-')) break;
+      items.push(t.replace(/^-\s?/, '').trim());
+      end += line.length + 1;
+    }
+    return { items, end };
+  };
 
-  const keyPoints = kpIdx >= 0 ? sectionList(kpIdx, relIdx >= 0 ? relIdx : raw.length, '## Key points') : [];
-  const related = relIdx >= 0 ? sectionList(relIdx, raw.length, '## Related') : [];
-  return { body, keyPoints, related };
+  const keyPoints = kpIdx >= 0 ? sectionScan(kpIdx, relIdx >= 0 ? relIdx : raw.length, '## Key points').items : [];
+  const rel = relIdx >= 0 ? sectionScan(relIdx, raw.length, '## Related') : { items: [], end: raw.length };
+  // Content after the Related list — an `## Appended …` section below the sections — is
+  // body again, so the sheet shows the whole journal and the refresh re-organizes all of it.
+  const tail = raw.slice(rel.end).trim();
+  return {
+    body: tail ? `${body}\n\n${tail}` : body,
+    keyPoints,
+    related: rel.items,
+    bodyEnd: tail ? raw.length : bodyEnd,
+  };
 }
 
 /** Reconstruct the full Note a file holds — the inverse of `noteFileContent`. The
@@ -799,7 +838,13 @@ export interface AppendDeps {
 /** Append a Dump's organized content to an existing Note as a new dated section.
  *  Optimistic concurrency: writes with the current `_rev`; on a 409, re-fetches the
  *  fresh Note content and re-applies the append, so a concurrent edit survives. The
- *  frontmatter (title/tags/summary) is untouched — metadata refresh is explicit. */
+ *  frontmatter (title/tags/summary) is untouched — metadata refresh is explicit.
+ *
+ *  The section joins the *body* — inserted before the trailing sections, not at the
+ *  end of the file (finding 06). The reader takes Summary/Key points/Related to be the
+ *  last sections on the file; writing below them made the reader swallow the appended
+ *  content into the Related list. Appends stack here in capture order, and the
+ *  sections stay the last thing on the file. */
 export async function appendDumpToNote(
   note: Note,
   notePath: string,
@@ -809,7 +854,12 @@ export async function appendDumpToNote(
   const { metadataId, chunkId } = await modifyFile(
     deps.db,
     notePath,
-    (current) => `${current.trimEnd()}\n\n${section}\n`,
+    (current) => {
+      const { frontmatter, body: raw } = splitFrontmatter(current);
+      const sectionsAt = splitNoteBody(raw).bodyEnd + frontmatter.length;
+      if (sectionsAt >= current.length) return `${current.trimEnd()}\n\n${section}\n`;
+      return `${current.slice(0, sectionsAt).trimEnd()}\n\n${section}\n\n${current.slice(sectionsAt).trimStart()}`;
+    },
     { mtime: deps.now(), hash: deps.hash, settings: deps.settings },
   );
   return { path: notePath, metadataId, chunkId };

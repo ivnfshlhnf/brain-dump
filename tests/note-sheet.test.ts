@@ -127,6 +127,35 @@ describe('parseNote — the inverse of noteFileContent', () => {
   });
 });
 
+// --- parseNote: the layout the Append path once wrote (finding 06) --------
+
+describe('parseNote — appends written below the trailing sections', () => {
+  // The Append path once wrote its dated sections to the very end of the file — below
+  // `## Related` (finding 06). Files in the Vault still carry that layout, so reading them
+  // must not swallow the appended content into the Related list, nor lose it.
+  const appendedBelow = (related: string[]) =>
+    noteFileContent(makeNote({ related })) +
+    '\n## Appended 2026-08-24 08:31:27 UTC\n\n' +
+    '## Issue\n\nThe organized note is generated twice.\n\n' +
+    '_Source: [[_dumps/20260824-083127-c662cc]]_\n';
+
+  it('reads an appended section as body, never as Related links', () => {
+    const note = parseNote(appendedBelow([]));
+
+    expect(note.related).toEqual([]); // the appended headings are not links
+    expect(note.body).toContain('## Appended 2026-08-24 08:31:27 UTC');
+    expect(note.body).toContain('The organized note is generated twice.');
+    expect(note.body).toContain('_Source: [[_dumps/20260824-083127-c662cc]]_');
+  });
+
+  it('keeps genuine Related links when appended sections sit below them', () => {
+    const note = parseNote(appendedBelow(['[[Brain Dump/2026-08-01-garden]]']));
+
+    expect(note.related).toEqual(['[[Brain Dump/2026-08-01-garden]]']);
+    expect(note.body).toContain('## Appended 2026-08-24 08:31:27 UTC');
+  });
+});
+
 // --- readNote: the Note the sheet shows -----------------------------------
 
 describe('readNote — the full Note and its verbatim source (ticket 06)', () => {

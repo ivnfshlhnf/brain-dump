@@ -13,6 +13,7 @@ import {
   refreshNoteMetadata,
   beginCapture,
   finalizeCapture,
+  parseNote,
   type WriteResult,
 } from '../src/lib/operations';
 import { docIdForPath } from '../src/lib/livesync';
@@ -127,6 +128,36 @@ describe('matchNote (Seam A — ticket 04)', () => {
     const bogus: Matcher = { match: async () => ({ kind: 'append', path: 'Brain Dump/nope.md' }) };
     const decision = await matchNote(makeNote(), db, settings, bogus);
     expect(decision.kind).toBe('new');
+  });
+});
+
+// --- append + edit preservation + 409 retry ------------------------------
+
+describe('appendDumpToNote — where the dated section lands (finding 06)', () => {
+  it('inserts the dated section into the body, before the trailing sections', async () => {
+    // The Append path once wrote to the very end of the file, below `## Related` — which
+    // made the reader swallow the appended content into the Related list. The section joins
+    // the body instead, so Summary/Key points/Related stay the last sections on the file.
+    const path = await seedNote(makeNote());
+
+    await appendDumpToNote(makeNote({ body: 'A second thought about the plants.' }), path, {
+      db,
+      settings,
+      hash: sha1Hex,
+      now: () => fixedNow,
+    });
+
+    const content = await noteContent(path);
+    const appended = content.indexOf('## Appended 2026-08-21 20:30:45 UTC');
+    expect(appended).toBeGreaterThan(-1);
+    expect(appended).toBeLessThan(content.indexOf('## Summary'));
+    expect(appended).toBeLessThan(content.indexOf('## Related'));
+
+    // And reading it back: the append is body, the sections are intact.
+    const parsed = parseNote(content);
+    expect(parsed.body).toContain('A second thought about the plants.');
+    expect(parsed.related).toEqual(makeNote().related);
+    expect(parsed.keyPoints).toEqual(makeNote().keyPoints);
   });
 });
 

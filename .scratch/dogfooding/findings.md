@@ -483,3 +483,61 @@ marks the mismatch `unreadable`. A Note that is unreadable files nothing, so its
 reported as `note-unreadable` with a **Repair** action, and `restoreFile` corrects a wrong size
 whether or not the document was ever deleted. Against the live Vault the six now read: 2
 unfiled, 2 note-deleted, 1 dump-deleted, 1 note-unreadable.
+
+---
+
+## 05 — A cold cache loads the grid with no indication anything is happening
+
+**Date:** 2026-08-28
+
+**What I saw:** On the phone (first visit — no card cache), opening the app shows an
+empty grid for the whole Vault read: no cards, no text, no motion. It reads as "there
+is nothing here" rather than "this is loading".
+
+**What I expected:** Some quiet indication that the grid is on its way.
+
+**Context:** First seen on the phone, which is the first cold-cache surface — the Mac
+has always had a warm IndexedDB cache and paints instantly, so the gap was invisible
+until now. The grid's empty-Vault state ("Your first thought will land here.") is
+correctly gated on `cardsLoaded`, but the still-loading state shows nothing at all.
+
+---
+
+## 06 — A Note's appended sections are parsed as Related links
+
+**Date:** 2026-08-28
+
+**What I saw:** The Related section of Notes that have had a Dump appended shows the
+appended content as links — in the worst case the whole appended Note text, line by
+line. Seen on `Brain Dump/2026-08-24-brain-dump-save-failure-in-obsidian.md` and
+`Brain Dump/2026-08-24-brain-dump-app-error-on-mobile.md`.
+
+**What I expected:** Related to hold only the links Related resolution chose, never the
+Note's own appended sections.
+
+**Context:** Both affected Notes predate Related resolution — they carry an empty
+`## Related` written by the file template, then an `## Appended …` section below it.
+The file layout assumes the trailing sections (`## Summary`, `## Key points`,
+`## Related`) are the last things in the file; the Append path writes to the end of the
+file, after them. Reading back, `splitNoteBody` takes everything from `## Related` to
+the end as the Related list, so the appended sections are swallowed into it.
+
+---
+
+## 07 — Append computes Related links, then throws them away
+
+**Date:** 2026-08-28
+
+**What I saw:** Found in the code while fixing 06, not in use. On the Append path,
+`finalizeCapture` resolves the Note's Related links (`withRelated`) and
+`appendDumpToNote` then writes only the dated section — the resolved links are
+discarded, and the target Note keeps whatever links it already had.
+
+**What I expected:** Either the target Note's Related to be refreshed with the new
+links, or the links not computed at all.
+
+**Context:** Related is resolved at save over the whole vault, so on the Append path
+the work is paid for and dropped. Related is also the thing the recovery rule leans on
+("Related is what reconnects the two" — a recovered Dump founds a new Note and Related
+reconnects it to the Note it would have Appended to). A Note that receives an Append
+never gains the connection the same judgment chose for it.
