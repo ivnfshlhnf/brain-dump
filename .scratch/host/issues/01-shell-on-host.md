@@ -1,4 +1,5 @@
-**Status:** ready-for-agent
+**Status:** done — in-repo half pushed as 3a6700b; human steps run 2026-08-31 and the PWA
+loads from `https://brain-dump.ivnhnf.com` on the phone.
 
 # 01 — Shell on the Host
 

@@ -1,4 +1,5 @@
-**Status:** ready-for-human
+**Status:** unblocked — 01 and 02 are done; the Host is live and the PWA loads on the phone
+(2026-08-31). Checklist below.
 
 # 03 — Phone verification against the real Host
 
@@ -12,9 +13,24 @@ only reality provides (phone, tunnel, iOS PWA quirks). No automated seam here by
 1. **Cold start with the Mac asleep** (the headline): put the Mac to sleep. Close the PWA on
    the phone, reopen it. The shell paints from precache. Record: yes/no, any first-paint
    oddity.
+
+   **Result (2026-08-31): pass.** Shell painted, no oddity reported.
+
 2. **Offline capture → Pending → recovery:** with the Mac asleep (or Tailscale off), capture
    a real thought. It enrolls as Pending. Reconnect, reopen — the Dump organizes into its
    Note. Record the log of the whole arc.
+
+   **Result (2026-08-31): BUG FOUND and diagnosed — it was the grid, not recovery.** The
+   airplane-mode variant exposed a real failure with a happy engine: the phone's exported
+   log shows the whole arc SUCCEEDING (`recovery started due:1` → `Note written, Dump no
+   longer Pending` → `recovery finished {organized:1}`, 21s end to end). The Note landed on
+   the Vault. What failed was the running session's view: `onOnline` fired `recover()` and
+   `enterGrid()` concurrently, so the grid read predates the recovery write, and recovery
+   afterward touched only the Pending strip and a status line. The Note appeared only after
+   the user closed and reopened the app. Fixed in App.svelte: recovery that files or
+   dequeues anything now refreshes the grid; regression check
+   `scripts/check-recovery-refresh.mjs` (red without the fix, green with it, wired into
+   npm test).
 3. **Log persistence:** while a failure is reproducible, close and reopen the app, open
    Settings — the events are still listed. Export; the download is one JSON object per line.
    Paste-compare against `logs/brain-dump.jsonl` format. Record: byte-comparable or not.

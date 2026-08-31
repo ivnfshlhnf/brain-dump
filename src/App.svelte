@@ -924,6 +924,12 @@
         exclude: session && !session.saved ? [session.dump.id] : [],
       });
       await refreshPending();
+      // The grid must hear about what recovery filed: it is the one persistent surface,
+      // its read raced this recovery's writes on every trigger (onOnline fires both at
+      // once), and only the next boot would have re-read the Vault — the phone saw a filed
+      // Note that arrived only after closing and reopening (ticket 03, finding caught by
+      // the exported log). The Pending strip is not enough; the grid must say it.
+      if (result.organized.length || result.alreadyOrganized.length) void enterGrid();
       if (result.organized.length) {
         const n = result.organized.length;
         status = n === 1
