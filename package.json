@@ -10,7 +10,7 @@
     "dev": "vite",
     "build": "svelte-check && node scripts/check-tokens.mjs && vite build",
     "preview": "vite preview",
-    "test": "vitest run && node scripts/check-sheet-scroll.mjs && node scripts/check-sheet-exit.mjs && node scripts/check-grid-steady.mjs && node scripts/check-grid-loading.mjs && node scripts/check-log-export.mjs",
+    "test": "vitest run && node scripts/check-sheet-scroll.mjs && node scripts/check-sheet-exit.mjs && node scripts/check-grid-steady.mjs && node scripts/check-grid-loading.mjs && node scripts/check-log-export.mjs && node scripts/check-offline-shell.mjs",
     "test:watch": "vitest",
     "typecheck": "svelte-check --tsconfig ./tsconfig.json",
     "check:tokens": "node scripts/check-tokens.mjs"

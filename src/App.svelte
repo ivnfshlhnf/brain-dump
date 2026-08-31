@@ -1923,9 +1923,9 @@
     </ul>
 
     <p class="rule-label">version</p>
-    <!-- The quiet foot of the sheet: which commit the running server is on and when it came
-         up. Compared against the machine's line, it answers "is the phone up to date?" — a
-         stale PWA shows an older commit until it is reloaded. -->
+    <!-- The quiet foot of the sheet: which commit the running build was made from, and
+         when. Compared against the machine's line, it answers "is the phone up to date?" —
+         a stale PWA shows an older commit until the SW picks up the redeploy. -->
     <p class="version">{appVersionLabel}</p>
         {#if status}<p class="status" aria-live="polite">{status}</p>{/if}
       </div>

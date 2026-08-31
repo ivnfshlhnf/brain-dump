@@ -9,10 +9,10 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 const require = createRequire(import.meta.url);
 
-/** The version the Settings sheet shows: the commit this server was started from, and when
- *  it came up. Evaluated once at config load — dev-server start, or build time — which is
- *  exactly the moment "this version" begins. The phone's sheet shows the same line, so
- *  comparing commits answers "is the PWA serving what was just built?". */
+/** The version the Settings sheet shows: the commit this build was made from, and when
+ *  it was made. Evaluated once at config load — build time, or dev-server start — which
+ *  is exactly the moment "this version" begins. The phone's sheet shows the same line, so
+ *  comparing commits answers "is the PWA serving what was just deployed?". */
 function appVersionDefine(): Record<string, string> {
   let commit = 'unknown';
   try {
@@ -24,7 +24,7 @@ function appVersionDefine(): Record<string, string> {
   } catch {
     // Not a git checkout (or git is unavailable): the sheet says "version unknown".
   }
-  return { __APP_VERSION__: JSON.stringify({ commit, startedAt: Date.now() }) };
+  return { __APP_VERSION__: JSON.stringify({ commit, builtAt: Date.now() }) };
 }
 
 /** Dev-only: let the running app write its diagnostic log to the project folder.

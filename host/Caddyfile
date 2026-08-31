@@ -1,0 +1,26 @@
+# The Host (CONTEXT.md): the always-on origin the app itself is served from —
+# brain-dump.ivnhnf.com, a static Caddy container on the Proxmox Docker host, published
+# through the existing cloudflared tunnel. TLS terminates at Cloudflare's edge, so Caddy
+# serves plain HTTP inside the Docker network and the tunnel carries the certificate.
+#
+# The Host is a file server and nothing more — it never stands in the path of a Capture.
+# The volume receives `dist/` (`npm run build`, then copy the folder in); nothing here
+# rebuilds on deploy. The shell is inert without Vault credentials, so exposure is public
+# and access-free by decision (host spec).
+#
+#   npm run build
+#   rsync -a --delete dist/ <proxmox>:<volume>/      # deploy is one copy; rollback is rsync back
+#
+# Human setup lives in .scratch/host/issues/01-shell-on-host.md: CNAME, ingress rule,
+# CouchDB CORS origin for https://brain-dump.ivnhnf.com.
+
+:80 {
+	root * /srv
+	encode zstd gzip
+
+	# Every path is the app: the SPA has no routes, but a stray link must not 404 the
+	# shell out from under the service worker.
+	try_files {path} /index.html
+
+	file_server
+}

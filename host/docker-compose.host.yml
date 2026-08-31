@@ -1,0 +1,22 @@
+# The Host (CONTEXT.md) as a compose service for the Proxmox Docker host. A snippet, not
+# the whole file — this container joins whatever services already run there, so copy the
+# service block into the existing compose and `docker compose up -d caddy`.
+#
+# Not used by the app or the default test suite — like docker-compose.smoke.yml, this file
+# exists so the running thing matches something checked in.
+#
+# The volume is the deployment surface: `npm run build`, then rsync dist/ into ./host/dist/
+# (same layout the Caddyfile expects at /srv). Nothing rebuilds on deploy; the mount does.
+#
+# The tunnel, tunnel config, CNAME and CouchDB CORS origin are the guided human steps in
+# .scratch/host/issues/01-shell-on-host.md — this file is only the serving half.
+services:
+  caddy:
+    image: caddy:alpine
+    container_name: brain-dump-host
+    restart: unless-stopped
+    ports:
+      - "8090:80" # the cloudflared ingress rule points at this port
+    volumes:
+      - ./dist:/srv:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
