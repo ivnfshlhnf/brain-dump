@@ -18,6 +18,15 @@
 	root * /srv
 	encode zstd gzip
 
+	# The two URLs whose *names* never change must never be cached — hashed assets carry
+	# their freshness in the filename, but nothing invalidates a same-named file, and
+	# Cloudflare's default edge TTL (4h, applied when the origin sends none) would serve a
+	# stale service worker / shell for up to four hours after every deploy. Found on the
+	# phone 2026-08-31: dist/ was replaced, sw.js kept arriving from the edge.
+	header /sw.js Cache-Control "no-cache"
+	header /registerSW.js Cache-Control "no-cache"
+	header /index.html Cache-Control "no-cache"
+
 	# Every path is the app: the SPA has no routes, but a stray link must not 404 the
 	# shell out from under the service worker.
 	try_files {path} /index.html
