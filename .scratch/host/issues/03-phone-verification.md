@@ -38,7 +38,13 @@ only reality provides (phone, tunnel, iOS PWA quirks). No automated seam here by
    Copy-of-JSONL and record the decision in ticket 02.
 5. **Update pickup (lazy):** change something visible, build, rsync to the volume, open the
    PWA twice (iOS updates SW on navigation). The Settings version line names the new commit.
-   Record: how many reloads it took.
+   Record: how many reloads it took. There is now also a manual action — Settings → "Check
+   for updates" — which fetches the newest worker on press and reloads into it if it claims
+   right away (`src/lib/sw-update.ts`; added after item 5's first run found the phone pinned
+   to a stale sw.js). **For the press to see a deploy, Cloudflare must not serve sw.js from
+   its edge cache:** purge `/sw.js` and `/index.html` once after the Caddyfile no-cache
+   headers are live; after that, the origin header keeps the edge honest and no purge is
+   needed again.
 6. **Clear:** wipe the persisted log after export; confirm the retained set is empty.
 7. **The origin switch ledger:** confirm any Dump stranded by the reinstall surface — run
    Find stranded Dumps once and record its counts. This is the deliberate backstop for the

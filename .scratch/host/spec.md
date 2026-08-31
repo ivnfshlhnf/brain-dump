@@ -83,7 +83,7 @@ A good test here exercises behavior at the seam the feature is actually used at,
 - **No pre-reinstall Pending banner.** Decided against (2026-08-31): the Vault-side reconciler — Find stranded Dumps — is the backstop, and a stranded Dump surfaces rather than vanishes. A one-line warning was rejected as scope.
 - **No Cloudflare Access** on the Host (decided: public, the shell is inert).
 - **No deploy script / CI** — hand rsync until it hurts.
-- **No skip-waiting / update prompt** — lazy updates only.
+- **No skip-waiting / update prompt** — lazy updates only. Amended (2026-08-31, after the phone sat on a stale sw.js behind edge cache): a *manual, user-initiated* update action was added to Settings (`src/lib/sw-update.ts`) — the same lazy mechanism, triggered by a press. The lazy default is unchanged; no automatic prompt exists.
 - **No work on onboarding friction** — the Setup URI import, the commonlib port, the E2EE gate: all parked in `.scratch/onboarding-friction/research.md` to be picked up later. The Host removes none of that scope and adds none.
 - **No multi-device Pending sharing** — Pending state stays device-local per its ADR; the Vault remains the cross-device reconciler.
 - **No change to the dev-server dogfooding setup** — tailscale serve, allowedHosts, the jsonl sink: untouched.

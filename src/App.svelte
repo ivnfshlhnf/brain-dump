@@ -39,6 +39,7 @@
   import { createCachingEmbedder } from './lib/embedding-cache';
   import { validateProviderUrl } from './lib/config';
   import { appVersion, versionLabel } from './lib/version';
+  import { checkForUpdate } from './lib/sw-update';
   import {
     connectionTransition,
     configRejectedMessage,
@@ -68,6 +69,9 @@
   // directly from the template would never re-render (this component is in legacy mode,
   // where reactivity comes from assignment).
   let logEvents: LogEvent[] = [];
+  /** The manual update action's line under the version stamp (Settings). Empty until a
+   *  check runs; the version line itself is the durable fact, this is the moment's. */
+  let swUpdateStatus = '';
   const log: Log = (event) => {
     logStore.log(event);
     logEvents = logStore.events();
@@ -1144,6 +1148,22 @@
     URL.revokeObjectURL(url);
     status = 'Diagnostics exported';
   }
+
+  // The manual update (deployed on the Host, wanted on the phone): the same lazy
+  // mechanism, user-initiated, so a fresh deploy does not have to wait for iOS's
+  // navigation cadence to be seen. The lazy default is untouched — nothing prompts or
+  // reloads by itself, and this runs in Settings where a capture is not in flight.
+  async function runUpdateCheck() {
+    swUpdateStatus = 'Checking for updates…';
+    const outcome = await checkForUpdate({ reload: () => window.location.reload() });
+    if (outcome === 'applied') return; // reloading; whatever this sets is momentary
+    swUpdateStatus =
+      outcome === 'current'
+        ? 'This is the latest build.'
+        : outcome === 'pending'
+          ? 'Update downloaded — it takes over when you reopen the app.'
+          : `No app to update here${navigator.onLine ? '' : ' — the phone is offline'}.`;
+  }
 </script>
 
 <!-- The masthead is a sibling of <main>, not a child of it: a <header> only becomes a `banner`
@@ -1933,6 +1953,10 @@
          when. Compared against the machine's line, it answers "is the phone up to date?" —
          a stale PWA shows an older commit until the SW picks up the redeploy. -->
     <p class="version">{appVersionLabel}</p>
+    {#if swUpdateStatus}<p class="hint" aria-live="polite">{swUpdateStatus}</p>{/if}
+    <div class="actions">
+      <button on:click={runUpdateCheck} disabled={swUpdateStatus === 'Checking for updates…'}>Check for updates</button>
+    </div>
         {#if status}<p class="status" aria-live="polite">{status}</p>{/if}
       </div>
     </div>

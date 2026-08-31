@@ -72,6 +72,21 @@ try {
     timeout: 15000,
   });
 
+  // The manual update action, against the built worker: the Settings sheet holds the
+  // button (the Capture sheet does not — the masthead gear opens Settings, as in
+  // shot-settings.mjs). A press with nothing newer at the Host must say so — asserting
+  // the *outcome* line only, not a loose substring that the transient "Checking for
+  // updates…" hint would satisfy before the decision lands.
+  await page.click('.masthead__gear');
+  await page.waitForSelector('text=Check for updates', { timeout: 5000 });
+  await page.click('text=Check for updates');
+  await page.waitForFunction(
+    () => [...document.querySelectorAll('.hint')].some((el) => el.textContent.includes('This is the latest build.')),
+    { timeout: 15000 },
+  );
+  console.log('update check on the built shell → ok');
+  await page.click('.sheet__close');
+
   // The decisive cut: offline, reload. setOffline alone is not decisive — Chromium's
   // emulation does not reach service-worker fetches — so every request from here on is
   // also aborted at the route layer. A precached shell passes; anything that still
