@@ -30,7 +30,7 @@ const COUCH = 'http://127.0.0.1:5999';
 async function seedStore(page) {
   await page.evaluate(async (couch) => {
     const db = await new Promise((res, rej) => {
-      const r = indexedDB.open('brain-dump', 5);
+      const r = indexedDB.open('brain-dump', 6);
       r.onsuccess = () => res(r.result);
       r.onerror = () => rej(r.error);
     });

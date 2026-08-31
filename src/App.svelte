@@ -31,7 +31,8 @@
   import { createOrganizer, createMatcher, createEmbedder, createAnswerer, createRelater } from './lib/llm';
   import { defaultSha1Hex } from './lib/livesync';
   import { createAutosaver } from './lib/autosave';
-  import { createLog, createDevFileSink, type Log, type LogEvent } from './lib/logger';
+  import { createDevFileSink, type Log, type LogEvent } from './lib/logger';
+  import { createPersistedLog, serializeEventsJsonl } from './lib/durable-log';
   import { obsidianUrl, linkHref, linkText } from './lib/obsidian';
   import { formatStamp } from './lib/format';
   import { checkConnections, type HealthReport, type CheckResult } from './lib/health';
@@ -54,9 +55,15 @@
 
   // Diagnostics. In dev the sink POSTs each event to the Vite middleware, which appends
   // it to logs/brain-dump.jsonl in the project folder; in a production build there is no
-  // such endpoint and the POSTs simply fail and are swallowed, leaving the in-memory
-  // buffer that the Config screen shows.
-  const logStore = createLog({ sink: createDevFileSink() });
+  // such endpoint and the POSTs simply fail and are swallowed. Either way the log is
+  // durable: every event is written through to IndexedDB and previous sessions' events
+  // are loaded back at boot — a reload no longer takes the evidence it killed with it
+  // (host ticket 02). Export in Settings hands the retained events over in the dev file's
+  // exact format.
+  const logStore = createPersistedLog({ sink: createDevFileSink() });
+  void logStore.hydrate().then(() => {
+    logEvents = logStore.events();
+  });
   // Mirrored into reactive state on every event: `logStore` is a const, so reading it
   // directly from the template would never re-render (this component is in legacy mode,
   // where reactivity comes from assignment).
@@ -1114,6 +1121,23 @@
     void navigator.clipboard?.writeText(logStore.format());
     status = 'Diagnostics copied';
   }
+
+  /** The exported log is raw events, one JSON object per line — the dev file's exact
+   * format, so a log handed over on the phone reads the same as one tailed in the project
+   * folder. Copy stays human-readable; Export is for an agent (host spec, ticket 02). */
+  function exportDiagnostics() {
+    const text = serializeEventsJsonl(logStore.events());
+    const blob = new Blob([text], { type: 'application/x-ndjson' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `brain-dump-log-${new Date().toISOString().slice(0, 10)}.jsonl`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    status = 'Diagnostics exported';
+  }
 </script>
 
 <!-- The masthead is a sibling of <main>, not a child of it: a <header> only becomes a `banner`
@@ -1878,11 +1902,13 @@
 
     <p class="rule-label">diagnostics</p>
     <p class="hint">
-      The last {logEvents.length} events, newest first. In dev these are also appended to
-      <code>logs/brain-dump.jsonl</code> in the project folder.
+      The last {logEvents.length} events, newest first — kept across restarts. In dev these
+      are also appended to <code>logs/brain-dump.jsonl</code> in the project folder; Export
+      downloads the same events in that file's format.
     </p>
     <div class="actions">
       <button on:click={copyDiagnostics}>Copy diagnostics</button>
+      <button on:click={exportDiagnostics}>Export JSONL</button>
       <button on:click={() => { logStore.clear(); logEvents = []; status = 'Diagnostics cleared'; }}>Clear</button>
     </div>
     <ul class="diagnostics">

@@ -51,7 +51,7 @@ const longNoteHtml = `
 async function seedStore(page) {
   await page.evaluate(async (card) => {
     const db = await new Promise((res, rej) => {
-      const r = indexedDB.open('brain-dump', 5);
+      const r = indexedDB.open('brain-dump', 6);
       r.onsuccess = () => res(r.result);
       r.onerror = () => rej(r.error);
     });

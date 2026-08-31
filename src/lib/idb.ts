@@ -5,7 +5,7 @@
 import type { Dump, PendingDump } from './types';
 
 const DB_NAME = 'brain-dump';
-const VERSION = 5; // v1: settings; v2: + outbox; v3: outbox→PendingDump; v4: + dismissed; v5: + note-cards
+const VERSION = 6; // v1: settings; v2: + outbox; v3: outbox→PendingDump; v4: + dismissed; v5: + note-cards; v6: + log
 
 export const SETTINGS_STORE = 'settings';
 /** The Pending store. The *key* is still `outbox` — the name it was created under in v2 —
@@ -19,6 +19,10 @@ export const DISMISSED_STORE = 'dismissed';
 /** The home grid's card projection, cached device-local so the grid paints before the Vault
  *  read completes (ADR-0007). Disposable — rebuilt from the Vault in one pass when absent. */
 export const CARD_CACHE_STORE = 'note-cards';
+/** The diagnostics log, durable (host ticket 02): the event that survives the reload which
+ *  killed the failure it recorded. Auto-incrementing seq keys keep capture order; eviction
+ *  is newest-wins, handled by the log store itself. */
+export const LOG_STORE = 'log';
 
 /** Open the app database, creating any missing object stores. Opened per operation
  *  rather than cached, so a store handle never outlives the connection it holds. */
@@ -32,6 +36,8 @@ export function openAppDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(PENDING_STORE)) db.createObjectStore(PENDING_STORE);
       if (!db.objectStoreNames.contains(DISMISSED_STORE)) db.createObjectStore(DISMISSED_STORE);
       if (!db.objectStoreNames.contains(CARD_CACHE_STORE)) db.createObjectStore(CARD_CACHE_STORE);
+      if (!db.objectStoreNames.contains(LOG_STORE))
+        db.createObjectStore(LOG_STORE, { keyPath: 'seq', autoIncrement: true });
       if (event.oldVersion >= 2 && event.oldVersion < 3) migrateBareDumps(req.transaction);
     };
     req.onsuccess = () => resolve(req.result);

@@ -46,6 +46,7 @@ export interface LogStore {
 }
 
 const DEFAULT_CAPACITY = 300;
+export { DEFAULT_CAPACITY };
 
 /** An in-memory ring buffer of the last `capacity` events, with an optional sink called
  *  for each one as it arrives. The buffer is bounded so a long-running PWA session cannot

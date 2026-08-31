@@ -72,6 +72,12 @@ _Avoid_: format, type, mode
 A full-screen surface the app drops over the grid for one focused job — Capture, Ask, Note, or Settings. You drop into a Sheet and return from it; the grid is home. A Sheet is opened and closed, never visited like a place.
 _Avoid_: page, modal, screen, popup
 
+**Host**:
+The always-on origin the app itself is served from — the installed PWA's home. The Host serves
+the app shell and its updates; it is never in the path of a Capture, which talks to the Vault
+through CouchDB and the LLM provider directly. The Host going away slows updates, not thoughts.
+_Avoid_: serve server, dev server, backend, server
+
 **Vault**:
 The user's entire note collection — every document they have, including all the personal notes
 the app had no hand in creating. The app reads all of it and writes into none of it except the
