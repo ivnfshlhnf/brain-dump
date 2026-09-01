@@ -1,7 +1,6 @@
-**Status:** checklist complete (2026-09-01) — items 1–6 pass on the real device; item 7 found
-1 stranded Dump, awaiting the Organize/Dismiss decision in the sheet. One observed rough
-edge recorded under item 2 (capture lingers ~35s when the network claims online but is
-dead) — candidate for a future ticket, not blocking.
+**Status:** COMPLETE (2026-09-01) — all items pass on the real device; the one stranded
+Dump found by item 7 was Organized. One observed rough edge recorded under item 2
+(capture lingers ~35s when the network claims online but is dead) — parked as ticket 04.
 
 # 03 — Phone verification against the real Host
 
@@ -86,9 +85,10 @@ only reality provides (phone, tunnel, iOS PWA quirks). No automated seam here by
    Find stranded Dumps once and record its counts. This is the deliberate backstop for the
    Pending store not carrying over; now is when it is least hypothetical.
 
-   **Result (2026-09-01): 1 stranded Dump.** The backstop was not hypothetical: exactly one
-   Dump never became a Note. Decide in the sheet: Organize (it was a real thought) or
-   Dismiss.
+   **Result (2026-09-01): 1 stranded Dump — Organized.** The backstop was not
+   hypothetical: exactly one Dump never became a Note, and the user Organized it from the
+   sheet (2026-09-01), so it became its Note. Item closed; the Host spec is verified end
+   to end.
 
 ## Notes
 
