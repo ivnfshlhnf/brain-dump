@@ -1,4 +1,4 @@
-**Status:** ready
+**Status:** done
 
 # 03 — Fix the Related judge's prompt
 
@@ -74,6 +74,20 @@ keep this diff minimal. It can be a later change if Related order ever matters.
   isolated Note) must still return nothing.
 - The untracked harness must stay untracked (it knows the local vault path and uses env
   credentials).
+
+## Acceptance (2026-09-01)
+
+Run with the edited `buildRelatedPrompt` (the criterion lines extracted from the source, so
+the run cannot drift from what the app sends), against the real shortlists computed from the
+cached vectors, judged by the sitting model (`deepseek/deepseek-v4-flash`, JSON mode):
+
+- **`brain-dump-app-feedback`** (5 true siblings in the shortlist): **`[0,1,2,3,4]` — all
+  five siblings — on 5 of 6 runs** (one early run returned `[0,1]`, still genuine siblings).
+  Before: historical `linked: 0` on four passes and `[]`/`[0]` on replay.
+- **Negative control** (`macbook-keyboard-battery`, no true Related): **`[]` on 5 of 5
+  runs.** The loosened criterion did not open junk links.
+- Full suite (`npm test`) and `svelte-check` green, unchanged — the Seam A suites never
+  assert on prompt text, so orchestration is untouched by construction.
 
 ## Out of Scope
 

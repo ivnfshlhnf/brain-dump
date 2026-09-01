@@ -588,3 +588,29 @@ would fail any future Re-organize that re-derives its frontmatter.
 **Replay harness:** `scripts/debug-related-replay.mjs` (untracked, `[DEBUG-replay]`
 marked) — ranks a saved Note against the cached vectors read-only, and re-runs the
 actual judge prompt; it is the feedback loop for whatever fix this becomes.
+
+**Judge bake-off (2026-09-01, later the same day):** model × prompt × case grid run
+against the real shortlists — `app-feedback` (5 true siblings), `espresso` (2 true),
+`macbook-keyboard-battery` (negative control, expects 0–1). Six flash-tier models
+(deepseek-v4-flash, glm-5.3-flash, gemini-2.5-flash-lite, gpt-4.1-mini,
+claude-haiku-4.5, qwen3.7-flash), three prompts. Result: **the prompt is the bug, not
+the model.** On the current prompt the sitting model returned `[]` (the historical
+failure) and gpt-4.1-mini and qwen3.7-flash joined it; with a positive criterion —
+"related when they share an app, project, person, place, event, or topic, even from
+different angles or times; empty only when nothing shares any thread" — the *same*
+deepseek-v4-flash returns all five siblings. Every model × positive-prompt cell
+recovers the siblings, and all 18 negative-control cells stay empty, so the loosened
+prompt does not open junk links. A rank-then-include variant behaves the same and adds
+strongest-first ordering as a bonus. The pessimistic clause ("Being about a similar
+subject is not enough on its own") is what deepseek obeys too faithfully.
+
+**Also confirmed the same day, on the embedding layer:** no model change is warranted
+— all four candidate embedders (3-small/large, gemini-embedding-001, qwen3-embedding-8b)
+rank every true sibling into the top 5 for both known cases; the current 3-small is as
+good as any and switching costs a re-embed plus floor recalibration for nothing.
+Parsed-content vs raw-file embedding moved nothing. Two real side-findings: the embed
+call sends the whole vault in one untruncated request, and any doc over 8192 tokens
+400s the entire batch — silently emptying Related until fixed (currently dormant: the
+oversized livesync logs are local-only and not in the CouchDB pool, but accumulating
+pool files will cross the line eventually); and the 8 Memos `_index.md` boilerplate
+files sit in the ranking pool and can waste shortlist slots.
