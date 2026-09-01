@@ -54,7 +54,7 @@ export async function findRelated(
   if (docs.length === 0) return [];
 
   const subject = `${note.title}\n\n${note.summary}\n\n${note.body}`;
-  const ranked = await rankBySimilarity(subject, docs, deps.embedder);
+  const ranked = await rankBySimilarity(subject, docs, deps.embedder, log);
   const shortlist = shortlistOf(ranked);
 
   if (shortlist.length === 0) {

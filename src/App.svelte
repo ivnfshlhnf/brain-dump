@@ -1033,6 +1033,7 @@
         ...storeDeps(),
         embedder: cachedEmbedder(),
         answerer: createAnswerer(settings, log),
+        log,
       });
       answer = result.answer;
       // The citations are shown as the same cards the grid shows — projected from the cited

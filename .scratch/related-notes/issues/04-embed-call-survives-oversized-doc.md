@@ -1,4 +1,4 @@
-**Status:** ready
+**Status:** done
 
 # 04 — Make the whole-vault embed call survive an oversized document
 
@@ -91,3 +91,22 @@ stays exactly as it is — the fallback runs only when the batch call throws.
 - Per-provider token limits as configuration — the fallback makes exact limits unnecessary.
 - A `_changes`-fed index or pre-warming (still out of scope per the original spec).
 - The judge prompt — ticket 03.
+
+## Acceptance (2026-09-01)
+
+Implemented in `src/lib/vault-search.ts`: `rankBySimilarity` tries the batched call first
+(trusted exactly as before — the contract `retrieve.test.ts` pins for a malformed response
+is preserved), and only when the batch **throws** does it fall back to one sequential request
+per document. A document that fails or returns nothing even alone is excluded from the
+ranking entirely (not scored 0 — a fabricated 0 would hand an unranked document to Retrieve
+as one of the best) and logged with its path. Every document failing degrades to an empty
+ranking, never a throw. The subject embed stays a single call, and the throw for a missing
+subject vector is unchanged. `log` is now threaded through from both callers (`related.ts`
+already had it; `retrieve.ts` gained an optional `log` dep, wired from `App.svelte`).
+
+Tests: `tests/vault-search.test.ts` (new) — batch success ranks in one batched call; batch
+failure falls back per-document and still ranks in similarity order; a document that fails
+even alone is absent from the ranking with the skip logged; every document failing returns
+`[]` without throwing. Full suite: 267 passed (was 263 + 4 new), `svelte-check` clean. The
+live 400 was reproduced during the finding-08 diagnosis; the fake embedder's failure text
+mirrors the provider's real message.

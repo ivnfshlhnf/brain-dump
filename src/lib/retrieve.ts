@@ -17,6 +17,7 @@ import type {
   Settings,
   VaultDoc,
 } from './types';
+import { noopLog, type Log } from './logger';
 import { wikilink } from './operations';
 
 /** How many of the most similar vault docs are handed to the LLM as context. */
@@ -31,18 +32,20 @@ export interface RetrieveDeps {
   settings: Settings;
   embedder: Embedder;
   answerer: Answerer;
+  log?: Log;
 }
 
 /** Answer a question from the vault: read every file, embed them and the question,
  *  hand the closest few to the LLM, and cite what it drew on. */
 export async function retrieve(question: string, deps: RetrieveDeps): Promise<RetrieveResult> {
+  const log = deps.log ?? noopLog;
   const asked = question.trim();
   if (!asked) throw new Error('Cannot retrieve without a question.');
 
   const docs = await readVaultDocs(deps.db, deps.settings);
   if (docs.length === 0) return { answer: EMPTY_VAULT_ANSWER, citations: [] };
 
-  const sources = await mostSimilar(asked, docs, deps.embedder);
+  const sources = await mostSimilar(asked, docs, deps.embedder, log);
   const output = await deps.answerer.answer(asked, sources);
 
   return { answer: output.answer, citations: cite(output.sources, sources) };
@@ -53,8 +56,9 @@ async function mostSimilar(
   question: string,
   docs: VaultDoc[],
   embedder: Embedder,
+  log: Log,
 ): Promise<VaultDoc[]> {
-  const ranked = await rankBySimilarity(question, docs, embedder);
+  const ranked = await rankBySimilarity(question, docs, embedder, log);
   return ranked.slice(0, RETRIEVE_TOP_K).map((scored) => scored.doc);
 }
 
