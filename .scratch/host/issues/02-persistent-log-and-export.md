@@ -45,3 +45,9 @@ diagnostic path that found findings 02–06 exists only on the dev origin.
 - iOS may have quirks around downloading a blob from a standalone PWA; if Export on the
   phone proves hostile, the fallback is Copy-from-Settings of the JSONL text — decide in
   ticket 03 against the real device, not speculatively.
+
+  **Decided on the real device (ticket 03, 2026-09-01): no fallback needed.** The blob
+  download works from the standalone PWA on iOS — the file landed as
+  `brain-dump-log-2026-09-01.jsonl.ndjson` and byte-compared against the dev format
+  (81 lines, one JSON object per line, same op vocabulary). Copy stays as the readable
+  alternative it was designed to be, not a fallback.
