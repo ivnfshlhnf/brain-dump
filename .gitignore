@@ -18,3 +18,8 @@ logs/
 # Documents pulled back out of CouchDB after the 2026-08-25 deletion (finding 04).
 # Real Note and Dump content — the same reason logs/ and shots/ are ignored.
 .scratch/recovery/
+
+# [DEBUG-replay] The finding-08 diagnosis harness — deliberate, clearly-marked, kept for
+# the future fix, but never for the repo: it knows this machine's vault path and reads
+# the real cache with env credentials.
+scripts/debug-related-replay.mjs

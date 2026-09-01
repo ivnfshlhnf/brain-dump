@@ -541,3 +541,50 @@ the work is paid for and dropped. Related is also the thing the recovery rule le
 ("Related is what reconnects the two" — a recovered Dump founds a new Note and Related
 reconnects it to the Note it would have Appended to). A Note that receives an Append
 never gains the connection the same judgment chose for it.
+
+---
+
+## 08 — Organized Notes still come back with empty Related
+
+**Date:** 2026-09-01
+
+**What I saw:** After the embedding-cache + populate-Related work shipped, newer Notes
+still arrive with an empty `## Related`. The 2026-08-31 phone export and the dev log
+show the pipeline running on every save — candidates 49→63, shortlist 3–5 — yet several
+Notes land with nothing. The empties: `2026-08-31-brain-dump-app-feedback`,
+`2026-08-28-improving-brain-dump-app-integration`, `2026-08-28-trying-glm-5-3-flash`,
+`2026-08-31-offline-mode-attempt`.
+
+**What I expected:** Notes about the same ongoing subject (the brain-dump app itself)
+to link to their obvious siblings, the way `espresso-tuning` links to its two.
+
+**Context (checked the same day, on request):** Two different loss points, confirmed
+against the real cache and the real model —
+
+1. *Recovery writes no Related at all.* `recoverPending` calls `organizeNote` then
+   `writeNote` directly (`src/lib/operations.ts:1533`) — it never goes through
+   `fillRelated`. Every Note founded by recovery — i.e. every offline capture, the
+   phone's defining arc — has an empty Related by construction. Both 08-31 offline
+   notes are this. The sting: the recovery rule's own comment says "Related is what
+   reconnects the two" when an offline capture is founded as a separate Note
+   (`operations.ts:1258`), so the reconnection the design leans on is the one thing
+   recovery never computes. `offline-dump-capture`'s single link appeared only because
+   a later user-triggered Re-organize ran the path that does call `fillRelated`.
+2. *The judge rejects clear siblings.* Replayed `brain-dump-app-feedback`'s ranking
+   from the real embedding cache: the top five were exactly the right brain-dump notes
+   at 0.47–0.54 cosine (floor 0.35) — the ranking and the floor are healthy. The
+   judge (deepseek-v4-flash) answered `linked: 0` historically and `[0]` on replay.
+   The dev log shows the same verdict on three other passes (`shortlisted 4–5,
+   linked 0`). The prompt's "Being about a similar subject is not enough on its own"
+   appears to license rejecting same-project notes that a reader of one would plainly
+   want.
+
+Also seen while checking: two dev-log passes were floor-misses ("nothing cleared the
+similarity floor") — isolated topics in a then-smaller vault, not a bug; and
+`2026-08-24-semekar-s-adenium-grind-adjustment-notes.md` is a legacy-corrupted file
+(double frontmatter, `created: 0`) from the pre-rework era that still links fine but
+would fail any future Re-organize that re-derives its frontmatter.
+
+**Replay harness:** `scripts/debug-related-replay.mjs` (untracked, `[DEBUG-replay]`
+marked) — ranks a saved Note against the cached vectors read-only, and re-runs the
+actual judge prompt; it is the feedback loop for whatever fix this becomes.
