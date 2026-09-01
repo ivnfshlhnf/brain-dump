@@ -254,3 +254,57 @@ to ship without a vector index, and retroactively removes Retrieve's known scali
 - **Domain vocabulary:** this spec uses the terms defined in `CONTEXT.md` (Dump, Note, Context,
   Organize, Append, Related, Retrieve, Capture, Modality). Implementation should use the same
   vocabulary in code and tests and not drift to the avoided synonyms.
+
+---
+
+## Addendum — Finding 08 follow-up (2026-09-01)
+
+Tickets 01 and 02 shipped, and dogfooding (finding 08 in `.scratch/dogfooding/findings.md`)
+found Notes still arriving with an empty `## Related`. Diagnosis against the real embedding
+cache and the real models split the loss into two independent causes, and a bake-off (model ×
+prompt × case, recorded in full in finding 08) decided the fix order. This addendum scopes
+that follow-up; the original spec above is unchanged.
+
+### What the evidence established
+
+- **The hybrid design is sound.** Replayed from the real cache, the ranking put exactly the
+  right documents in the top five for both known cases, with clear margin over the 0.35 floor.
+  No embedder model change is warranted: all four candidates on the provider
+  (`openai/text-embedding-3-small/-3-large`, `google/gemini-embedding-001`,
+  `qwen/qwen3-embedding-8b`) ranked every ground-truth sibling into the top five. Embedding
+  the parsed Note (title + summary + body) instead of the raw file moved nothing. **Decision:
+  keep the embedder model, the floor (0.35), the cap (5), and `embeddableText` as they are.**
+- **The judge's prompt is the bug.** The current prompt's clause — "Being about a similar
+  subject is not enough on its own. Return an empty array if none qualify — that is a good
+  answer, not a failure" — makes the sitting model (`deepseek/deepseek-v4-flash`) reject
+  obvious siblings: four historical passes ended `linked: 0`, and a replay returned `[]`.
+  With a positive criterion instead, the *same* model returns all five siblings, and every
+  model × positive-prompt cell recovers them while all 18 negative-control cells (a Note with
+  no true Related) stay empty. Six flash-tier models were tried; the prompt dominates the
+  model choice. → **Ticket 03.**
+- **The whole-vault embed call is one oversized document away from failure.**
+  `rankBySimilarity` (`src/lib/vault-search.ts`) sends every vault document to the embeddings
+  endpoint in a single request, and the provider rejects any input over 8192 tokens with a
+  400 that kills the whole batch. `fillRelated` catches and saves the Note with no Related —
+  silently. The same ranking call underlies Retrieve. Currently dormant (the oversized files
+  in the local vault never reach the CouchDB pool the app reads), but accumulating pool
+  documents (`random-notes`, `coffee-log`) will cross the limit eventually. → **Ticket 04.**
+
+### Decisions
+
+- **Ticket 03 — fix the judge prompt.** Replace the pessimistic clause with the positive
+  criterion proven in the bake-off. No model change, no re-embedding, no cache invalidation.
+- **Ticket 04 — make the embed call survive an oversized document.** One failing document
+  must cost its own ranking entry, never the whole pass.
+- **No model, floor, or text-form change** (the tests say there is nothing to gain and a
+  re-embed plus floor recalibration to pay).
+- **Out of scope, pending its own decision:** `recoverPending` never calls `fillRelated`, so
+  every Note founded by recovery — every offline Capture — lands with an empty `## Related`
+  by construction (`src/lib/operations.ts:1533`). This is finding 08's other loss point; the
+  bake-off does not touch it. The user's decision on that gap is recorded in finding 08.
+- **Ordering: 03 then 04,** per the user's decision — 03 fixes the observed failure, 04
+  hardens the path that has not failed yet.
+- **Acceptance loop for 03:** `scripts/debug-related-replay.mjs` (untracked, `[DEBUG-replay]`
+  marked) — it re-runs the real judge against the real shortlist from the cached vectors.
+  The Seam A suites deliberately never assert on prompt text, so the prompt change is judged
+  by the harness, not by unit tests.
