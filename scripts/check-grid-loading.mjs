@@ -11,6 +11,7 @@
 //   node scripts/check-grid-loading.mjs [url]   — bare, it starts its own dev server;
 //                                                 pass a URL to reuse one already running
 import { chromium } from 'playwright';
+import { seedStore } from './lib/check-harness.mjs';
 
 const urlArg = process.argv.slice(2).find((a) => !a.startsWith('--'));
 
@@ -26,24 +27,6 @@ if (!url) {
 // A dead port: nothing listens here, so the only way the Vault read is slow is our route
 // handler holding it — which makes the loading state observable.
 const COUCH = 'http://127.0.0.1:5999';
-
-async function seedStore(page) {
-  await page.evaluate(async (couch) => {
-    const db = await new Promise((res, rej) => {
-      const r = indexedDB.open('brain-dump', 6);
-      r.onsuccess = () => res(r.result);
-      r.onerror = () => rej(r.error);
-    });
-    await new Promise((res, rej) => {
-      const tx = db.transaction(['note-cards', 'settings'], 'readwrite');
-      // note-cards stays empty: this is a cold cache.
-      tx.objectStore('settings').put({ couchdbUrl: couch, couchdbDb: 'obsidian' }, 'current');
-      tx.oncomplete = () => res();
-      tx.onerror = () => rej(tx.error);
-    });
-    db.close();
-  }, COUCH);
-}
 
 const browser = await chromium.launch();
 
@@ -61,7 +44,11 @@ try {
   });
 
   await page.goto(url, { waitUntil: 'load' });
-  await seedStore(page);
+  // note-cards stays empty: this is a cold cache.
+  await seedStore(page, {
+    stores: ['note-cards', 'settings'],
+    settings: { couchdbUrl: COUCH, couchdbDb: 'obsidian' },
+  });
   await page.reload({ waitUntil: 'load' });
 
   // While the read is held open: the loading line is on, live, and capture is not gated.

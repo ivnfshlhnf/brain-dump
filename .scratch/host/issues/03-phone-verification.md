@@ -78,6 +78,71 @@ only reality provides (phone, tunnel, iOS PWA quirks). No automated seam here by
 
    **Button on-device (2026-09-01): pass.** Settings → "Check for updates" answered
    "This is the latest build." in under a second.
+
+   **Follow-up (2026-09-01): that pass only exercised the nothing-newer path.** After the
+   next deploy, the button on the phone answered "This is the latest build." while a
+   newer build sat at the Host — the reopen served it at once. Root cause: the decision
+   read `registration.installing` alone, one snapshot after `await registration.update()`.
+   The worker calls skipWaiting as soon as it evaluates and a LAN precache finishes in
+   well under a second, so by the time WebKit resolves `update()` the worker has moved
+   past `installing` — null read as "nothing found", and the claim (which had already
+   fired `controllerchange`) went unanswered. Chromium resolves `update()` earlier, so
+   desktop passed by timing luck. Fix in `src/lib/sw-update.ts`: an update is "found"
+   if the worker is `installing`, `waiting`, or has already claimed (controller identity
+   changed) — any of the phases it can have reached when the promise resolves. Ordering
+   pinned by tests/update-check.test.ts; the found-an-update path now also has a
+   real-browser check (scripts/check-update-pickup.mjs, in `npm test`), which deploys a
+   second build under the running page and requires the press to land in it.
+
+   **Second follow-up (2026-09-01): an applied press dumped the user on the grid.** Once
+   the fix above was live, every found-update press reloaded the document — and the
+   reload starts from the grid, stranding the user who pressed inside the Settings
+   sheet. The reload itself is the update applying (the running document cannot swap to
+   the new build in place); what was missing was the press's *place* riding across it.
+   Fix: `runUpdateCheck` leaves a sessionStorage mark before reloading; boot consumes it
+   and reopens the Settings sheet (`UPDATE_SHEET_KEY`, App.svelte) — session-scoped, so
+   closing and reopening the app later still boots the grid. Pinned by the same check's
+   "applied press keeps the Settings sheet open" assertion. Third pass (same day): the
+   restored sheet also answers — the press's status line died with the old document, so
+   the reopened sheet was a silent blink; boot now sets "This is the latest build."
+   alongside the reopen (the reload just landed on the newest build), pinned by "the
+   restored sheet answers for the applied update" in the check. Fourth pass (same day):
+   the restored sheet also keeps the press's scroll — the version block lives at the
+   foot and a fresh dialog opens at scrollTop 0, so the answer rendered below the fold;
+   the mark now carries the `.sheet__body` offset and boot restores it after the dialog
+   renders, pinned by "opens scrolled to the version block" (check runs at a phone
+   viewport, where the sheet actually overflows).
+
+   **Closing correction (2026-09-01, same day): the apply-in-place design above is
+   superseded — the button is now check-only, by the user's decision.** The chain of
+   reload-restore fixes (sheet restore → message restore → scroll restore) was each
+   patching the previous patch, because a reload is inherently destructive of the
+   moment; the question that ended it was "why should it reopen the sheet, it's only
+   checking the latest build, right?" The final design: the press fetches and downloads
+   the newest worker and reports on the spot — "Update downloaded — it takes over when
+   you reopen the app." — and *never* reloads. The sheet never closes, nothing scrolls,
+   and the found update serves on the next app reopen exactly like the lazy path
+   (`registerType: 'autoUpdate'` claims it as soon as the worker evaluates). The whole
+   UPDATE_SHEET_KEY/restore machinery was deleted from App.svelte; `sw-update.ts` now
+   returns pending/current/unavailable with no 'applied'. Every paragraph in the two
+   follow-ups above that mentions a reload, a restore, or a scroll mark describes
+   removed code; the misreport fix itself (found = installing || waiting || controller
+   changed) stands unchanged underneath it. Pinned by tests/update-check.test.ts and
+   `scripts/check-update-pickup.mjs`, whose contract is now: no reload during the press,
+   sheet stays open, reopen serves the second build.
+
+   **Review pass (2026-09-01, same day): the pins hardened, two dead references removed.**
+   The two-axis review of the working tree found the check's own reload watch ending at
+   the answer (a late reload would have passed) and the reopen asserted via `page.reload()`
+   — a reload proxy, not a reopen. The check now keeps watching for a load event after the
+   answer ("never reloads" is the whole contract, not just during the press) and reopens
+   through a fresh page in the same context (same install, new document — closer to what
+   iOS's reopen means). Both promise-returning `waitForFunction` calls (the anti-pattern
+   the check itself documents) became hand-rolled polls. The stale scroll-overflow comment
+   from the deleted fourth pass is gone. Repo-wide, the Node gate and the IndexedDB seeding
+   every check copy-pasted moved into `scripts/lib/check-harness.mjs`, and `npm test`'s
+   hand-maintained chain of checks became `scripts/run-checks.mjs` (alphabetical walk;
+   each check is hermetic, so order was never load-bearing).
 6. **Clear:** wipe the persisted log after export; confirm the retained set is empty.
 
    **Result (2026-09-01): pass.** The list emptied and stayed empty after a close/reopen.

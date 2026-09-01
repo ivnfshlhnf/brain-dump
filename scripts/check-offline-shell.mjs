@@ -12,15 +12,9 @@
 // but its workbox bundling still dies with "crypto is not defined" inside terser — so the
 // honest gate is the version, not the feature. The repo pins 22 in .nvmrc.
 import { chromium } from 'playwright';
+import { ensureNode, seedStore } from './lib/check-harness.mjs';
 
-const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number);
-if (nodeMajor < 20 || (nodeMajor === 20 && nodeMinor < 19)) {
-  console.error(
-    `This check builds the PWA, and the service-worker bundling step needs Node ≥ 20.19 ` +
-      `(found ${process.version}; the repo pins 22 in .nvmrc). Run: nvm use`,
-  );
-  process.exit(1);
-}
+ensureNode();
 
 const { build, preview } = await import('vite');
 
@@ -37,23 +31,6 @@ if (!url) {
   url = previewServer.resolvedUrls.local[0];
 }
 
-async function seedStore(page) {
-  await page.evaluate(async (couch) => {
-    const db = await new Promise((res, rej) => {
-      const r = indexedDB.open('brain-dump', 6);
-      r.onsuccess = () => res(r.result);
-      r.onerror = () => rej(r.error);
-    });
-    await new Promise((res, rej) => {
-      const tx = db.transaction(['settings'], 'readwrite');
-      tx.objectStore('settings').put({ couchdbUrl: couch, couchdbDb: 'obsidian' }, 'current');
-      tx.oncomplete = () => res();
-      tx.onerror = () => rej(tx.error);
-    });
-    db.close();
-  }, COUCH);
-}
-
 const browser = await chromium.launch();
 
 let pass = true;
@@ -62,7 +39,10 @@ try {
   const page = await context.newPage();
 
   await page.goto(url, { waitUntil: 'load' });
-  await seedStore(page);
+  await seedStore(page, {
+    stores: ['settings'],
+    settings: { couchdbUrl: COUCH, couchdbDb: 'obsidian' },
+  });
 
   // The service worker must be active and controlling before the wire is cut — on a fresh
   // origin the first install finishes (precache done) only after activation, so "ready"

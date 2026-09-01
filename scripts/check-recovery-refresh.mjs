@@ -13,6 +13,7 @@
 // variables): an empty vault, PUTs that succeed, and one chat completion for the
 // Organizer — which is the recovery path's only LLM call.
 import { chromium } from 'playwright';
+import { seedStore } from './lib/check-harness.mjs';
 
 const urlArg = process.argv.slice(2).find((a) => !a.startsWith('--'));
 
@@ -43,30 +44,17 @@ const couchJson = (body) => ({ status: 200, headers: { 'content-type': 'applicat
 // store, so a re-read sees what was just written — a Vault that behaves like the real one.
 const vaultDocs = new Map();
 
-async function seedStore(page) {
-  await page.evaluate(async ({ couch, llm }) => {
-    const db = await new Promise((res, rej) => {
-      const r = indexedDB.open('brain-dump', 6);
-      r.onsuccess = () => res(r.result);
-      r.onerror = () => rej(r.error);
-    });
-    await new Promise((res, rej) => {
-      const tx = db.transaction(['settings'], 'readwrite');
-      tx.objectStore('settings').put(
-        {
-          couchdbUrl: couch,
-          couchdbDb: 'obsidian',
-          llmProvider: llm, // same origin, path-prefixed: no CORS in play
-          llmApiKey: 'test-key',
-        },
-        'current',
-      );
-      tx.oncomplete = () => res();
-      tx.onerror = () => rej(tx.error);
-    });
-    db.close();
-  }, { couch: COUCH, llm: `${url}llm/v1` });
-}
+// The organizer's LLM endpoint rides in the settings record (same origin, path-prefixed:
+// no CORS in play) — it is the recovery path's only LLM call.
+const seed = {
+  stores: ['settings'],
+  settings: {
+    couchdbUrl: COUCH,
+    couchdbDb: 'obsidian',
+    llmProvider: `${url}llm/v1`,
+    llmApiKey: 'test-key',
+  },
+};
 
 const browser = await chromium.launch();
 
@@ -111,7 +99,7 @@ try {
   );
 
   await page.goto(url, { waitUntil: 'load' });
-  await seedStore(page);
+  await seedStore(page, seed);
   await page.reload({ waitUntil: 'load' });
   await page.waitForSelector('.ctl-catch', { timeout: 5000 });
 

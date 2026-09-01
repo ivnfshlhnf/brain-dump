@@ -1150,14 +1150,12 @@
     status = 'Diagnostics exported';
   }
 
-  // The manual update (deployed on the Host, wanted on the phone): the same lazy
-  // mechanism, user-initiated, so a fresh deploy does not have to wait for iOS's
-  // navigation cadence to be seen. The lazy default is untouched — nothing prompts or
-  // reloads by itself, and this runs in Settings where a capture is not in flight.
+  // The manual update is check-only by decision (2026-09-01); the rationale and the
+  // pending/current/unavailable decision live in src/lib/sw-update.ts — this is only
+  // the wording the sheet shows for each outcome.
   async function runUpdateCheck() {
     swUpdateStatus = 'Checking for updates…';
-    const outcome = await checkForUpdate({ reload: () => window.location.reload() });
-    if (outcome === 'applied') return; // reloading; whatever this sets is momentary
+    const outcome = await checkForUpdate();
     swUpdateStatus =
       outcome === 'current'
         ? 'This is the latest build.'

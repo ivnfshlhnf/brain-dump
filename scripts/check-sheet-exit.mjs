@@ -12,6 +12,7 @@
 //   node scripts/check-sheet-exit.mjs [url]   — bare, it starts its own dev server;
 //                                               pass a URL to reuse one already running
 import { chromium } from 'playwright';
+import { seedStore } from './lib/check-harness.mjs';
 
 const urlArg = process.argv.slice(2).find((a) => !a.startsWith('--'));
 
@@ -34,31 +35,14 @@ const card = {
   createdAt: Date.UTC(2026, 7, 21, 20, 30, 45),
 };
 
-async function seedStore(page) {
-  await page.evaluate(async (card) => {
-    const db = await new Promise((res, rej) => {
-      const r = indexedDB.open('brain-dump', 6);
-      r.onsuccess = () => res(r.result);
-      r.onerror = () => rej(r.error);
-    });
-    await new Promise((res, rej) => {
-      const tx = db.transaction(['note-cards', 'settings'], 'readwrite');
-      tx.objectStore('note-cards').put([card], 'all');
-      tx.objectStore('settings').put(
-        { couchdbUrl: 'http://127.0.0.1:1', couchdbDb: 'brain-dump' },
-        'current',
-      );
-      tx.oncomplete = () => res();
-      tx.onerror = () => rej(tx.error);
-    });
-    db.close();
-  }, card);
-}
-
 // Open the app's own Note sheet (card → openNote → showModal), return the dialog handle.
 async function openNoteSheet(page) {
   await page.goto(url, { waitUntil: 'load' });
-  await seedStore(page);
+  await seedStore(page, {
+    stores: ['note-cards', 'settings'],
+    cards: [card],
+    settings: { couchdbUrl: 'http://127.0.0.1:1', couchdbDb: 'brain-dump' },
+  });
   await page.reload({ waitUntil: 'load' });
   await page.waitForSelector('.card--door', { timeout: 5000 });
   await page.click('.card--door');
