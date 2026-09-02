@@ -139,9 +139,34 @@ resolved `ms` for Organize/Match/Related and `completion_tokens_details.reasonin
 per call — to be recorded here at the next dogfooding session. The replay ranking is
 unchanged (57/63 cache hits, same top-5).
 
-**2026-09-02 — desktop "after" numbers recorded** (the phone capture is still outstanding,
-but the gate question for ticket 07 did not need the phone — generation time dominates, not
-the phone network). Seven live Organize calls from the desktop with `reasoning: { enabled:
+**2026-09-02 — phone "after" numbers recorded** (durable log, first capture on the streamed
+build; closes this ticket's outstanding item). Capture `4e64e661` at 10:47:56, 25 chars,
+`deepseek/deepseek-v4-flash-0731`, every call `reasoning_tokens: 0`:
+
+- **Organize (streamed): 6220ms**, 74 completion tokens — preview on screen 6.9s after
+  `capture started`.
+- **Match: 12317ms** for 13 completion tokens — provider-side latency, not generation; the
+  new-vs-append decision arrived 20.2s after capture start (it also waited ~4.4s of vault
+  read before the request went out).
+- **Related judge (preview pass): 4777ms** for 10 tokens, but it started 15.6s after the
+  pass began — the pass spent ~13.4s reading the vault (`readVaultFiles` fetches every chunk
+  with a separate `db.get`, one CouchDB round trip each) before it could embed. The 5s
+  deadline expired while the pass was still reading; the design degraded exactly as built
+  (note filed without links, links applied later).
+
+Same day, same model, the immediately prior capture on the pre-streaming build (no
+`reasoning` field sent): Organize **28500ms** with **1394 reasoning tokens of 1476
+completion tokens** — 94% of the output was thinking — and the preview at 38.1s. Phone
+before/after for this ticket: **38.1s → 6.9s to preview, 5.5×**.
+
+The full read of this log lives in the dogfooding analysis; the one new work item it
+nominates is batching the chunk reads in `readVaultFiles` (one `allDocs` over the chunk keys
+instead of one `db.get` per chunk) — it is the largest non-provider cost on the phone path
+and it is paid twice per capture.
+
+**2026-09-02 — desktop "after" numbers recorded** (recorded before the phone capture landed;
+the gate question for ticket 07 did not need the phone — generation time dominates, not the
+phone network). Seven live Organize calls from the desktop with `reasoning: { enabled:
 false }` against `deepseek/deepseek-v4-flash-0731`, ~230–260 completion tokens each, every
 call reporting `reasoning_tokens: 0`: **2.9s, 3.1s, 9.6s, 11.2s, 11.3s, 11.7s, 16.0s**.
 Bimodal — fast calls exist, but the dominant mode sits at or past the 10-second attention

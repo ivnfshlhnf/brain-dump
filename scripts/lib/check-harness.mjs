@@ -69,3 +69,42 @@ export async function fulfillChat(route, json) {
     body: sse,
   });
 }
+
+// Fulfil a Playwright route for the CouchDB obsidian store the way PouchDB's HTTP adapter
+// uses it: PUT writes, `GET _all_docs` scans the store, and — since the vault chunk read was
+// batched into one keys query (capture-latency ticket 08) — `POST _all_docs` answers in
+// key order with an `error` row for a key that is not in the store. Everything else is a
+// GET by id, 404 when absent. `vaultDocs` is the caller's Map, so a check can seed it and
+// watch what the app wrote.
+export async function handleCouch(route, vaultDocs) {
+  const method = route.request().method();
+  const id = decodeURIComponent(route.request().url().split('/couch/obsidian/')[1].split('?')[0]);
+  if (method === 'PUT') {
+    vaultDocs.set(id, route.request().postDataJSON());
+    return route.fulfill({ status: 201, body: JSON.stringify({ ok: true, id, rev: '1-check' }) });
+  }
+  if (id === '_all_docs') {
+    const rowFor = (key, doc) =>
+      doc
+        ? { id: key, doc: { _id: key, ...doc }, value: { rev: '1-check' } }
+        : { id: key, error: 'not_found' };
+    const rows =
+      method === 'POST'
+        ? (route.request().postDataJSON()?.keys ?? []).map((key) => rowFor(key, vaultDocs.get(key)))
+        : [...vaultDocs.entries()].map(([key, doc]) => rowFor(key, doc));
+    return route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ offset: 0, rows, total_rows: rows.length }),
+    });
+  }
+  const doc = vaultDocs.get(id);
+  if (doc) {
+    return route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ _id: id, ...doc }),
+    });
+  }
+  return route.fulfill({ status: 404, body: JSON.stringify({ error: 'not_found' }) });
+}

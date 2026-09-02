@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { createHash } from 'node:crypto';
 import PouchDB from 'pouchdb-core';
 import memory from 'pouchdb-adapter-memory';
-import { writeFile, modifyFile, restoreFile, docIdForPath } from '../src/lib/livesync';
+import { writeFile, modifyFile, restoreFile, readVaultFiles, docIdForPath } from '../src/lib/livesync';
 import { DEFAULT_SETTINGS, type DocStore, type Settings } from '../src/lib/types';
 
 PouchDB.plugin(memory);
@@ -48,6 +48,64 @@ describe('declared size', () => {
     await writeFile(db, 'Brain Dump/ascii.md', ascii, { ctime: now, mtime: now, hash, settings });
 
     expect((await meta('Brain Dump/ascii.md')).size).toBe(ascii.length);
+  });
+});
+
+/** A DocStore decorator that tallies round trips, so the read's wire cost is asserted at the
+ *  seam the same way its content is (capture-latency ticket 08). */
+function counting(db: DocStore): DocStore & { calls: { get: number; allDocs: number } } {
+  const calls = { get: 0, allDocs: 0 };
+  return {
+    calls,
+    put: (doc) => db.put(doc),
+    get: (id) => {
+      calls.get += 1;
+      return db.get(id);
+    },
+    allDocs: (opts) => {
+      calls.allDocs += 1;
+      return db.allDocs(opts);
+    },
+  };
+}
+
+describe('reading the vault', () => {
+  const write = (path: string, text: string) =>
+    writeFile(db, path, text, { ctime: now, mtime: now, hash, settings });
+
+  it('fetches every chunk in one round trip, not one request per document', async () => {
+    // A LiveSplit-style multi-chunk file rides along: LiveSync itself splits larger
+    // files, and the read must reassemble those in order whatever the transport.
+    await write('Brain Dump/note.md', 'the note');
+    await write('Brain Dump/other.md', 'the other note');
+    await write('Personal/aside.md', 'a personal note');
+    const multi = docIdForPath('Brain Dump/split.md', settings);
+    await db.put({
+      _id: multi, path: 'Brain Dump/split.md', type: 'plain', children: ['h:aaa', 'h:bbb'],
+      ctime: now, mtime: now, size: 8, eden: {},
+    });
+    await db.put({ _id: 'h:aaa', type: 'leaf', data: 'split ' });
+    await db.put({ _id: 'h:bbb', type: 'leaf', data: 'content' });
+
+    const watched = counting(db);
+    const files = await readVaultFiles(watched, (p) => p.startsWith('Brain Dump/'));
+
+    expect(watched.calls.get).toBe(0); // the tax this ticket removes: no per-chunk round trip
+    expect(watched.calls.allDocs).toBe(2); // metadata scan + one batched chunk fetch
+    expect(files.map((f) => [f.path, f.content])).toEqual([
+      ['Brain Dump/note.md', 'the note'],
+      ['Brain Dump/other.md', 'the other note'],
+      ['Brain Dump/split.md', 'split content'], // children concatenated in order
+    ]);
+  });
+
+  it('still fails the whole read when a chunk is missing', async () => {
+    await write('Brain Dump/note.md', 'the note');
+    const doc = await meta('Brain Dump/note.md');
+    await db.put({ ...doc, children: [...doc.children, 'h:gone'] });
+
+    const watched = counting(db);
+    await expect(readVaultFiles(watched, () => true)).rejects.toThrow();
   });
 });
 

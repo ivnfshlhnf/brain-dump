@@ -13,7 +13,7 @@
 // variables): an empty vault, PUTs that succeed, and one chat completion for the
 // Organizer — which is the recovery path's only LLM call.
 import { chromium } from 'playwright';
-import { seedStore, fulfillChat } from './lib/check-harness.mjs';
+import { seedStore, fulfillChat, handleCouch } from './lib/check-harness.mjs';
 
 const urlArg = process.argv.slice(2).find((a) => !a.startsWith('--'));
 
@@ -38,7 +38,6 @@ const ORGANIZE = {
 };
 
 const COUCH = `${url}couch`; // `createRemoteDb` joins `couchdbUrl` + `/` + `couchdbDb`
-const couchJson = (body) => ({ status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
 // The mock Vault's memory: writes accumulate here, and every `allDocs` returns the whole
 // store, so a re-read sees what was just written — a Vault that behaves like the real one.
@@ -75,21 +74,7 @@ try {
 
   // A Vault on a path prefix: PUTs land in `vaultDocs` and reads return the whole store,
   // so a grid re-read behaves like the real thing — recovery's write is visible to it.
-  await page.route('**/couch/obsidian/**', (route) => {
-    const method = route.request().method();
-    const id = decodeURIComponent(route.request().url().split('/couch/obsidian/')[1].split('?')[0]);
-    if (method === 'PUT') {
-      vaultDocs.set(id, route.request().postDataJSON());
-      return route.fulfill({ status: 201, body: JSON.stringify({ ok: true, id, rev: '1-check' }) });
-    }
-    if (id === '_all_docs') {
-      const rows = [...vaultDocs.entries()].map(([id, doc]) => ({ id, doc, value: { rev: '1-check' } }));
-      return route.fulfill(couchJson({ offset: 0, rows, total_rows: rows.length }));
-    }
-    const doc = vaultDocs.get(id);
-    if (doc) return route.fulfill(couchJson({ _id: id, ...doc }));
-    return route.fulfill({ status: 404, body: JSON.stringify({ error: 'not_found' }) });
-  });
+  await page.route('**/couch/obsidian/**', (route) => handleCouch(route, vaultDocs));
   await page.route('**/llm/v1/chat/completions', (route) => fulfillChat(route, ORGANIZE));
 
   await page.goto(url, { waitUntil: 'load' });

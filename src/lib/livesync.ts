@@ -145,16 +145,41 @@ export async function readVaultFiles(
     deleted?: boolean;
     size?: number;
   }>({ include_docs: true });
-  const files: VaultFile[] = [];
+  // The chunk fetch is batched (capture-latency ticket 08): one `allDocs` over every chunk
+  // id, whatever the vault size. The per-chunk `db.get` this replaces cost one CouchDB
+  // round trip per document — measured at ~13.4s of vault read on the phone, twice in one
+  // capture, and paid by Related, Match, Ask and reconcile alike. A read that quietly
+  // omitted a file would mis-rank Related and mis-answer Ask, so a chunk that comes back
+  // missing fails the whole read — exactly what `db.get`'s 404 did.
+  interface Meta {
+    path: string;
+    children: string[];
+    deleted?: boolean;
+    size?: number;
+  }
+  const wanted: Meta[] = [];
+  const chunkIds = new Set<string>();
   for (const row of all.rows) {
     const doc = row.doc;
     if (!doc || doc.type !== 'plain' || typeof doc.path !== 'string') continue;
     if (!doc.children?.length || !include(doc.path)) continue;
     if (doc.deleted && !opts.includeDeleted) continue;
-    const chunks = await Promise.all(
-      doc.children.map((id) => db.get<{ data: string }>(id)),
-    );
-    const content = chunks.map((c) => c.data).join('');
+    wanted.push(doc as Meta);
+    for (const id of doc.children) chunkIds.add(id);
+  }
+  const chunks = new Map<string, { data: string }>();
+  if (chunkIds.size > 0) {
+    const keys = [...chunkIds];
+    const fetched = await db.allDocs<{ data: string }>({ keys, include_docs: true });
+    // `allDocs` with `keys` answers in key order, so the rows zip onto the keys.
+    fetched.rows.forEach((row, i) => {
+      if (!row.doc) throw new Error(`chunk ${keys[i]} is missing from the database`);
+      chunks.set(keys[i], row.doc);
+    });
+  }
+  const files: VaultFile[] = [];
+  for (const doc of wanted) {
+    const content = doc.children.map((id) => chunks.get(id)?.data ?? '').join('');
     files.push({
       path: doc.path,
       content,
