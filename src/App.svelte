@@ -168,6 +168,9 @@
   // decision is held until the user taps Append — so the autosave no-ops an
   // unconfirmed append rather than silently appending.
   let appendConfirmed = false;
+  // The path the committed Note landed at — the committed sheet's Filed stamp links into the
+  // Vault through it. Set only when the write returns (capture-latency ticket 06).
+  let savedPath = '';
   // Retrieve: a question over the whole vault, and the answer with its citations. The citations
   // are shown as the same cards the grid shows (ticket 07), so the answer's sources are
   // tappable into the Note sheet — `askCards` is that projection, built once per answer.
@@ -367,7 +370,14 @@
    *  and is re-surfaced on the next open. */
   function onSheetClose() {
     sheet = null;
-    if (!session || session.saved) return;
+    if (!session) return;
+    // The session is settled at save; closing the committed sheet is presentation only
+    // (capture-latency ticket 06). It still clears the session, so the next Capture opens
+    // blank.
+    if (session.saved) {
+      endSession();
+      return;
+    }
     if (
       held ||
       session.match.kind === 'undecided' ||
@@ -396,6 +406,7 @@
     held = false;
     appendConfirmed = false;
     contextRevision = 0;
+    savedPath = '';
   }
 
   /** Mark a card as just filed. The ring and the slot-in are the receipt; they clear
@@ -790,6 +801,7 @@
       held = false;
       contextRevision = 0;
       appendConfirmed = false;
+      savedPath = '';
       matchSettled = false;
       relatedSettled = false;
       // The preview is on screen; the new-vs-append decision and the Related links both
@@ -839,6 +851,16 @@
     autosaver.schedule();
   }
 
+  /** The two behind-the-preview settles run concurrently and both reassign `session` — so
+   *  object identity cannot tell them apart, and a naive `session !== settling` guard makes
+   *  whichever settles second discard the first's result (the match could be lost to a fast
+   *  Related pass and the preview would hang at "Matching…" forever). They are the same
+   *  review as long as the Dump — the session's identity — is unchanged; each settle writes
+   *  only the fields it owns, on top of whatever the sibling already applied. */
+  function sameCapture(as: CaptureSession): boolean {
+    return !!session && !session.saved && session.dump.id === as.dump.id;
+  }
+
   /** Resolve the new-vs-append decision behind the preview (capture-latency ticket 03). */
   async function settleCaptureMatch() {
     if (!session || session.saved) return;
@@ -847,9 +869,9 @@
       ...storeDeps(),
       matcher: createMatcher(settings, log),
     });
-    // The sheet closed, or another capture replaced this session, while the match ran.
-    if (session !== settling) return;
-    session = settled;
+    // The sheet closed, another capture replaced this session, or the save landed first.
+    if (!sameCapture(settling)) return;
+    session = { ...session, match: settled.match };
     matchSettled = true;
     armAutosaveWhenSettled();
   }
@@ -857,24 +879,39 @@
   /** Collect the preview's Related pass behind the preview (capture-latency ticket 04).
    *  The pass settles like the match does, and a deadline miss is not the end: the sheet
    *  keeps listening, so links that land before the save still go on the Note — one that
-   *  lands after the save is discarded by the same session-identity guard. */
+   *  lands after the save is discarded by the same guard. */
   async function settleCaptureRelated() {
     if (!session || session.saved) return;
     const settling = session;
     const settled = await settleRelated(session);
-    if (session !== settling) return;
-    session = settled;
+    if (!sameCapture(settling)) return;
+    session = { ...session, ...relatedFields(settled) };
     relatedSettled = true;
     armAutosaveWhenSettled();
-    if (settled.related === 'missed') void settleCaptureRelatedFollowUp(settling);
+    if (settled.related === 'missed') void settleCaptureRelatedFollowUp(settling.dump.id);
   }
 
   /** The no-wait follow-up for a pass that missed its deadline or failed: wait as long as
    *  it takes, and apply the links if they arrive before the save. */
-  async function settleCaptureRelatedFollowUp(settling: CaptureSession) {
+  async function settleCaptureRelatedFollowUp(dumpId: string) {
+    const settling = session;
+    if (!settling || settling.dump.id !== dumpId || settling.saved) return;
     const settled = await settleRelated(settling, { timeoutMs: Number.POSITIVE_INFINITY });
-    if (session !== settling) return;
-    session = settled;
+    if (!session || !sameCapture(settling)) return;
+    session = { ...session, ...relatedFields(settled) };
+  }
+
+  /** The fields a Related settle owns — the links and the pass's state on the session. */
+  function relatedFields(settled: CaptureSession): Pick<
+    CaptureSession,
+    'preview' | 'related' | 'relatedRun' | 'relatedStartedAt'
+  > {
+    return {
+      preview: settled.preview,
+      related: settled.related,
+      relatedRun: settled.relatedRun,
+      relatedStartedAt: settled.relatedStartedAt,
+    };
   }
 
   async function saveAndFinalize() {
@@ -919,11 +956,14 @@
         status = appended
           ? `Appended to: ${appendedTo ?? result.note.title}`
           : `Saved Note: ${result.note.title}`;
-        // Closed through the dialog, so the browser tears the sheet out of the top layer and
-        // hands focus back to the grid itself. `onSheetClose` returns without touching the
-        // session — it is saved — so the session is settled here.
-        closeCapture();
-        endSession();
+        // The sheet becomes the filed Note (capture-latency ticket 06): it stays open, the
+        // countdown edge refills and cross-fades to dry ink, and the user closes it. The
+        // write has returned, so the completion signal is honest — a sheet that claimed
+        // "filed" before this point could be lying about the one thing the app promises.
+        // The preview is swapped for the Note that actually landed, so what stays on screen
+        // is the Note in the Vault, links included.
+        savedPath = result.written.path;
+        session = { ...result.session, preview: result.note };
       } else {
         // The Dump persists; the Note will be generated from it later. Whether the save came
         // from the timer firing or from a flush, no timer is armed afterwards — so the
@@ -1516,13 +1556,19 @@
             <p class="your-words__label">your original words</p>
             <p class="your-words__text">{session.dump.content}</p>
           </div>
-          <article class="note">
+          <article class="note" class:committed={session.saved}>
             {#key contextRevision}
               <div class="burn" class:burn--held={held || session.match.kind === 'undecided' || (session.match.kind === 'append' && !appendConfirmed)}></div>
             {/key}
 
             <p class="eyebrow">
-              {#if session.match.kind === 'undecided'}
+              {#if session.saved}
+                <!-- The sheet is the filed Note now (capture-latency ticket 06): the stamp and
+                     the path, as on the Note sheet — the write has returned, so this is honest. -->
+                <span class="filed-mark">Filed</span>
+                <span class="eyebrow__sep" aria-hidden="true">&middot;</span>
+                <a class="vault-link" href={obsidianUrl(settings.vaultName, savedPath)}>{savedPath}</a>
+              {:else if session.match.kind === 'undecided'}
                 <!-- The append decision is still being made; the clock is not running. -->
                 Matching against your Notes&hellip;
               {:else if session.match.kind === 'new'}
@@ -1575,34 +1621,42 @@
             {/if}
           </article>
 
-          <label class="context-field">
-            add context
-            <textarea
-              bind:value={context}
-              on:input={onContextInput}
-              on:keydown={(e) => commitOnModEnter(
-                e,
-                () => autosaver.flush(),
-                // The context field only renders with a session; the !session guard is for the
-                // type checker, not the runtime — it makes an absent session a no-op rather
-                // than a null deref. A flush is offered only where one can actually run: the
-                // match settled to `new` (the "Save now" visibility rule below).
-                !session || session.match.kind !== 'new',
-              )}></textarea>
-          </label>
-          <p class="hint">
-            {#if session.match.kind === 'undecided'}
-              Checking your existing Notes for one this could append to — the countdown starts
-              when that settles.
-            {:else if session.match.kind === 'append' && !appendConfirmed}
-              Append waits for your confirmation — it won’t save on its own. Confirming merges
-              this capture into the matched note and re-organizes it; your verbatim original is kept.
-            {:else if held}
-              Held — the countdown is stopped and won’t restart. It saves when you say so.
-            {:else}
-              Saves 5 seconds after you stop typing. Your verbatim original is kept.
-            {/if}
-          </p>
+          {#if !session.saved}
+            <label class="context-field">
+              add context
+              <textarea
+                bind:value={context}
+                on:input={onContextInput}
+                on:keydown={(e) => commitOnModEnter(
+                  e,
+                  () => autosaver.flush(),
+                  // The context field only renders with a session; the !session guard is for the
+                  // type checker, not the runtime — it makes an absent session a no-op rather
+                  // than a null deref. A flush is offered only where one can actually run: the
+                  // match settled to `new` (the "Save now" visibility rule below).
+                  !session || session.match.kind !== 'new',
+                )}></textarea>
+            </label>
+          {:else}
+            <!-- The field is gone, not disabled: the Dump is frozen, so the thing it did is
+                 gone. A disabled textarea invites a click that means nothing (ticket 06). -->
+            <p class="hint">The Dump is frozen — this Note is filed. A further capture on the same subject will Append here.</p>
+          {/if}
+          {#if !session.saved}
+            <p class="hint">
+              {#if session.match.kind === 'undecided'}
+                Checking your existing Notes for one this could append to — the countdown starts
+                when that settles.
+              {:else if session.match.kind === 'append' && !appendConfirmed}
+                Append waits for your confirmation — it won’t save on its own. Confirming merges
+                this capture into the matched note and re-organizes it; your verbatim original is kept.
+              {:else if held}
+                Held — the countdown is stopped and won’t restart. It saves when you say so.
+              {:else}
+                Saves 5 seconds after you stop typing. Your verbatim original is kept.
+              {/if}
+            </p>
+          {/if}
         {/if}
       </div>
 
@@ -1613,6 +1667,13 @@
             <button class="primary" on:click={captureDump} disabled={busy || !text.trim()}>
               {busy ? 'Capturing…' : 'Capture'}
               <span class="primary__sub">save the raw thought</span>
+            </button>
+          {:else if session.saved}
+            <!-- The Note is filed; the user closes the sheet when they are done reading it
+                 (capture-latency ticket 06). -->
+            <button class="primary" on:click={closeCapture}>
+              Done
+              <span class="primary__sub">back to the grid</span>
             </button>
           {:else if session.match.kind === 'append' && !appendConfirmed}
             <!-- The app files and the user signs once: the suggested Append is the primary

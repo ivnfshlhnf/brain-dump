@@ -1,4 +1,28 @@
-**Status:** ready
+**Status:** done
+
+## Comments
+
+2026-09-02 — Built as specified: on a successful save the capture sheet gains `committed`,
+the eyebrow becomes the Filed stamp linking into the Vault at the written path, the Context
+field is replaced by the frozen line, the countdown hint yields to it, and the actions row
+offers Done. `onSheetClose` settles a saved session (clearing it, so the next Capture opens
+blank) instead of ignoring it. The preview is swapped for `result.note` when the write
+returns, so what stays on screen is the Note that actually landed — the ticket-04 guarantee
+extends to the committed view. The failure path is untouched (`held = true`, status carries
+the error). Phone verification of the animation by eye is still outstanding, as the ticket
+assigns to hand testing.
+
+One real bug found while writing the browser check (`scripts/check-committed-sheet.mjs`,
+now the 9th check): the two behind-the-preview settles — Match (ticket 03) and Related
+(ticket 04) — raced each other, and both guarded with `session !== settling`. Whichever
+settled second reassigned `session` and made the first's result look stale: a fast Related
+pass (an empty vault resolves instantly) silently discarded the Match, and the sheet hung at
+"Matching against your Notes…" with the autosave never armed. In production this is a
+every-capture race, not a corner case. The guard now compares the Dump id (the session's
+identity) and each settle merges only the fields it owns, so sibling settles compose instead
+of clobbering.
+
+Verified: 287 tests pass, svelte-check clean, all 9 browser checks pass, tokens clean.
 
 # 06 — The sheet becomes the saved Note
 
