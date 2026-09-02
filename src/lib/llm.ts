@@ -272,6 +272,14 @@ async function chat(settings: Settings, prompt: string, log: Log = noopLog): Pro
       model: settings.llmModel,
       stream: false,
       response_format: { type: 'json_object' },
+      // Explicitly off, never left to the provider default: `deepseek-v4-flash` defaults to
+      // `default_effort: "high"` and `glm-5.3-flash` is mandatory max, so Organize, Match and
+      // Related were all thinking on every capture. These are extraction and classification
+      // shapes — the opposite of what a thinking budget helps with (capture-latency ticket 02).
+      // `enabled: false` and not `exclude: true`, which hides the reasoning while still paying
+      // for the tokens. A model that refuses to disable it is a Settings problem: no per-model
+      // branching.
+      reasoning: { enabled: false },
       messages: [{ role: 'user', content: prompt }],
     },
     settings,

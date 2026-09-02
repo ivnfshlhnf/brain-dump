@@ -301,7 +301,13 @@ export const DEFAULT_SETTINGS: Settings = {
   // the pair verified live by the Seam C smoke test; the API key is the only cloud field
   // that cannot have a default.
   llmProvider: 'https://openrouter.ai/api/v1',
-  llmModel: 'deepseek/deepseek-v4-flash',
+  // A dated snapshot, not `~deepseek/deepseek-v4-flash-latest`: the alias resolves to 0731
+  // today and buys nothing now, but its failure mode is invisible — the Organize prompt is
+  // tuned by hand for faithfulness, and a model changing underneath it produces no error and
+  // no log line, only Notes that gradually get worse. Taking a future snapshot is a Settings
+  // edit. 0731 scores 51.8 on OpenRouter's intelligence index against 42.1 for the 0423
+  // snapshot this default was pinned to before, at the same price (capture-latency ticket 02).
+  llmModel: 'deepseek/deepseek-v4-flash-0731',
   llmApiKey: '',
   embedderModel: 'openai/text-embedding-3-small',
   embeddingsDb: 'brain-dump-embeddings',

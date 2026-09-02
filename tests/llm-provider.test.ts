@@ -117,6 +117,23 @@ describe('OpenAI-compatible chat seam (createOrganizer / createAnswerer)', () =>
     expect(body.messages[0].content).toContain('a dump');
   });
 
+  it('sends reasoning disabled, so the provider default cannot think for us (ticket 02)', async () => {
+    // Every model's provider default applied otherwise — `deepseek-v4-flash` at `default_effort:
+    // "high"`, `glm-5.3-flash` at mandatory max. The reasoning field is a provider contract, not
+    // prompt text, so pinning it here is the deliberate exception to "never assert on request
+    // content beyond shape". `enabled: false`, not `exclude: true` — exclude hides the reasoning
+    // while still paying for the tokens.
+    responseBody = {
+      choices: [{ message: { content: JSON.stringify({
+        title: 'T', tags: [], category: 'C', summary: 'S', keyPoints: [], body: 'B',
+      }) } }],
+    };
+    await createOrganizer(settings()).organize('a dump', 'text');
+
+    const body = JSON.parse(lastOpts.body as string);
+    expect(body.reasoning).toEqual({ enabled: false });
+  });
+
   it('parses the reply from choices[0].message.content', async () => {
     const organizeJson = JSON.stringify({
       title: 'Water the basil',

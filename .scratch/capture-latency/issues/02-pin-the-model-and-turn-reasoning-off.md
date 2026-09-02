@@ -1,4 +1,4 @@
-**Status:** ready
+**Status:** done
 
 # 02 — Pin the model and turn reasoning off
 
@@ -107,3 +107,34 @@ not suggestions" note that already guards this block.
   with its own failure modes.
 - Changing `embedderModel`.
 - Prompt work on Organize. If output degrades, record the finding.
+
+## Comments
+
+**2026-09-02 — shipped** (llm.ts `chat()`, types.ts default). The reasoning field rides on
+every chat call (Organize, Match, Related, and the Answerer share `chat()`), and
+`DEFAULT_SETTINGS.llmModel` is now `deepseek/deepseek-v4-flash-0731` with the dated-snapshot
+comment beside the "Real defaults, not suggestions" note.
+
+**Judge quality check (the ticket's one non-test acceptance), run live with reasoning off:**
+three runs of the finding-08 bake-off cases through the replay shortlist against `0731`
+with `reasoning: { enabled: false }`, verifying `reasoning_tokens` is genuinely 0 on every
+call —
+
+- **macbook-keyboard-battery (negative control): `[]` in all three runs.** The loosened
+  prompt still does not open junk links.
+- **espresso: `[0,1]`, `[1]`, `[0,1]`** — the two true siblings most runs, one dropped once.
+- **app-feedback: `[1,3,4]`, `[0,1,2,3,4]`, `[1,2,0,3,4]`** — *unstable.* The bake-off with
+  reasoning at default effort returned all five siblings; reasoning-off returns a varying
+  subset (one run only `[1]`). The judge is the one call of the three whose task shape is
+  judgement rather than extraction, and it is the one that got noisier.
+
+**Recorded as a prompt finding, per the ticket's own rule — not a reason to restore the
+thinking budget.** Latency is the point of this thread, and the judge runs behind the
+preview where the wait is free (ticket 04). If Related precision visibly degrades in
+dogfooding, the floor is `effort: "low"` on the Relater only — a per-call split, which this
+ticket deliberately declined, would become warranted then.
+
+**Still outstanding (same as ticket 01):** the *after* numbers from a phone capture —
+resolved `ms` for Organize/Match/Related and `completion_tokens_details.reasoning_tokens`
+per call — to be recorded here at the next dogfooding session. The replay ranking is
+unchanged (57/63 cache hits, same top-5).
