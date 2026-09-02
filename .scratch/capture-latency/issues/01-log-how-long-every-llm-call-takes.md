@@ -95,10 +95,50 @@ this level at all, which is why the `Load failed` in the 2026-09-01 log appears 
 capture-level failure with no indication of whether the provider was slow or the network was
 gone.
 
-**Still outstanding:** the before/after numbers themselves. This ticket makes them
-observable; reading them needs a real capture on the phone against a real provider. Record
-the `ms` and `usage.reasoning_tokens` for Organize, Match and Related here before ticket 02
-changes anything.
+### The baseline (2026-09-02, phone, `logs/brain-dump-log-2026-09-02.jsonl.ndjson`)
+
+One real capture against OpenRouter on `deepseek/deepseek-v4-flash-0731`, with **reasoning
+still at its provider default** — ticket 02's request change is not in yet, so this is what
+the app has always been doing, now visible.
+
+| call | ms | prompt | completion | reasoning | actual output | reasoning share |
+|---|---|---|---|---|---|---|
+| Organize (health test) | 11,823 | 280 | 608 | 540 | 68 | **89%** |
+| **Organize (capture)** | **28,500** | 357 | 1,476 | **1,394** | **82** | **94%** |
+| Match | 4,774 | 1,641 | 200 | 186 | 14 | **93%** |
+| Related judge | 1,015 | 848 | 98 | 102 | — | **~100%** |
+| embeddings | 606–710 | — | — | — | — | — |
+
+**The capture's Organize spent 28.5 seconds and 1,394 reasoning tokens to produce 82 tokens
+of Note.** Match spent 186 to produce 14. On the judge, `reasoning_tokens` (102) exceeds
+`completion_tokens` (98) — the provider accounts them separately, and either way essentially
+the entire reply was thinking.
+
+The hypothesis behind ticket 02 was that reasoning is a multiplier worth removing. It is
+larger than the ~6.7x the published benchmarks predicted: on Organize the useful output is
+**one eighteenth** of what was generated and paid for.
+
+**Two things the measurement changed, which inference had not:**
+
+1. **The judge was never the slow part — the model was.** On `glm-5.3-flash` earlier in the
+   same log, judge calls ran 10.6s, 11.5s, 18.8s and 25.5s. On `0731` the judge is
+   **1,015 ms**. So the "15 seconds to file a Note" in finding 09 was almost entirely
+   glm-5.3-flash's mandatory max-effort reasoning on the judge, not the vault read and not
+   the embeddings. The whole save leg's calls now total about 2.5s.
+2. **Moving to `0731` on its own made the preview *slower*, not faster** — 28.5 + 4.8 =
+   **33.3s** to a preview, against the 23s finding 09 measured on the 0423 snapshot. A
+   better model reasons more. Ticket 02's two halves are not independent: the model change
+   only pays once reasoning is off.
+
+Cost, for the record: $0.00029 for that Organize, about $0.0008 for the whole capture.
+Confirms the spec's decision to keep cost out of the argument.
+
+**Also seen:** `deepseek/deepseek-v4-flash-latest` returns **400** — OpenRouter's floating
+alias requires the `~` prefix (`~deepseek/deepseek-v4-flash-latest` works). Another reason
+ticket 02 pins the dated snapshot.
+
+**Still outstanding:** the *after* numbers. Re-run this exact measurement once ticket 02
+ships, and confirm `completion_tokens_details.reasoning_tokens` is `0`.
 
 ## Out of Scope
 
