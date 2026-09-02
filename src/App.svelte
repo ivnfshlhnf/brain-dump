@@ -1632,9 +1632,12 @@
                   () => autosaver.flush(),
                   // The context field only renders with a session; the !session guard is for the
                   // type checker, not the runtime — it makes an absent session a no-op rather
-                  // than a null deref. A flush is offered only where one can actually run: the
-                  // match settled to `new` (the "Save now" visibility rule below).
-                  !session || session.match.kind !== 'new',
+                  // than a null deref. A flush is offered only where one can actually run — the
+                  // "Save now" visibility rule below: undecided saves refuse, and an unconfirmed
+                  // append no-ops. A confirmed append can still flush; the confirm already did.
+                  !session ||
+                    session.match.kind === 'undecided' ||
+                    (session.match.kind === 'append' && !appendConfirmed),
                 )}></textarea>
             </label>
           {:else}
