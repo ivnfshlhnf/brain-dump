@@ -14,6 +14,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Mock } from 'vitest';
 import { createOrganizer, createEmbedder, createAnswerer } from '../src/lib/llm';
 import { CATEGORIES } from '../src/lib/category';
+import type { Log, LogInput } from '../src/lib/logger';
 import { DEFAULT_SETTINGS, type Settings } from '../src/lib/types';
 
 const base = 'https://example.test/v1';
@@ -38,6 +39,23 @@ function jsonResponse(body: unknown, status = 200): Response {
     statusText: 'OK',
     json: async () => body,
   } as Response;
+}
+
+/** A recording Log, so the timing lines can be asserted on. `Log` is the seam the cloud
+ *  functions take, so this is the same thing the app passes — no reaching into llm.ts. */
+function collectLog(): { log: Log; entries: LogInput[] } {
+  const entries: LogInput[] = [];
+  return { log: (e) => void entries.push(e), entries };
+}
+
+/** The one log line a call emits when it comes back — the thing this suite exists to pin. */
+function resolved(entries: LogInput[]): LogInput | undefined {
+  return entries.find((e) => e.message.endsWith('request resolved'));
+}
+
+/** The one log line a call emits when it does not. */
+function failed(entries: LogInput[]): LogInput | undefined {
+  return entries.find((e) => e.message.endsWith('request failed'));
 }
 
 /** Per-test response: the mock returns this body+status while capturing the request. */
@@ -245,5 +263,108 @@ describe('OpenAI-compatible embedder seam (createEmbedder)', () => {
     const vectors = await createEmbedder(settings()).embed([]);
     expect(vectors).toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// The durable log used to record only that a request *started*, so every latency figure in
+// dogfooding finding 09 had to be reconstructed by subtracting timestamps of adjacent,
+// unrelated lines — arithmetic that cannot separate a slow model from a slow vault read, and
+// cannot see reasoning tokens at all. These pin the resolve/failure lines that replace it.
+// The `ms` value itself is never asserted (it is wall-clock); the contract is that it is
+// there, is a number, and carries whatever the provider said about tokens.
+describe('call timing and usage are recorded (capture-latency ticket 01)', () => {
+  const organizeReply = JSON.stringify({
+    title: 'T', tags: [], category: 'C', summary: 'S', keyPoints: [], body: 'B',
+  });
+
+  it('logs a resolved line with elapsed ms and the provider usage verbatim', async () => {
+    const usage = { prompt_tokens: 812, completion_tokens: 260, reasoning_tokens: 1904 };
+    responseBody = { choices: [{ message: { content: organizeReply } }], usage };
+    const { log, entries } = collectLog();
+
+    await createOrganizer(settings(), log).organize('a dump', 'text');
+
+    const line = resolved(entries);
+    expect(line).toBeDefined();
+    expect(line!.op).toBe('http');
+    expect(line!.message).toBe('chat request resolved');
+    expect(typeof line!.detail!.ms).toBe('number');
+    expect(line!.detail!.model).toBe('chat-model');
+    // Verbatim, not mapped onto app-owned fields: reasoning_tokens is the whole point, and
+    // the app must not have to know a field's name in advance to record it.
+    expect(line!.detail!.usage).toEqual(usage);
+  });
+
+  it('still logs a resolved line when the provider reports no usage, without inventing zeros', async () => {
+    responseBody = { choices: [{ message: { content: organizeReply } }] };
+    const { log, entries } = collectLog();
+
+    await createOrganizer(settings(), log).organize('a dump', 'text');
+
+    const line = resolved(entries);
+    expect(line).toBeDefined();
+    expect(typeof line!.detail!.ms).toBe('number');
+    // Absent, not zero — zeros would read as "no tokens" rather than "this provider does
+    // not say".
+    expect('usage' in line!.detail!).toBe(false);
+  });
+
+  it('logs elapsed ms on a non-OK response, so a slow failure is distinguishable', async () => {
+    responseStatus = 500;
+    responseBody = { error: 'boom' };
+    const { log, entries } = collectLog();
+
+    await expect(createOrganizer(settings(), log).organize('a dump', 'text')).rejects.toThrow();
+
+    const line = failed(entries);
+    expect(line).toBeDefined();
+    expect(line!.level).toBe('error');
+    expect(typeof line!.detail!.ms).toBe('number');
+    expect(line!.detail!.status).toBe(500);
+    expect(resolved(entries)).toBeUndefined();
+  });
+
+  it('logs a rejected fetch and rethrows it untouched', async () => {
+    // The offline `Load failed` that reaches the capture path left no trace at this level at
+    // all, so a dead network and a slow provider looked identical in the log.
+    fetchMock.mockImplementation(async () => {
+      throw new Error('Load failed');
+    });
+    const { log, entries } = collectLog();
+
+    await expect(createOrganizer(settings(), log).organize('a dump', 'text')).rejects.toThrow(
+      'Load failed',
+    );
+
+    const line = failed(entries);
+    expect(line).toBeDefined();
+    expect(line!.level).toBe('error');
+    expect(typeof line!.detail!.ms).toBe('number');
+    expect(line!.detail!.error).toBe('Load failed');
+  });
+
+  it('records the embedding call the same way, keeping the batch size alongside', async () => {
+    const usage = { prompt_tokens: 4096, total_tokens: 4096 };
+    responseBody = { data: [{ embedding: [0.1], index: 0 }, { embedding: [0.2], index: 1 }], usage };
+    const { log, entries } = collectLog();
+
+    await createEmbedder(settings(), log).embed(['one', 'two']);
+
+    const line = resolved(entries);
+    expect(line).toBeDefined();
+    expect(line!.message).toBe('embedding request resolved');
+    expect(typeof line!.detail!.ms).toBe('number');
+    expect(line!.detail!.inputs).toBe(2);
+    expect(line!.detail!.usage).toEqual(usage);
+  });
+
+  it('still logs the request line before the call, so a hang shows as a start with no end', async () => {
+    responseBody = { choices: [{ message: { content: organizeReply } }] };
+    const { log, entries } = collectLog();
+
+    await createOrganizer(settings(), log).organize('a dump', 'text');
+
+    expect(entries[0].message).toBe('chat request');
+    expect(entries[0].detail!.url).toBe(`${base}/chat/completions`);
   });
 });

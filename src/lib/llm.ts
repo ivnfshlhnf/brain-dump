@@ -63,28 +63,15 @@ export function createEmbedder(settings: Settings, log: Log = noopLog): Embedder
     async embed(texts): Promise<number[][]> {
       if (texts.length === 0) return [];
       const url = `${baseUrl(settings)}/embeddings`;
-      log({
-        op: 'http',
-        message: 'embedding request',
+      const data = await timedPost<EmbeddingsResponse>({
+        url,
+        body: { model: settings.embedderModel, input: texts },
+        settings,
+        log,
+        name: 'embedding',
+        failure: 'Embedding request failed',
         detail: { url, model: settings.embedderModel, inputs: texts.length },
       });
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: authHeaders(settings),
-        body: JSON.stringify({ model: settings.embedderModel, input: texts }),
-      });
-      if (!res.ok) {
-        log({
-          level: 'error',
-          op: 'http',
-          message: 'embedding request failed',
-          detail: { url, model: settings.embedderModel, status: res.status, statusText: res.statusText },
-        });
-        throw new Error(
-          `Embedding request failed: ${res.status} ${res.statusText} (POST ${url})`,
-        );
-      }
-      const data = (await res.json()) as EmbeddingsResponse;
       // The provider returns embeddings keyed by `index` in arbitrary order; reorder to
       // match the input texts — a reorder here would silently mis-rank the vault against
       // the question.
@@ -261,41 +248,118 @@ function baseUrl(settings: Settings): string {
   return settings.llmProvider.replace(/\/+$/, '');
 }
 
+/** What every OpenAI-compatible reply may carry alongside its payload: the provider's token
+ *  accounting. Typed loosely and on purpose — the fields differ by provider and grow over
+ *  time (`prompt_tokens`, `completion_tokens`, and on a reasoning model `reasoning_tokens`),
+ *  and this is logged verbatim rather than mapped onto app-owned names. Mapping it would mean
+ *  the log could only ever show the fields this app already knew to ask about, which is the
+ *  opposite of what it is for. */
+type Usage = { usage?: Record<string, unknown> };
+
 /** The OpenAI-compatible chat-completions response: the reply text is the first choice's
  *  message content. Named so the contract is explicit rather than re-inlined at each call. */
-type ChatResponse = { choices?: { message?: { content?: string } }[] };
+type ChatResponse = Usage & { choices?: { message?: { content?: string } }[] };
 
 /** The OpenAI-compatible embeddings response: one embedding per input, keyed by `index`
  *  in arbitrary order. Named so the reorder contract is explicit. */
-type EmbeddingsResponse = { data?: { embedding?: number[]; index?: number }[] };
+type EmbeddingsResponse = Usage & { data?: { embedding?: number[]; index?: number }[] };
 
 async function chat(settings: Settings, prompt: string, log: Log = noopLog): Promise<string> {
   const url = `${baseUrl(settings)}/chat/completions`;
-  // The resolved URL, not the configured one: an `llmProvider` that is blank or missing
-  // its scheme resolves against the app's own origin, and seeing that in the log is the
-  // difference between "404 Not Found" and "you posted to your own dev server".
-  log({ op: 'http', message: 'chat request', detail: { url, model: settings.llmModel } });
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: authHeaders(settings),
-    body: JSON.stringify({
+  const data = await timedPost<ChatResponse>({
+    url,
+    body: {
       model: settings.llmModel,
       stream: false,
       response_format: { type: 'json_object' },
       messages: [{ role: 'user', content: prompt }],
-    }),
+    },
+    settings,
+    log,
+    name: 'chat',
+    failure: 'LLM request failed',
+    // The resolved URL, not the configured one: an `llmProvider` that is blank or missing
+    // its scheme resolves against the app's own origin, and seeing that in the log is the
+    // difference between "404 Not Found" and "you posted to your own dev server".
+    detail: { url, model: settings.llmModel },
   });
+  return data.choices?.[0]?.message?.content ?? '';
+}
+
+/** POST a JSON body to the provider and return the parsed reply, timing the round trip and
+ *  recording it.
+ *
+ *  Both cloud calls go through here so the timing contract cannot drift between them: one
+ *  definition of when the clock starts, what counts as elapsed, and what a resolved call
+ *  reports. Three lines are emitted per call —
+ *
+ *  - **request**, before the fetch, so a call that never returns is still visible as a start
+ *    with no end. This is the shape a hang takes in the durable log.
+ *  - **resolved**, carrying `ms` and the provider's `usage` verbatim. Without it the log
+ *    could only say a request began, and every latency figure had to be reconstructed by
+ *    subtracting the timestamps of adjacent, unrelated lines.
+ *  - **failed**, carrying `ms` as well. A call that took thirty seconds to fail is a
+ *    different problem from one that failed at once, and the two were indistinguishable.
+ *
+ *  Elapsed time spans the fetch *and* the body parse, because that is the whole of what the
+ *  caller waits for. A rejected fetch — the offline `Load failed` that reaches the capture
+ *  path — is logged here too and rethrown untouched; it previously left no trace at this
+ *  level at all, so a network failure and a slow provider looked the same from the log. */
+async function timedPost<T>(opts: {
+  url: string;
+  body: unknown;
+  settings: Settings;
+  log: Log;
+  /** Names the call in the log messages: `<name> request`, `<name> request resolved`. */
+  name: string;
+  /** Prefix of the thrown Error on a non-OK status. */
+  failure: string;
+  /** Logged on all three lines, so one call's records are greppable as a set. */
+  detail: Record<string, unknown>;
+}): Promise<T> {
+  const { url, body, settings, log, name, failure, detail } = opts;
+  log({ op: 'http', message: `${name} request`, detail });
+
+  const startedAt = Date.now();
+  const elapsed = () => Date.now() - startedAt;
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: authHeaders(settings),
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    log({
+      level: 'error',
+      op: 'http',
+      message: `${name} request failed`,
+      detail: { ...detail, ms: elapsed(), error: (e as Error).message },
+    });
+    throw e;
+  }
+
   if (!res.ok) {
     log({
       level: 'error',
       op: 'http',
-      message: 'chat request failed',
-      detail: { url, model: settings.llmModel, status: res.status, statusText: res.statusText },
+      message: `${name} request failed`,
+      detail: { ...detail, ms: elapsed(), status: res.status, statusText: res.statusText },
     });
-    throw new Error(`LLM request failed: ${res.status} ${res.statusText} (POST ${url})`);
+    throw new Error(`${failure}: ${res.status} ${res.statusText} (POST ${url})`);
   }
-  const data = (await res.json()) as ChatResponse;
-  return data.choices?.[0]?.message?.content ?? '';
+
+  const data = (await res.json()) as T & Usage;
+  log({
+    op: 'http',
+    message: `${name} request resolved`,
+    // `usage` is spread in only when the provider sent one: an absent usage block is absent
+    // from the log rather than reported as zeros, which would read as "no tokens" instead of
+    // "this provider does not say".
+    detail: { ...detail, ms: elapsed(), ...(data?.usage ? { usage: data.usage } : {}) },
+  });
+  return data;
 }
 
 /** Parse the model's JSON reply onto OrganizeOutput, tolerating fences and loose typing. */
