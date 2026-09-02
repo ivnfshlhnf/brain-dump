@@ -11,6 +11,7 @@ import {
   writeDump,
   matchNote,
   beginCapture,
+  settleMatch,
   finalizeCapture,
   parseNote,
   refreshNoteMetadata,
@@ -47,6 +48,18 @@ let seq = 0;
 beforeEach(() => {
   db = new PouchDB('ap' + seq++, { adapter: 'memory' }) as unknown as DocStore;
 });
+
+// Capture-latency ticket 03: beginCapture leaves the match undecided and the app settles
+// it behind the preview. These suites are about the append path, not the decision's
+// timing (pinned in operations.test.ts), so they settle immediately with the matcher
+// under test — same protocol the app follows.
+async function beginAndSettle(text: string, deps: Parameters<typeof beginCapture>[1]) {
+  return settleMatch(await beginCapture(text, deps), {
+    db: deps.db,
+    settings: deps.settings,
+    matcher: deps.matcher,
+  });
+}
 
 // --- helpers -------------------------------------------------------------
 
@@ -147,7 +160,7 @@ describe('finalizeCapture — the append rework (ADR-0009, Seam A)', () => {
       body: 'The whole thought, re-organized.',
     });
 
-    const session = await beginCapture('Second verbatim capture.', {
+    const session = await beginAndSettle('Second verbatim capture.', {
       db,
       settings,
       organizer: reorganizer,
@@ -215,7 +228,7 @@ describe('finalizeCapture — the append rework (ADR-0009, Seam A)', () => {
       },
     };
 
-    const session = await beginCapture('Second verbatim capture.', {
+    const session = await beginAndSettle('Second verbatim capture.', {
       db,
       settings,
       organizer,
@@ -250,7 +263,7 @@ describe('finalizeCapture — the append rework (ADR-0009, Seam A)', () => {
 
   it('founding a new Note is unchanged — the preview is reused when no Context was added', async () => {
     const { calls, organizer: reorganizer } = recordingOrganizer();
-    const session = await beginCapture('a brand new thought', {
+    const session = await beginAndSettle('a brand new thought', {
       db,
       settings,
       organizer: reorganizer,
@@ -281,6 +294,7 @@ describe('matchNote (Seam A — ticket 04)', () => {
     const decision = await matchNote(makeNote(), db, settings, appendToFirstMatcher);
 
     expect(decision.kind).toBe('append');
+    if (decision.kind !== 'append') return; // narrow the union for the type checker
     expect(decision.suggestion?.path).toBe(path);
     expect(decision.suggestion?.title).toBe('Water the plants');
     expect(decision.suggestion?.tags).toEqual(['home', 'plants']);
@@ -290,7 +304,7 @@ describe('matchNote (Seam A — ticket 04)', () => {
     await seedNote(makeNote());
     const decision = await matchNote(makeNote(), db, settings, newOnlyMatcher);
     expect(decision.kind).toBe('new');
-    expect(decision.suggestion).toBeUndefined();
+    expect('suggestion' in decision).toBe(false);
   });
 
   it('decides new when there are no existing Notes (no matcher call)', async () => {
@@ -327,7 +341,7 @@ describe('finalizeCapture — append failure semantics (ADR-0009, Seam A)', () =
       },
     };
 
-    const session = await beginCapture('Second verbatim capture.', {
+    const session = await beginAndSettle('Second verbatim capture.', {
       db,
       settings,
       organizer: failingOrganizer,
@@ -373,7 +387,7 @@ describe('finalizeCapture — append failure semantics (ADR-0009, Seam A)', () =
       },
     };
 
-    const session = await beginCapture('Second verbatim capture.', {
+    const session = await beginAndSettle('Second verbatim capture.', {
       db,
       settings,
       organizer: flakyOrganizer,
@@ -426,7 +440,7 @@ describe('finalizeCapture — append failure semantics (ADR-0009, Seam A)', () =
       allDocs: (opts?: { include_docs?: boolean }) => db.allDocs(opts),
     };
 
-    const session = await beginCapture('Second verbatim capture.', {
+    const session = await beginAndSettle('Second verbatim capture.', {
       db: conflictingDb,
       settings,
       organizer,
@@ -454,7 +468,7 @@ describe('finalizeCapture — append failure semantics (ADR-0009, Seam A)', () =
     // must still file.
     await seedNote(makeNote({ body: 'Dump-less note.' }));
 
-    const session = await beginCapture('a thought with nowhere to merge', {
+    const session = await beginAndSettle('a thought with nowhere to merge', {
       db,
       settings,
       organizer,
@@ -493,10 +507,11 @@ describe('capture composition (Seam A — ticket 04)', () => {
       hash: sha1Hex,
     };
 
-    const session = await beginCapture('I keep forgetting to water the plants', beginDeps);
+    const session = await beginAndSettle('I keep forgetting to water the plants', beginDeps);
 
     // The match-and-confirm: the new Dump is matched to the existing Note.
     expect(session.match.kind).toBe('append');
+    if (session.match.kind !== 'append') return; // narrow the union for the type checker
     expect(session.match.suggestion?.path).toBe(existingPath);
     expect(session.preview.title).toBe('Water the plants'); // the initial Organize preview is shown
     expect(session.saved).toBe(false);
@@ -541,7 +556,7 @@ describe('capture composition (Seam A — ticket 04)', () => {
       newId: () => 'cccccccc-cccc-cccc-dddd-eeeeeeeeeeee',
       hash: sha1Hex,
     };
-    const session = await beginCapture('a brand new thought', beginDeps);
+    const session = await beginAndSettle('a brand new thought', beginDeps);
     expect(session.match.kind).toBe('new');
 
     const result = await finalizeCapture(session, {
@@ -559,7 +574,7 @@ describe('capture composition (Seam A — ticket 04)', () => {
   it('the user declines the append suggestion — overriding to new founds a fresh Note', async () => {
     const existingPath = await seedNote(makeNote({ title: 'Plants care log', body: 'Existing note body.' }));
 
-    const session = await beginCapture('I keep forgetting to water the plants', {
+    const session = await beginAndSettle('I keep forgetting to water the plants', {
       db,
       settings,
       organizer,

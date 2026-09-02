@@ -282,12 +282,14 @@ ${note.related.map((r) => `- ${r}`).join('\n')}
 // composes the capture→preview→Context→autosave flow. The match decision is
 // 'new' here; ticket 04 fills LLM-assisted matching against existing Notes.
 
-/** The new-vs-append decision offered alongside a Note preview. Ticket 03 always
- *  decides 'new'; ticket 04 adds 'append' with the suggested existing Note. */
-export interface MatchDecision {
-  kind: 'new' | 'append';
-  suggestion?: NoteCandidate; // the suggested existing Note when 'append'
-}
+/** The new-vs-append decision offered alongside a Note preview. `undecided` is the state
+ *  between the preview rendering and the Matcher settling — distinct from `new` on purpose:
+ *  reusing `new` as the placeholder is what would make a duplicate-Note save possible, since
+ *  nothing could then tell "decided new" from "not decided yet" (capture-latency ticket 03). */
+export type MatchDecision =
+  | { kind: 'undecided' }
+  | { kind: 'new' }
+  | { kind: 'append'; suggestion?: NoteCandidate }; // the suggested existing Note when 'append'
 
 /** An in-flight capture review session: the captured Dump, the initial Organize
  *  preview (held while Context is added), the match decision, and saved state. */
@@ -298,9 +300,17 @@ export interface CaptureSession {
   saved: boolean; // true once the Note has been written and the Dump frozen
 }
 
-/** Deps to begin a capture review session (capture's deps plus the Organizer and Matcher). */
+/** Deps to begin a capture review session (capture's deps plus the Organizer). The Matcher
+ *  is resolved later, by `settleMatch` — the preview renders before the match decision. */
 export interface BeginCaptureDeps extends CaptureDeps {
   organizer: Organizer;
+  matcher: Matcher;
+}
+
+/** Deps to settle a session's match decision (the Matcher's dependencies). */
+export interface SettleMatchDeps {
+  db: DocStore;
+  settings: Settings;
   matcher: Matcher;
 }
 
@@ -329,17 +339,34 @@ export interface FinalizeDeps {
   pending?: PendingStore;
 }
 
-/** Begin a capture review session: save the verbatim Dump immediately, run the
- *  initial Organize for the preview, and match it (LLM-assisted, by tags/topic)
- *  against the existing Notes to offer new-vs-append. */
+/** Begin a capture review session: save the verbatim Dump immediately and run the initial
+ *  Organize for the preview. The match decision is left `undecided` — the caller settles it
+ *  with `settleMatch` while the preview is already on screen (capture-latency ticket 03:
+ *  Match decides only new-vs-append, which the sheet expresses in its buttons, so nothing
+ *  the user reads waits on it). */
 export async function beginCapture(
   text: string,
   deps: BeginCaptureDeps,
 ): Promise<CaptureSession> {
   const { dump } = await capture(text, deps);
   const preview = await organizeNote(dump, deps.organizer, deps.settings);
-  const match = await matchNote(preview, deps.db, deps.settings, deps.matcher);
-  return { dump, preview, match, saved: false };
+  return { dump, preview, match: { kind: 'undecided' }, saved: false };
+}
+
+/** Settle the session's match decision: match the preview against the existing Notes
+ *  (LLM-assisted, by tags/topic) to offer new-vs-append. A Match that fails settles to
+ *  `new`, matching `matchNote`'s own behaviour for a bad or out-of-range index — a failed
+ *  match must not strand the capture. */
+export async function settleMatch(
+  session: CaptureSession,
+  deps: SettleMatchDeps,
+): Promise<CaptureSession> {
+  try {
+    const match = await matchNote(session.preview, deps.db, deps.settings, deps.matcher);
+    return { ...session, match };
+  } catch {
+    return { ...session, match: { kind: 'new' } };
+  }
 }
 
 /** Add Context to the Dump: rewrites the Dump file preserving the verbatim original
@@ -392,6 +419,14 @@ export async function finalizeCapture(
   deps: FinalizeDeps,
 ): Promise<FinalizeResult> {
   if (session.saved) throw new Error('Already saved.');
+  if (session.match.kind === 'undecided') {
+    // The decision the save exists to honour has not been made. Saving now would found a
+    // duplicate Note — the exact failure the Matcher exists to prevent — so the save refuses
+    // rather than guessing `new` (capture-latency ticket 03). The autosave timer is armed only
+    // once the match has settled, so this is reachable only through an explicit flush racing
+    // an unresolved match, which is precisely when the guess would be wrong.
+    throw new Error('Cannot save: the new-vs-append decision has not been made yet.');
+  }
 
   try {
     const suggestion =

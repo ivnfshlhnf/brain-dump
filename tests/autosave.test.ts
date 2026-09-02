@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import PouchDB from 'pouchdb-core';
 import memory from 'pouchdb-adapter-memory';
-import { beginCapture, addContext, finalizeCapture, type CaptureSession } from '../src/lib/operations';
+import { beginCapture, settleMatch, addContext, finalizeCapture, type CaptureSession } from '../src/lib/operations';
 import { createAutosaver, AUTOSAVE_DELAY_MS } from '../src/lib/autosave';
 import { docIdForPath } from '../src/lib/livesync';
 import { DEFAULT_SETTINGS, type Settings, type DocStore, type Organizer, type OrganizeOutput, type Matcher } from '../src/lib/types';
@@ -64,7 +64,11 @@ async function noteWritten(slug: string): Promise<boolean> {
 
 async function sessionWithContext(): Promise<CaptureSession> {
   const s = await beginCapture('I keep forgetting to water the plants', beginDeps());
-  return addContext(s, 'they are the basil on the windowsill', { db, settings, hash: sha1Hex });
+  // Capture-latency ticket 03: beginCapture leaves the match undecided; the save refuses
+  // an undecided session, so the autosave suites settle it the way the app does before
+  // arming the timer.
+  const settled = await settleMatch(s, { db, settings, matcher: newOnlyMatcher });
+  return addContext(settled, 'they are the basil on the windowsill', { db, settings, hash: sha1Hex });
 }
 
 /** The autosave save callback: finalize the session (returning void, not the
@@ -161,5 +165,35 @@ describe('autosave timing (Seam A — ticket 03)', () => {
   it('exposes exactly schedule, flush and cancel — Hold adds no interface (#12)', () => {
     const a = createAutosaver({ save: async () => {} });
     expect(Object.keys(a).sort()).toEqual(['cancel', 'flush', 'schedule']);
+  });
+
+  // --- Match sequencing (capture-latency ticket 03) ------------------------
+  // The timer is armed only once the match has settled. While the decision is
+  // unresolved the save refuses to guess — a save that guessed `new` would found
+  // a duplicate Note, the exact failure the Matcher exists to prevent.
+
+  it('no save occurs while the match is unresolved, however long that is (capture-latency ticket 03)', async () => {
+    const s = await beginCapture('I keep forgetting to water the plants', beginDeps());
+    // The save swallows the refusal the way saveAndFinalize catches its own errors —
+    // the assertion is on what was written, not on what the timer reported.
+    createAutosaver({
+      save: async () => {
+        try {
+          await finalizeCapture(s, finalizeDeps());
+        } catch {
+          /* the save refuses an undecided match */
+        }
+      },
+    }).schedule();
+
+    // Ten autosave windows over an undecided session: nothing is written, ever.
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 10);
+    expect(await noteWritten('water-the-plants')).toBe(false);
+
+    // Settling the decision is what makes an honest save possible.
+    const settled = await settleMatch(s, { db, settings, matcher: newOnlyMatcher });
+    createAutosaver({ save: saveOf(settled) }).schedule();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+    expect(await waitForNote('water-the-plants')).toBe(true);
   });
 });

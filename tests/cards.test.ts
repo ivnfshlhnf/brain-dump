@@ -17,6 +17,7 @@ import {
   fileOnGrid,
   findStrandedDumps,
   beginCapture,
+  settleMatch,
   finalizeCapture,
   dumpPath,
   dumpFileContent,
@@ -379,10 +380,13 @@ const newOnlyMatcher: Matcher = { match: async () => ({ kind: 'new' }) };
 
 /** Run a whole capture through the operation layer and return what the commit produced. */
 async function commitCapture(): Promise<{ note: Note; path: string }> {
-  const session = await beginCapture('I keep forgetting to water the plants', {
-    db, settings, hash: sha1Hex, organizer, matcher: newOnlyMatcher,
-    now: () => fixedNow, newId: () => 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-  });
+  const session = await settleMatch(
+    await beginCapture('I keep forgetting to water the plants', {
+      db, settings, hash: sha1Hex, organizer, matcher: newOnlyMatcher,
+      now: () => fixedNow, newId: () => 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    }),
+    { db, settings, matcher: newOnlyMatcher },
+  );
   const result = await finalizeCapture(session, {
     db, settings, hash: sha1Hex, organizer, now: () => fixedNow,
   });
@@ -432,11 +436,18 @@ describe('fileOnGrid — a committed Note lands on the grid (ticket 05)', () => 
     });
     const before = await readGrid(gridDeps());
 
-    const session = await beginCapture('the basil is wilting again', {
-      db, settings, hash: sha1Hex, organizer,
-      matcher: { match: async () => ({ kind: 'append', path: 'Brain Dump/2026-08-20-plants.md' }) },
-      now: () => fixedNow, newId: () => 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-    });
+    const session = await settleMatch(
+      await beginCapture('the basil is wilting again', {
+        db, settings, hash: sha1Hex, organizer,
+        matcher: { match: async () => ({ kind: 'append', path: 'Brain Dump/2026-08-20-plants.md' }) },
+        now: () => fixedNow, newId: () => 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      }),
+      {
+        db,
+        settings,
+        matcher: { match: async () => ({ kind: 'append', path: 'Brain Dump/2026-08-20-plants.md' }) },
+      },
+    );
     expect(session.match.kind).toBe('append');
     const result = await finalizeCapture(session, { db, settings, hash: sha1Hex, organizer, now: () => fixedNow });
     if (!result.ok) throw result.error;

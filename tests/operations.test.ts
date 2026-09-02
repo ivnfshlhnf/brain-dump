@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { createHash } from 'node:crypto';
 import PouchDB from 'pouchdb-core';
 import memory from 'pouchdb-adapter-memory';
-import { capture, organizeDump, beginCapture, addContext, finalizeCapture, dumpFilename } from '../src/lib/operations';
+import { capture, organizeDump, beginCapture, settleMatch, addContext, finalizeCapture, dumpFilename, writeNote } from '../src/lib/operations';
 import { docIdForPath, writeFile } from '../src/lib/livesync';
 import {
   DEFAULT_SETTINGS,
@@ -285,12 +285,14 @@ describe('capture review flow (Seam A — ticket 03)', () => {
     };
   }
 
-  it('begins a session: saves the Dump immediately, runs the initial Organize for a preview, decides new', async () => {
+  it('begins a session: saves the Dump immediately, runs the initial Organize for a preview, leaves the match to settle', async () => {
     const session = await beginCapture('I keep forgetting to water the plants', beginDeps());
 
     expect(session.dump.content).toBe('I keep forgetting to water the plants');
     expect(session.dump.context).toBe('');
-    expect(session.match.kind).toBe('new');
+    // Capture-latency ticket 03: the preview does not wait for the match — the decision
+    // arrives behind it, so the session begins explicitly undecided.
+    expect(session.match.kind).toBe('undecided');
     expect(session.saved).toBe(false);
 
     // The Dump is in _dumps/ with the verbatim original preserved in a ## Original section.
@@ -327,7 +329,10 @@ describe('capture review flow (Seam A — ticket 03)', () => {
   });
 
   it('finalizes at autosave: re-organizes over the full Dump (original + Context), writes the Note, freezes the Dump', async () => {
-    const session = await beginCapture('I keep forgetting to water the plants', beginDeps());
+    const session = await settleMatch(
+      await beginCapture('I keep forgetting to water the plants', beginDeps()),
+      { db, settings, matcher: newOnlyMatcher },
+    );
     const withContext = await addContext(session, 'they are the basil on the windowsill', contextDeps());
 
     const result = await finalizeCapture(withContext, finalizeDeps());
@@ -346,7 +351,10 @@ describe('capture review flow (Seam A — ticket 03)', () => {
   });
 
   it('finalizes a Dump with no Context: the preview is the Note — no second Organize', async () => {
-    const session = await beginCapture('I keep forgetting to water the plants', beginDeps());
+    const session = await settleMatch(
+      await beginCapture('I keep forgetting to water the plants', beginDeps()),
+      { db, settings, matcher: newOnlyMatcher },
+    );
     const result = await finalizeCapture(session, finalizeDeps());
 
     expect(result.ok).toBe(true);
@@ -359,7 +367,7 @@ describe('capture review flow (Seam A — ticket 03)', () => {
   });
 
   it('freezes the Dump once the Note is saved — adding Context throws', async () => {
-    const session = await beginCapture('a thought', beginDeps());
+    const session = await settleMatch(await beginCapture('a thought', beginDeps()), { db, settings, matcher: newOnlyMatcher });
     const result = await finalizeCapture(session, finalizeDeps());
     expect(result.ok).toBe(true);
 
@@ -367,7 +375,7 @@ describe('capture review flow (Seam A — ticket 03)', () => {
   });
 
   it('refuses to finalize an already-saved session', async () => {
-    const session = await beginCapture('a thought', beginDeps());
+    const session = await settleMatch(await beginCapture('a thought', beginDeps()), { db, settings, matcher: newOnlyMatcher });
     const first = await finalizeCapture(session, finalizeDeps());
     expect(first.ok).toBe(true);
 
@@ -375,7 +383,10 @@ describe('capture review flow (Seam A — ticket 03)', () => {
   });
 
   it('keeps the Dump (with Context) and defers the Note when the final save fails', async () => {
-    const session = await beginCapture('I keep forgetting to water the plants', beginDeps());
+    const session = await settleMatch(
+      await beginCapture('I keep forgetting to water the plants', beginDeps()),
+      { db, settings, matcher: newOnlyMatcher },
+    );
     const withContext = await addContext(session, 'they are the basil on the windowsill', contextDeps());
 
     const result = await finalizeCapture(withContext, finalizeDeps(dbThatFailsNoteWrites(db)));
@@ -394,5 +405,141 @@ describe('capture review flow (Seam A — ticket 03)', () => {
     await expect(
       db.get(docIdForPath('Brain Dump/2026-08-21-water-the-plants-with-context.md', settings)),
     ).rejects.toThrow();
+  });
+});
+
+// Seam A — match sequencing (capture-latency ticket 03): the preview renders as soon as
+// Organize returns, and the new-vs-append decision settles behind it. The Matcher fake
+// resolves on demand, so the suite can express "the preview exists and the match does
+// not yet" — the whole point of the ticket.
+describe('match sequencing (Seam A — capture-latency ticket 03)', () => {
+  const sampleOutput: OrganizeOutput = {
+    title: 'Water the plants',
+    tags: ['home', 'plants'],
+    category: 'personal',
+    summary: 'A reminder to water the plants.',
+    keyPoints: ['Water the plants regularly'],
+    related: ['[[plants]]'],
+    body: 'I keep forgetting to water the plants.',
+  };
+  const organizer: Organizer = { organize: async () => sampleOutput };
+
+  const beginDeps = (matcher: Matcher) => ({
+    db,
+    settings,
+    organizer,
+    matcher,
+    now: () => fixedNow,
+    newId: () => fixedId,
+    hash: sha1Hex,
+  });
+
+  /** A Matcher whose resolution the test controls: calls are counted, and the promise is
+   *  resolved only when the test says so. */
+  function deferredMatcher(): {
+    matcher: Matcher;
+    calls: () => number;
+    resolve: () => void;
+  } {
+    let count = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    return {
+      matcher: {
+        match: async (...args) => {
+          count += 1;
+          await gate;
+          return newOnlyMatcher.match(...args);
+        },
+      },
+      calls: () => count,
+      resolve: release,
+    };
+  }
+
+  /** Seed one existing Note so the matcher is reached at all — with an empty vault
+   *  `matchNote` decides new without calling it. */
+  const seedOneNote = async () => {
+    await writeNote(
+      {
+        title: 'Water the plants',
+        tags: ['home', 'plants'],
+        createdAt: fixedNow,
+        modality: 'text',
+        source: '[[_dumps/20260821-203045-aaaaaa]]',
+        category: 'personal',
+        summary: 'A reminder to water the plants.',
+        body: 'I keep forgetting to water the plants.',
+        keyPoints: ['Water the plants regularly'],
+        related: ['[[plants]]'],
+      },
+      db,
+      settings,
+      sha1Hex,
+    );
+  };
+
+  it('the preview is available after exactly one Organizer call and zero Matcher resolutions', async () => {
+    const { matcher, calls } = deferredMatcher();
+    const session = await beginCapture('I keep forgetting to water the plants', beginDeps(matcher));
+
+    // The whole preview is readable, and the decision it renders in its buttons is
+    // explicitly "not decided yet" — not `new` wearing a placeholder.
+    expect(session.preview.title).toBe('Water the plants');
+    expect(session.match.kind).toBe('undecided');
+    expect(calls()).toBe(0);
+  });
+
+  it('settleMatch resolves the decision behind the preview', async () => {
+    await seedOneNote();
+    const { matcher, calls, resolve } = deferredMatcher();
+    const session = await beginCapture('a thought', beginDeps(matcher));
+    expect(session.match.kind).toBe('undecided');
+
+    const settling = settleMatch(session, { db, settings, matcher });
+    resolve();
+    const settled = await settling;
+
+    expect(calls()).toBe(1);
+    expect(settled.match.kind).toBe('new');
+    expect(settled.preview).toBe(session.preview); // the same preview object is held
+  });
+
+  it('finalizeCapture refuses to save while the match is unresolved — it must not guess new', async () => {
+    const { matcher } = deferredMatcher();
+    const session = await beginCapture('a thought', beginDeps(matcher));
+
+    // Saving an undecided session would found a second Note — the exact failure the
+    // Matcher exists to prevent — so the save refuses rather than guessing.
+    await expect(
+      finalizeCapture(session, {
+        db,
+        settings,
+        organizer,
+        hash: sha1Hex,
+        now: () => fixedNow,
+      }),
+    ).rejects.toThrow('decision has not been made');
+    // Nothing was written to the managed folder.
+    await expect(
+      db.get(docIdForPath('Brain Dump/2026-08-21-water-the-plants.md', settings)),
+    ).rejects.toThrow();
+  });
+
+  it('a Matcher that rejects still settles to new, and the session files as a new Note', async () => {
+    const rejecting: Matcher = { match: async () => { throw new Error('matcher exploded'); } };
+    const session = await beginCapture('a thought', beginDeps(rejecting));
+
+    const settled = await settleMatch(session, { db, settings, matcher: rejecting });
+    expect(settled.match.kind).toBe('new');
+
+    const result = await finalizeCapture(settled, {
+      db,
+      settings,
+      organizer,
+      hash: sha1Hex,
+      now: () => fixedNow,
+    });
+    expect(result.ok).toBe(true);
   });
 });

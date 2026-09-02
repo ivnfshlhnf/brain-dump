@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { createHash } from 'node:crypto';
 import PouchDB from 'pouchdb-core';
 import memory from 'pouchdb-adapter-memory';
-import { beginCapture, finalizeCapture } from '../src/lib/operations';
+import { beginCapture, settleMatch, finalizeCapture } from '../src/lib/operations';
 import { RELATED_MAX } from '../src/lib/related';
 import { writeFile, readVaultFiles } from '../src/lib/livesync';
 import {
@@ -128,7 +128,7 @@ describe('Related links on a saved Note', () => {
   it('links to a document about the same topic', async () => {
     await seedDoc('Brain Dump/2026-01-01-plants.md', 'Notes on plants and watering.');
 
-    const session = await beginCapture('The plants need water', captureDeps());
+    const session = await settleMatch(await beginCapture('The plants need water', captureDeps()), { db, settings, matcher: newMatcher });
     const result = await finalizeCapture(session, finalizeDeps());
 
     expect(result.ok).toBe(true);
@@ -140,7 +140,7 @@ describe('Related links on a saved Note', () => {
     await seedDoc('Brain Dump/2026-01-01-plants.md', 'Notes on plants.');
     await seedDoc('personal/garden.md', 'My basil and plants journal.');
 
-    const session = await beginCapture('The plants need water', captureDeps());
+    const session = await settleMatch(await beginCapture('The plants need water', captureDeps()), { db, settings, matcher: newMatcher });
     const result = await finalizeCapture(session, finalizeDeps());
     const links = await relatedLinksOf(result.ok ? result.written.path : '');
 
@@ -157,7 +157,7 @@ describe('Related links on a saved Note', () => {
   it('draws on personal notes, not just the managed folder', async () => {
     await seedDoc('personal/garden.md', 'My basil and plants journal.');
 
-    const session = await beginCapture('The plants need water', captureDeps());
+    const session = await settleMatch(await beginCapture('The plants need water', captureDeps()), { db, settings, matcher: newMatcher });
     const result = await finalizeCapture(session, finalizeDeps());
     const links = await relatedLinksOf(result.ok ? result.written.path : '');
 
@@ -170,7 +170,7 @@ describe('Related links on a saved Note', () => {
     await seedDoc('Brain Dump/2026-01-01-plants.md', 'Notes on plants.');
     await seedDoc('personal/garden.md', 'My basil and plants journal.');
 
-    const session = await beginCapture('The plants need water', captureDeps());
+    const session = await settleMatch(await beginCapture('The plants need water', captureDeps()), { db, settings, matcher: newMatcher });
     // Snapshot content, not just paths: a reverse link would edit an existing Note in place
     // and leave the path set identical, so comparing paths alone would not catch it.
     const before = await snapshot();
@@ -187,7 +187,7 @@ describe('Related links on a saved Note', () => {
   it('leaves Related empty when nothing clears the similarity floor', async () => {
     await seedDoc('personal/taxes.md', 'The taxes are due in April.');
 
-    const session = await beginCapture('The plants need water', captureDeps());
+    const session = await settleMatch(await beginCapture('The plants need water', captureDeps()), { db, settings, matcher: newMatcher });
     const result = await finalizeCapture(session, finalizeDeps());
     const links = await relatedLinksOf(result.ok ? result.written.path : '');
 
@@ -201,7 +201,7 @@ describe('Related links on a saved Note', () => {
       await seedDoc(`Brain Dump/2026-01-0${i}-plants.md`, `Plants note number ${i}.`);
     }
 
-    const session = await beginCapture('The plants need water', captureDeps());
+    const session = await settleMatch(await beginCapture('The plants need water', captureDeps()), { db, settings, matcher: newMatcher });
     const result = await finalizeCapture(session, finalizeDeps());
     const links = await relatedLinksOf(result.ok ? result.written.path : '');
 
@@ -212,7 +212,7 @@ describe('Related links on a saved Note', () => {
   it('does not let a Note list itself', async () => {
     await seedDoc('Brain Dump/2026-01-01-plants.md', 'Notes on plants.');
 
-    const session = await beginCapture('The plants need water', captureDeps());
+    const session = await settleMatch(await beginCapture('The plants need water', captureDeps()), { db, settings, matcher: newMatcher });
     const result = await finalizeCapture(session, finalizeDeps());
     const links = await relatedLinksOf(result.ok ? result.written.path : '');
     const self = (result.ok ? result.written.path : '').replace(/\.md$/, '');
@@ -223,7 +223,7 @@ describe('Related links on a saved Note', () => {
   it('excludes raw Dumps from Related', async () => {
     await seedDoc('Brain Dump/2026-01-01-plants.md', 'Notes on plants.');
 
-    const session = await beginCapture('The plants need water', captureDeps());
+    const session = await settleMatch(await beginCapture('The plants need water', captureDeps()), { db, settings, matcher: newMatcher });
     const result = await finalizeCapture(session, finalizeDeps());
     const links = await relatedLinksOf(result.ok ? result.written.path : '');
 
@@ -236,7 +236,7 @@ describe('Related links on a saved Note', () => {
     await seedDoc('Brain Dump/2026-01-01-plants.md', 'Notes on plants.');
     const liar: Relater = { related: async () => [0, 99, -1, 0] };
 
-    const session = await beginCapture('The plants need water', captureDeps());
+    const session = await settleMatch(await beginCapture('The plants need water', captureDeps()), { db, settings, matcher: newMatcher });
     const result = await finalizeCapture(session, finalizeDeps(liar));
     const links = await relatedLinksOf(result.ok ? result.written.path : '');
 
@@ -252,7 +252,7 @@ describe('Related links on a saved Note', () => {
       },
     };
 
-    const session = await beginCapture('The plants need water', captureDeps());
+    const session = await settleMatch(await beginCapture('The plants need water', captureDeps()), { db, settings, matcher: newMatcher });
     const result = await finalizeCapture(session, finalizeDeps(broken));
 
     // Losing the links is far better than losing the Note.
@@ -264,7 +264,7 @@ describe('Related links on a saved Note', () => {
   it('writes no Related links when the caller supplies no embedder and judge', async () => {
     await seedDoc('Brain Dump/2026-01-01-plants.md', 'Notes on plants.');
 
-    const session = await beginCapture('The plants need water', captureDeps());
+    const session = await settleMatch(await beginCapture('The plants need water', captureDeps()), { db, settings, matcher: newMatcher });
     const result = await finalizeCapture(session, {
       db,
       settings,
@@ -280,7 +280,7 @@ describe('Related links on a saved Note', () => {
   it('leaves the capture preview free of Related links', async () => {
     await seedDoc('Brain Dump/2026-01-01-plants.md', 'Notes on plants.');
 
-    const session = await beginCapture('The plants need water', captureDeps());
+    const session = await settleMatch(await beginCapture('The plants need water', captureDeps()), { db, settings, matcher: newMatcher });
 
     // Related is a save-time step: the capture path stays instant and does no ranking.
     expect(session.preview.related).toEqual([]);

@@ -15,6 +15,7 @@ import memory from 'pouchdb-adapter-memory';
 import {
   captureThought,
   addContext,
+  settleMatch,
   finalizeCapture,
   recoverPending,
   adoptInterrupted,
@@ -260,7 +261,8 @@ describe('enrolment: every Capture is Pending before anything can fail', () => {
     const outcome = await captureThought('a thought', captureDeps({ online: true }));
     if (outcome.kind !== 'session') throw new Error('expected session');
 
-    const result = await finalizeCapture(outcome.session, finalizeDeps());
+    const settled = await settleMatch(outcome.session, { db, settings, matcher: newOnlyMatcher });
+    const result = await finalizeCapture(settled, finalizeDeps());
 
     expect(result.ok).toBe(true);
     expect(await pending.list()).toEqual([]);
@@ -270,7 +272,8 @@ describe('enrolment: every Capture is Pending before anything can fail', () => {
     const outcome = await captureThought('a thought', captureDeps({ online: true }));
     if (outcome.kind !== 'session') throw new Error('expected session');
 
-    const result = await finalizeCapture(outcome.session, { ...finalizeDeps(), db: failingDb });
+    const settled = await settleMatch(outcome.session, { db, settings, matcher: newOnlyMatcher });
+    const result = await finalizeCapture(settled, { ...finalizeDeps(), db: failingDb });
 
     expect(result.ok).toBe(false);
     expect(await pending.list()).toHaveLength(1);
@@ -529,7 +532,8 @@ describe('retry, backoff and giving up', () => {
     // throws. It must back off and try again like any other failed attempt.
     const outcome = await captureThought('a thought', captureDeps({ online: true }));
     if (outcome.kind !== 'session') throw new Error('expected session');
-    const failed = await finalizeCapture(outcome.session, { ...finalizeDeps(), db: failingDb });
+    const settled = await settleMatch(outcome.session, { db, settings, matcher: newOnlyMatcher });
+    const failed = await finalizeCapture(settled, { ...finalizeDeps(), db: failingDb });
     expect(failed.ok).toBe(false);
 
     const [record] = await pending.list();

@@ -634,6 +634,18 @@ textarea.dump {
   min-height: 44px;
 }
 
+/* The append decision is still being made (capture-latency ticket 03): a line where a button
+   would lie. "Save now" on that path would mean something different the moment the suggestion
+   landed, so nothing pressable is offered until the match settles. */
+.actions .settling {
+  margin: 0;
+  align-self: center;
+  font-family: var(--mono);
+  font-size: var(--label);
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+}
+
 /* ── Status ──────────────────────────────────────────────────────────── */
 
 .status {
@@ -850,8 +862,10 @@ textarea.dump {
   transition: background-color var(--speed) var(--ease);
 }
 
-/* An unconfirmed append never autosaves — the clock must not run. The edge stays wet and
- * full, holding the decision, instead of burning down to nothing and saving nothing. */
+/* An unconfirmed append never autosaves — the clock must not run. Neither does a match that
+ * has not settled (capture-latency ticket 03): the timer is armed only once the decision is
+ * on screen. The edge stays wet and full, holding the decision, instead of burning down to
+ * nothing and saving nothing. */
 .note .burn--held {
   animation: none;
   transform: scaleX(1);

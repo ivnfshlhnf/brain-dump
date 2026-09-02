@@ -20,6 +20,7 @@
     readNote,
     reorganizeNote,
     citedCards,
+    settleMatch,
     type CaptureSession,
     type NoteView,
   } from './lib/operations';
@@ -358,13 +359,19 @@
    *  Closing with the countdown running is the same as walking away from it: the clock was on
    *  screen promising a save, so it is honoured now rather than leaving the thought in limbo.
    *
-   *  Closing while Held — or with an Append the user has not confirmed — files nothing, because
-   *  both states exist precisely to say "not on your own". The Dump is already Pending, so it
-   *  appears on the grid as a Pending card and is re-surfaced on the next open. */
+   *  Closing while Held — with a match that has not settled — or with an Append the user has
+   *  not confirmed — files nothing, because all of these states exist precisely to say "not on
+   *  your own". An undecided match cannot be flushed: saving would guess `new` and found a
+   *  duplicate Note. The Dump is already Pending, so it appears on the grid as a Pending card
+   *  and is re-surfaced on the next open. */
   function onSheetClose() {
     sheet = null;
     if (!session || session.saved) return;
-    if (held || (session.match.kind === 'append' && !appendConfirmed)) {
+    if (
+      held ||
+      session.match.kind === 'undecided' ||
+      (session.match.kind === 'append' && !appendConfirmed)
+    ) {
       autosaver.cancel();
       endSession();
       void refreshPending();
@@ -778,10 +785,11 @@
       held = false;
       contextRevision = 0;
       appendConfirmed = false;
-      // Arm the 5s inactivity timer at capture, so a Dump with no added Context
-      // still finalizes on its own. For an 'append' match the autosave no-ops until
-      // the user confirms (see saveAndFinalize) — the Dump's Context is still saved.
-      autosaver.schedule();
+      // The preview is on screen; the new-vs-append decision settles behind it, and the 5s
+      // inactivity timer is armed only when it lands (settleCaptureMatch) — arming at render
+      // let an autosave fire before the app knew what saving meant, founding a duplicate Note
+      // (capture-latency ticket 03).
+      void settleCaptureMatch();
       // No status line: the Note is on screen, and the card states its own decision.
       status = '';
     } catch (e) {
@@ -808,8 +816,31 @@
     }
   }
 
+  /** Resolve the new-vs-append decision behind the preview, and only then arm the 5s
+   *  inactivity timer: the clock starts once everything the user is meant to see is on
+   *  screen, never against a screen that is still changing (capture-latency ticket 03).
+   *  A settle arriving after Hold must not start the clock — a stopped clock stays stopped. */
+  async function settleCaptureMatch() {
+    if (!session || session.saved) return;
+    const settling = session;
+    const settled = await settleMatch(session, {
+      ...storeDeps(),
+      matcher: createMatcher(settings, log),
+    });
+    // The sheet closed, or another capture replaced this session, while the match ran.
+    if (session !== settling) return;
+    session = settled;
+    if (held) return;
+    contextRevision += 1; // the countdown edge restarts from full — the clock starts now
+    autosaver.schedule();
+  }
+
   async function saveAndFinalize() {
     if (!session || session.saved) return;
+    // A match that has not settled is never saved around: the operation layer refuses an
+    // undecided session, because guessing `new` would found a duplicate Note (capture-latency
+    // ticket 03). The timer is not armed in this state, so this guards the explicit flush.
+    if (session.match.kind === 'undecided') return;
     // An 'append' decision is held until the user confirms it (one tap on Append).
     // The autosave may fire on its own for a 'new' decision, but never appends
     // unconfirmed — the Dump's Context is already persisted, so the Note append
@@ -823,7 +854,8 @@
         relater: createRelater(settings, log),
         now: () => Date.now(),
       });
-      const appendedTo = session.match.suggestion?.title;
+      const appendedTo =
+        session.match.kind === 'append' ? session.match.suggestion?.title : undefined;
       session = result.session;
       await refreshPending();
       if (result.ok) {
@@ -1439,11 +1471,14 @@
           </div>
           <article class="note">
             {#key contextRevision}
-              <div class="burn" class:burn--held={held || (session.match.kind === 'append' && !appendConfirmed)}></div>
+              <div class="burn" class:burn--held={held || session.match.kind === 'undecided' || (session.match.kind === 'append' && !appendConfirmed)}></div>
             {/key}
 
             <p class="eyebrow">
-              {#if session.match.kind === 'new'}
+              {#if session.match.kind === 'undecided'}
+                <!-- The append decision is still being made; the clock is not running. -->
+                Matching against your Notes&hellip;
+              {:else if session.match.kind === 'new'}
                 New Note
               {:else}
                 Append to <span class="keep-case">&ldquo;{session.match.suggestion?.title ?? 'an existing Note'}&rdquo;</span>
@@ -1495,12 +1530,16 @@
                 () => autosaver.flush(),
                 // The context field only renders with a session; the !session guard is for the
                 // type checker, not the runtime — it makes an absent session a no-op rather
-                // than a null deref. Matches the "Save now" visibility rule below.
-                !session || (session.match.kind === 'append' && !appendConfirmed),
+                // than a null deref. A flush is offered only where one can actually run: the
+                // match settled to `new` (the "Save now" visibility rule below).
+                !session || session.match.kind !== 'new',
               )}></textarea>
           </label>
           <p class="hint">
-            {#if session.match.kind === 'append' && !appendConfirmed}
+            {#if session.match.kind === 'undecided'}
+              Checking your existing Notes for one this could append to — the countdown starts
+              when that settles.
+            {:else if session.match.kind === 'append' && !appendConfirmed}
               Append waits for your confirmation — it won’t save on its own. Confirming merges
               this capture into the matched note and re-organizes it; your verbatim original is kept.
             {:else if held}
@@ -1529,6 +1568,10 @@
               <span class="primary__sub">merge in and re-organize the note</span>
             </button>
             <button on:click={chooseNewNote}>Save as new Note</button>
+          {:else if session.match.kind === 'undecided'}
+            <!-- The decision is still being made; no save is offered, because what a save
+                 would mean is exactly what has not been decided (capture-latency ticket 03). -->
+            <p class="settling">finding existing Notes&hellip;</p>
           {:else}
             <!-- "Save now" forces the autosave, and after a Hold it is the only thing that
                  files the Note. It is only shown where a save will actually happen — an

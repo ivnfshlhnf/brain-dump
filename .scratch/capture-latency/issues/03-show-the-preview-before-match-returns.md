@@ -1,4 +1,4 @@
-**Status:** ready
+**Status:** done
 
 # 03 — Show the preview before Match returns
 
@@ -95,3 +95,22 @@ is on screen.** Ticket 04 extends the same rule to Related.
 - Anything after the save fires — ticket 06.
 - Parallelising Organize and Match. Match consumes Organize's output; there is no parallelism
   available.
+
+## Comments
+
+**2026-09-02 — shipped.** `beginCapture` returns after the Organize with `match: { kind:
+'undecided' }`; the new `settleMatch` resolves the decision behind the preview, and a
+Matcher that rejects settles to `new` like a bad index does. `finalizeCapture` now *refuses*
+an undecided session — the duplicate-Note hole is closed in the operation layer, not just in
+the UI's timer arming — so a flush racing an unresolved match throws instead of guessing.
+
+UI: `captureDump` no longer arms the timer; `settleCaptureMatch` arms it when the decision
+lands (restarting the countdown edge from full), and a settle arriving after Hold never
+starts the clock. While undecided the sheet shows "Matching against your Notes…" in the
+eyebrow, a line where `Save now` would be, and the edge held full.
+
+Seam A tests: the ordering is pinned (one Organizer call, zero Matcher resolutions at
+preview); the refusal is pinned (`finalizeCapture` rejects undecided, nothing written);
+a rejecting Matcher still files. The autosave suite pins that ten windows over an undecided
+session write nothing. Existing suites updated to settle before finalizing — the new
+protocol, not new behaviour.
