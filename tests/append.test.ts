@@ -228,11 +228,22 @@ describe('finalizeCapture — the append rework (ADR-0009, Seam A)', () => {
       },
     };
 
+    // Append to the Water-the-plants Note specifically (it carries the seeded Dump in its
+    // `source`): candidates come back basil-first, so the old appendToFirstMatcher here
+    // picked the basil Note, whose `source` Dump does not exist — the append silently fell
+    // back to founding a colliding new Note, and the old unconditional save-time Related
+    // masked that. Pinning the target keeps the test on the path it is about.
+    const appendToPlantsMatcher: Matcher = {
+      match: async (_topic, candidates) => {
+        const target = candidates.find((c) => c.path === existingPath);
+        return target ? { kind: 'append', path: target.path } : { kind: 'new' };
+      },
+    };
     const session = await beginAndSettle('Second verbatim capture.', {
       db,
       settings,
       organizer,
-      matcher: appendToFirstMatcher,
+      matcher: appendToPlantsMatcher,
       now: () => fixedNow + 1000,
       newId: () => 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee',
       hash: sha1Hex,

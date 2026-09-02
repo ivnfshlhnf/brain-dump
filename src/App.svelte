@@ -21,6 +21,7 @@
     reorganizeNote,
     citedCards,
     settleMatch,
+    settleRelated,
     type CaptureSession,
     type NoteView,
   } from './lib/operations';
@@ -754,6 +755,10 @@
         ...storeDeps(),
         organizer: createOrganizer(settings, log),
         matcher: createMatcher(settings, log),
+        // The preview's Related pass starts here, with the capture (ticket 04) — it runs
+        // against the preview while the user reads, and the save reuses what it produced.
+        embedder: cachedEmbedder(),
+        relater: createRelater(settings, log),
         isOnline: () => navigator.onLine,
         now: () => Date.now(),
         newId: () => crypto.randomUUID(),
@@ -785,11 +790,15 @@
       held = false;
       contextRevision = 0;
       appendConfirmed = false;
-      // The preview is on screen; the new-vs-append decision settles behind it, and the 5s
-      // inactivity timer is armed only when it lands (settleCaptureMatch) — arming at render
-      // let an autosave fire before the app knew what saving meant, founding a duplicate Note
-      // (capture-latency ticket 03).
+      matchSettled = false;
+      relatedSettled = false;
+      // The preview is on screen; the new-vs-append decision and the Related links both
+      // settle behind it, and the 5s inactivity timer is armed only when both have landed
+      // (or the Related deadline has passed) — arming at render let an autosave fire before
+      // the app knew what saving meant, founding a duplicate Note (capture-latency ticket 03;
+      // the both-settled rule is ticket 04's extension of it).
       void settleCaptureMatch();
+      void settleCaptureRelated();
       // No status line: the Note is on screen, and the card states its own decision.
       status = '';
     } catch (e) {
@@ -816,10 +825,21 @@
     }
   }
 
-  /** Resolve the new-vs-append decision behind the preview, and only then arm the 5s
-   *  inactivity timer: the clock starts once everything the user is meant to see is on
-   *  screen, never against a screen that is still changing (capture-latency ticket 03).
-   *  A settle arriving after Hold must not start the clock — a stopped clock stays stopped. */
+  // The timer arms once both behind-the-preview waits have settled (capture-latency
+  // tickets 03 and 04: the clock starts when everything the user is meant to see is on
+  // screen). A settle arriving after Hold must not start the clock — a stopped clock
+  // stays stopped, which `armAutosaveWhenSettled` checks first.
+  let matchSettled = false;
+  let relatedSettled = false;
+
+  function armAutosaveWhenSettled() {
+    if (!session || session.saved || held) return;
+    if (!matchSettled || !relatedSettled) return;
+    contextRevision += 1; // the countdown edge restarts from full — the clock starts now
+    autosaver.schedule();
+  }
+
+  /** Resolve the new-vs-append decision behind the preview (capture-latency ticket 03). */
   async function settleCaptureMatch() {
     if (!session || session.saved) return;
     const settling = session;
@@ -830,9 +850,31 @@
     // The sheet closed, or another capture replaced this session, while the match ran.
     if (session !== settling) return;
     session = settled;
-    if (held) return;
-    contextRevision += 1; // the countdown edge restarts from full — the clock starts now
-    autosaver.schedule();
+    matchSettled = true;
+    armAutosaveWhenSettled();
+  }
+
+  /** Collect the preview's Related pass behind the preview (capture-latency ticket 04).
+   *  The pass settles like the match does, and a deadline miss is not the end: the sheet
+   *  keeps listening, so links that land before the save still go on the Note — one that
+   *  lands after the save is discarded by the same session-identity guard. */
+  async function settleCaptureRelated() {
+    if (!session || session.saved) return;
+    const settling = session;
+    const settled = await settleRelated(session);
+    if (session !== settling) return;
+    session = settled;
+    relatedSettled = true;
+    armAutosaveWhenSettled();
+    if (settled.related === 'missed') void settleCaptureRelatedFollowUp(settling);
+  }
+
+  /** The no-wait follow-up for a pass that missed its deadline or failed: wait as long as
+   *  it takes, and apply the links if they arrive before the save. */
+  async function settleCaptureRelatedFollowUp(settling: CaptureSession) {
+    const settled = await settleRelated(settling, { timeoutMs: Number.POSITIVE_INFINITY });
+    if (session !== settling) return;
+    session = settled;
   }
 
   async function saveAndFinalize() {
@@ -1513,10 +1555,18 @@
             {/if}
 
             <p class="rule-label">related</p>
-            {#if session.preview.related.length}
+            {#if session.related === 'resolving'}
+              <!-- Links are being found now, on the preview (capture-latency ticket 04) —
+                   the section must not read as "nothing connects" while the pass runs. -->
+              <p class="pending">finding links&hellip;</p>
+            {:else if session.preview.related.length}
               <ul class="links">{#each session.preview.related as link}<li><a class="vault-link" href={linkHref(settings.vaultName, link)}>{linkText(link)}</a></li>{/each}</ul>
+            {:else if session.related === 'missed'}
+              <!-- A deadline miss and a failure render the same way — from the user's side
+                   they are the same event (ticket 04). -->
+              <p class="pending">Links could not be found just now.</p>
             {:else}
-              <p class="pending">Links are found when the Note is saved.</p>
+              <p class="pending">Nothing in the Vault connects closely enough yet.</p>
             {/if}
           </article>
 

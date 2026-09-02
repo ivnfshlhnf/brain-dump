@@ -1,4 +1,26 @@
-**Status:** ready
+**Status:** done
+
+## Comments
+
+2026-09-02 — Built as specified, with one discovery worth recording: the "Related is recomputed
+on the append path" test in `tests/append.test.ts` had been silently exercising the founding
+*fallback*, not the append path — its `appendToFirstMatcher` picks `candidates[0]`, which was
+the basil Note, whose `source` Dump was never seeded, so the append fell back to founding a
+colliding new Note (same title, same day) and the old unconditional save-time `withRelated`
+computed the links that made the test pass. The no-Context reuse path (zero Relater calls) is
+what exposed it. The test now pins the matcher to the Note carrying the seeded Dump, so it
+tests the path its name claims; it passes against the real append path.
+
+Also: `judge` in `related.ts` used to swallow a Relater rejection and return `[]` — at the new
+settle layer that made "provider down" indistinguishable from "nothing cleared the floor". The
+rejection now propagates (every caller already treated it as "file without links"), so reject
+≡ timeout holds at the seam, as the Testing Decisions require.
+
+Verified: 284 tests pass (6 new in the ticket-04 describe at Seam A, including the reuse and
+deadline properties), svelte-check clean, all 8 browser checks pass. The UI arming rule is the
+ticket's: `armAutosaveWhenSettled` fires once Match *and* Related have settled — the Related
+deadline pass settles `missed` at exactly the deadline, which is the "or the deadline has
+passed" arm.
 
 # 04 — Related is computed for the preview, not at save
 

@@ -297,14 +297,30 @@ export interface CaptureSession {
   dump: Dump; // the captured Dump (original + accumulating Context)
   preview: Note; // the initial Organize preview — held, not re-organized per edit
   match: MatchDecision; // new vs append (ticket 04 fills matching)
+  /** The preview's Related pass (capture-latency ticket 04). `resolving` while it runs;
+   *  `done` once the links are on the preview — possibly an honest empty, nothing having
+   *  cleared the similarity floor; `missed` when the pass failed or missed its deadline,
+   *  which renders the same either way. The links live on `preview.related` — the object
+   *  the save reuses. */
+  related: 'resolving' | 'done' | 'missed';
   saved: boolean; // true once the Note has been written and the Dump frozen
+  /** The in-flight pass, resolving to the links or null on failure — never rejects. Started
+   *  by `beginCapture` when an embedder and judge are supplied, and deliberately kept after
+   *  a deadline miss: a pass that lands before the save is still used. */
+  relatedRun?: Promise<string[] | null>;
+  /** When the pass started, so the deadline is measured once from there, whoever waits. */
+  relatedStartedAt?: number;
 }
 
 /** Deps to begin a capture review session (capture's deps plus the Organizer). The Matcher
- *  is resolved later, by `settleMatch` — the preview renders before the match decision. */
+ *  is resolved later, by `settleMatch` — the preview renders before the match decision. The
+ *  embedder and judge are resolved later too, by the preview's own Related pass
+ *  (`settleRelated`); omit both and the preview carries no links. */
 export interface BeginCaptureDeps extends CaptureDeps {
   organizer: Organizer;
   matcher: Matcher;
+  embedder?: Embedder;
+  relater?: Relater;
 }
 
 /** Deps to settle a session's match decision (the Matcher's dependencies). */
@@ -343,14 +359,102 @@ export interface FinalizeDeps {
  *  Organize for the preview. The match decision is left `undecided` — the caller settles it
  *  with `settleMatch` while the preview is already on screen (capture-latency ticket 03:
  *  Match decides only new-vs-append, which the sheet expresses in its buttons, so nothing
- *  the user reads waits on it). */
+ *  the user reads waits on it). The preview's Related pass also starts here rather than at
+ *  save (ticket 04) — it runs against the preview while the user reads, and `settleRelated`
+ *  collects it; omit the embedder and judge and the preview simply carries no links. */
 export async function beginCapture(
   text: string,
   deps: BeginCaptureDeps,
 ): Promise<CaptureSession> {
   const { dump } = await capture(text, deps);
   const preview = await organizeNote(dump, deps.organizer, deps.settings);
-  return { dump, preview, match: { kind: 'undecided' }, saved: false };
+  const session: CaptureSession = {
+    dump,
+    preview,
+    match: { kind: 'undecided' },
+    related: 'resolving',
+    saved: false,
+  };
+  startPreviewRelated(session, deps);
+  return session;
+}
+
+/** The Related deadline, measured from when the pass started (capture-latency ticket 04):
+ *  past it the sheet stops waiting and the save may file the Note without links. Losing
+ *  the links is a far better outcome than losing the Note, and both failures render the
+ *  same way ("could not be found just now"). */
+export const RELATED_DEADLINE_MS = 5000;
+
+/** A sentinel distinguishing "the pass missed its deadline" from a pass that resolved to
+ *  null (failure) — both settle the session to `missed`, but only a real result applies. */
+const RELATED_MISSED = Symbol('related missed');
+
+/** Start the preview's Related pass in the background. The run mutates nothing: it resolves
+ *  to the links, or null when the pass failed. It never rejects, so a backgrounded failure
+ *  costs nothing — `settleRelated` applies whatever it returned. */
+function startPreviewRelated(session: CaptureSession, deps: BeginCaptureDeps): void {
+  if (!deps.embedder || !deps.relater) {
+    session.related = 'done'; // no embedder and judge — the preview carries no links, by design
+    return;
+  }
+  session.relatedStartedAt = Date.now();
+  const excludePath = `${deps.settings.managedFolder}/${noteFilename(session.preview)}`;
+  const relatedDeps: RelatedDeps = {
+    db: deps.db,
+    settings: deps.settings,
+    embedder: deps.embedder,
+    relater: deps.relater,
+    log: deps.log,
+  };
+  session.relatedRun = (async () => {
+    try {
+      return await findRelated(session.preview, excludePath, relatedDeps);
+    } catch (error) {
+      (deps.log ?? noopLog)({
+        level: 'error',
+        op: 'related',
+        message: 'preview Related pass failed — the Note will be filed without links',
+        detail: { error: (error as Error).message },
+      });
+      return null;
+    }
+  })();
+}
+
+/** Collect the preview's Related pass, waiting up to the remainder of its deadline
+ *  (measured from when the pass started, whoever waits and whenever). On a result the links
+ *  land on the session's preview — the object the save reuses — and the session settles to
+ *  `done`; on a deadline miss or failure it settles to `missed` and the run stays attached,
+ *  so a later `settleRelated` (the sheet's follow-up, which does not wait) applies whatever
+ *  landed before the save. With no run at all the session is returned untouched. */
+export async function settleRelated(
+  session: CaptureSession,
+  wait: { timeoutMs?: number } = {},
+): Promise<CaptureSession> {
+  if (!session.relatedRun) return session;
+  const remaining =
+    wait.timeoutMs ??
+    Math.max(0, RELATED_DEADLINE_MS - (Date.now() - (session.relatedStartedAt ?? Date.now())));
+  // Node truncates an out-of-range setTimeout delay to 1ms, which would turn "wait
+  // indefinitely" into an instant miss — clamp to the 32-bit timer maximum instead.
+  const timerMs = Math.min(remaining, 2147483647);
+  const result = await Promise.race([
+    session.relatedRun,
+    new Promise<typeof RELATED_MISSED>((resolve) => setTimeout(() => resolve(RELATED_MISSED), timerMs)),
+  ]);
+  if (result === RELATED_MISSED) return { ...session, related: 'missed' };
+  if (result === null) {
+    // The pass failed outright — terminal, so the run is dropped; nothing more is coming,
+    // and a follow-up settle must not wait on a settled run. Renders the same as a miss.
+    return { ...session, related: 'missed', relatedRun: undefined, relatedStartedAt: undefined };
+  }
+  return {
+    ...session,
+    preview: { ...session.preview, related: result },
+    related: 'done',
+    relatedRun: undefined,
+    relatedStartedAt: undefined,
+  };
 }
 
 /** Settle the session's match decision: match the preview against the existing Notes
@@ -431,13 +535,15 @@ export async function finalizeCapture(
   try {
     const suggestion =
       session.match.kind === 'append' ? session.match.suggestion : undefined;
-    const { note, written } = suggestion
+    const found = suggestion
       ? await appendCaptureToNote(session, suggestion.path, deps)
       : await foundNewNote(session, deps);
     // The Note exists, so the Dump is no longer Pending. If this dequeue is the thing
     // that fails, recovery's already-cited check dequeues it later without a second Note.
     await deps.pending?.remove(session.dump.id);
-    return { ok: true, note, written, session: { ...session, saved: true } };
+    // The settled session — the save may have collected the preview's Related pass on the
+    // way through (`foundNewNote`) — is what comes back, not the pre-save session.
+    return { ok: true, note: found.note, written: found.written, session: { ...found.session, saved: true } };
   } catch (error) {
     // The Dump stays Pending, and this counts as an attempt like any other: it is the one
     // failure the user is actually watching, so it must back off and be retried on the
@@ -456,19 +562,24 @@ export async function finalizeCapture(
 
 /** Found a new Note: settle the Organize (a fresh call only when Context edited the Dump —
  *  otherwise the held preview already is the Organize of the unchanged Dump; see
- *  `finalizeCapture`), fill in Related, write the Note. Related is resolved here, at save,
- *  and never at capture: it ranks the whole vault, and the capture path exists to feel
- *  instant. */
+ *  `finalizeCapture`), then write. The same shape governs Related (ticket 04): the preview's
+ *  links were computed for the preview at capture, so with no Context the save gives the
+ *  pass the rest of its deadline and writes the preview as it stands — no second ranking
+ *  whose only possible effect was to disagree with the first. With Context the Note changed,
+ *  so the links are recomputed at save, as they always were. */
 async function foundNewNote(
   session: CaptureSession,
   deps: FinalizeDeps,
-): Promise<{ note: Note; written: WriteResult }> {
-  const organized = session.dump.context
-    ? await organizeNote(session.dump, deps.organizer, deps.settings)
-    : session.preview;
-  const note = await withRelated(organized, session, deps);
+): Promise<{ note: Note; written: WriteResult; session: CaptureSession }> {
+  const ready = session.dump.context ? session : await settleRelated(session);
+  const organized = ready.dump.context
+    ? await organizeNote(ready.dump, deps.organizer, deps.settings)
+    : ready.preview;
+  const note = ready.dump.context
+    ? await withRelated(organized, ready, deps)
+    : organized;
   const written = await writeNote(note, deps.db, deps.settings, deps.hash);
-  return { note, written };
+  return { note, written, session: ready };
 }
 
 /** Read one file from the Vault, matching the bare path or the path with its `.md`
@@ -514,7 +625,7 @@ async function appendCaptureToNote(
   session: CaptureSession,
   notePath: string,
   deps: FinalizeDeps,
-): Promise<{ note: Note; written: WriteResult }> {
+): Promise<{ note: Note; written: WriteResult; session: CaptureSession }> {
   const target = await readSingleFile(notePath, deps);
   const fm = target ? parseFrontmatter(target.content) : null;
   const dumpFilePath = target && fm?.source ? wikilinkTarget(fm.source) : '';
@@ -573,7 +684,7 @@ async function appendCaptureToNote(
   //    thought — filed, not Stranded, and recovery will not found a second Note for it.
   await markAppendedInto(session.dump, notePath, deps);
 
-  return { note, written: { path: notePath, metadataId, chunkId } };
+  return { note, written: { path: notePath, metadataId, chunkId }, session };
 }
 
 /** Merge one dated verbatim section into a Dump file. The idempotency check sits inside

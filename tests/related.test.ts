@@ -7,11 +7,11 @@
 //     the failure this feature was built to avoid), and
 //   - finalizing writes no document other than the new Note ("outbound links only" must be a
 //     tested property, not an intention).
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import PouchDB from 'pouchdb-core';
 import memory from 'pouchdb-adapter-memory';
-import { beginCapture, settleMatch, finalizeCapture } from '../src/lib/operations';
+import { beginCapture, settleMatch, settleRelated, finalizeCapture, addContext, RELATED_DEADLINE_MS } from '../src/lib/operations';
 import { RELATED_MAX } from '../src/lib/related';
 import { writeFile, readVaultFiles } from '../src/lib/livesync';
 import {
@@ -74,7 +74,7 @@ async function seedDoc(path: string, body: string, title = path) {
   });
 }
 
-const captureDeps = () => ({
+const captureDeps = (over: { embedder?: Embedder; relater?: Relater } = {}) => ({
   db,
   settings,
   hash: sha1Hex,
@@ -82,6 +82,9 @@ const captureDeps = () => ({
   newId: () => 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
   organizer,
   matcher: newMatcher,
+  embedder,
+  relater: acceptAll,
+  ...over,
 });
 
 const finalizeDeps = (relater: Relater = acceptAll) => ({
@@ -236,7 +239,7 @@ describe('Related links on a saved Note', () => {
     await seedDoc('Brain Dump/2026-01-01-plants.md', 'Notes on plants.');
     const liar: Relater = { related: async () => [0, 99, -1, 0] };
 
-    const session = await settleMatch(await beginCapture('The plants need water', captureDeps()), { db, settings, matcher: newMatcher });
+    const session = await settleMatch(await beginCapture('The plants need water', captureDeps({ relater: liar })), { db, settings, matcher: newMatcher });
     const result = await finalizeCapture(session, finalizeDeps(liar));
     const links = await relatedLinksOf(result.ok ? result.written.path : '');
 
@@ -252,7 +255,7 @@ describe('Related links on a saved Note', () => {
       },
     };
 
-    const session = await settleMatch(await beginCapture('The plants need water', captureDeps()), { db, settings, matcher: newMatcher });
+    const session = await settleMatch(await beginCapture('The plants need water', captureDeps({ relater: broken })), { db, settings, matcher: newMatcher });
     const result = await finalizeCapture(session, finalizeDeps(broken));
 
     // Losing the links is far better than losing the Note.
@@ -264,7 +267,7 @@ describe('Related links on a saved Note', () => {
   it('writes no Related links when the caller supplies no embedder and judge', async () => {
     await seedDoc('Brain Dump/2026-01-01-plants.md', 'Notes on plants.');
 
-    const session = await settleMatch(await beginCapture('The plants need water', captureDeps()), { db, settings, matcher: newMatcher });
+    const session = await settleMatch(await beginCapture('The plants need water', captureDeps({ embedder: undefined, relater: undefined })), { db, settings, matcher: newMatcher });
     const result = await finalizeCapture(session, {
       db,
       settings,
@@ -276,14 +279,118 @@ describe('Related links on a saved Note', () => {
     expect(result.ok).toBe(true);
     expect(await relatedLinksOf(result.ok ? result.written.path : '')).toEqual([]);
   });
+});
 
-  it('leaves the capture preview free of Related links', async () => {
+describe('Related for the preview (capture-latency ticket 04)', () => {
+  /** A judge whose answer the test controls — its promise stays pending until `release`. */
+  function deferredRelater() {
+    const calls: Array<Array<{ path: string }>> = [];
+    let release!: (picked: number[]) => void;
+    const gate = new Promise<number[]>((resolve) => (release = resolve));
+    const relater: Relater = {
+      related: async (_subject, candidates) => {
+        calls.push(candidates);
+        return gate;
+      },
+    };
+    return { relater, calls, release };
+  }
+
+  it('computes the links for the preview, and finalizing reuses them with zero extra Relater calls', async () => {
     await seedDoc('Brain Dump/2026-01-01-plants.md', 'Notes on plants.');
 
     const session = await settleMatch(await beginCapture('The plants need water', captureDeps()), { db, settings, matcher: newMatcher });
+    // The pass starts with the capture, before anyone waits on it.
+    expect(session.related).toBe('resolving');
 
-    // Related is a save-time step: the capture path stays instant and does no ranking.
-    expect(session.preview.related).toEqual([]);
+    const settled = await settleRelated(session);
+    expect(settled.related).toBe('done');
+    expect(settled.preview.related).toContain('[[Brain Dump/2026-01-01-plants]]');
+    const calls = judged.length;
+    expect(calls).toBe(1);
+
+    const result = await finalizeCapture(settled, finalizeDeps());
+    // The reuse property — the whole point of the ticket: the save pays for no second
+    // ranking whose only possible effect was to disagree with the one already shown.
+    expect(judged.length).toBe(calls);
+    expect(await relatedLinksOf(result.ok ? result.written.path : '')).toContain('[[Brain Dump/2026-01-01-plants]]');
+  });
+
+  it('with Context added, finalizing recomputes: exactly one more Relater call, and the Note carries the recomputed links', async () => {
+    await seedDoc('Brain Dump/2026-01-01-plants.md', 'Notes on plants.');
+
+    const settled = await settleRelated(await settleMatch(await beginCapture('The plants need water', captureDeps()), { db, settings, matcher: newMatcher }));
+    expect(judged.length).toBe(1);
+    const withContext = await addContext(settled, 'they are the basil on the windowsill', { db, settings, hash: sha1Hex });
+
+    const result = await finalizeCapture(withContext, finalizeDeps());
+    expect(result.ok).toBe(true);
+    expect(judged.length).toBe(2);
+    expect(await relatedLinksOf(result.ok ? result.written.path : '')).toContain('[[Brain Dump/2026-01-01-plants]]');
+  });
+
+  it('a Relater that never resolves still files the Note, with an empty Related section, within the deadline', async () => {
+    await seedDoc('Brain Dump/2026-01-01-plants.md', 'Notes on plants.');
+    const { relater } = deferredRelater();
+    const session = await settleMatch(await beginCapture('The plants need water', captureDeps({ relater })), { db, settings, matcher: newMatcher });
+
+    // The deadline is measured from when the pass started, not from when the save waits —
+    // backdate the start so the deadline is already exhausted when the save gives it the
+    // rest of its time.
+    session.relatedStartedAt = Date.now() - RELATED_DEADLINE_MS - 1;
+
+    const result = await finalizeCapture(session, finalizeDeps(relater));
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.session.related).toBe('missed');
+    const links = await relatedLinksOf(result.ok ? result.written.path : '');
+    expect(links).toEqual([]);
+  });
+
+  it('a Relater that rejects behaves like a deadline miss — the Note is still filed', async () => {
+    await seedDoc('Brain Dump/2026-01-01-plants.md', 'Notes on plants.');
+    const broken: Relater = {
+      related: async () => {
+        throw new Error('provider down');
+      },
+    };
+
+    const session = await settleMatch(await beginCapture('The plants need water', captureDeps({ relater: broken })), { db, settings, matcher: newMatcher });
+    const settled = await settleRelated(session);
+    expect(settled.related).toBe('missed');
+    expect(settled.relatedRun).toBeUndefined(); // a failed pass is terminal — the follow-up must not wait on it
+
+    const result = await finalizeCapture(settled, finalizeDeps(broken));
+    expect(result.ok).toBe(true);
+    expect(await relatedLinksOf(result.ok ? result.written.path : '')).toEqual([]);
+  });
+
+  it('a pass that lands after the deadline but before the save is still used', async () => {
+    await seedDoc('Brain Dump/2026-01-01-plants.md', 'Notes on plants.');
+    const deferred = deferredRelater();
+
+    const session = await settleMatch(await beginCapture('The plants need water', captureDeps({ relater: deferred.relater })), { db, settings, matcher: newMatcher });
+    const missed = await settleRelated(session, { timeoutMs: 0 });
+    expect(missed.related).toBe('missed');
+    expect(missed.relatedRun).toBeDefined(); // the deadline miss keeps the run alive
+
+    deferred.release([0]); // the judge finally answers
+    const landed = await settleRelated(missed, { timeoutMs: 2147483647 }); // the sheet's follow-up: no deadline
+    expect(landed.related).toBe('done');
+    expect(landed.preview.related).toContain('[[Brain Dump/2026-01-01-plants]]');
+
+    const result = await finalizeCapture(landed, finalizeDeps(deferred.relater));
+    expect(await relatedLinksOf(result.ok ? result.written.path : '')).toContain('[[Brain Dump/2026-01-01-plants]]');
+  });
+
+  it('an honest empty result is done, not missed — nothing cleared the floor', async () => {
+    await seedDoc('personal/taxes.md', 'The taxes are due in April.');
+
+    const session = await beginCapture('The plants need water', captureDeps());
+    const settled = await settleRelated(session);
+
+    expect(settled.related).toBe('done');
+    expect(settled.preview.related).toEqual([]);
     expect(judged).toHaveLength(0);
   });
 });

@@ -109,7 +109,10 @@ async function judge(
       message: 'could not judge related links — saving the Note without them',
       detail: { error: (e as Error).message },
     });
-    return [];
+    // The failure propagates so the caller can tell a judge that failed from one that saw
+    // nothing close (capture-latency ticket 04) — every caller already treats a rejection
+    // as "file without links".
+    throw e;
   }
 
   const valid = indexes.filter(
