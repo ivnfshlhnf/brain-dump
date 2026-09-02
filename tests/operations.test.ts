@@ -406,6 +406,23 @@ describe('capture review flow (Seam A — ticket 03)', () => {
       db.get(docIdForPath('Brain Dump/2026-08-21-water-the-plants-with-context.md', settings)),
     ).rejects.toThrow();
   });
+
+  it('logs a failed save — the one failure the user is watching must be in the durable log (ticket 09)', async () => {
+    const entries: Array<{ level?: string; op?: string; message: string; detail?: { dumpId?: string } }> = [];
+    const session = await settleMatch(
+      await beginCapture('I keep forgetting to water the plants', beginDeps()),
+      { db, settings, matcher: newOnlyMatcher },
+    );
+
+    await finalizeCapture(session, {
+      ...finalizeDeps(dbThatFailsNoteWrites(db)),
+      log: (event) => entries.push(event),
+    });
+
+    const failure = entries.find((e) => e.level === 'error' && e.message.includes('save failed'));
+    expect(failure).toBeDefined();
+    expect(failure?.detail?.dumpId).toBe(fixedId);
+  });
 });
 
 // Seam A — match sequencing (capture-latency ticket 03): the preview renders as soon as

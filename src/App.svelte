@@ -929,6 +929,12 @@
     };
   }
 
+  /** A finalize is in flight (capture-latency ticket 09). One save at a time is already
+   *  the autosaver's contract — its `run` coalesces overlapping saves — so this flag is
+   *  presentation only: it drives the primary button's `Filing…` label, liveness for a
+   *  wait the phone measures at 7s. */
+  let filing = false;
+
   async function saveAndFinalize() {
     if (!session || session.saved) return;
     // A match that has not settled is never saved around: the operation layer refuses an
@@ -940,6 +946,7 @@
     // unconfirmed — the Dump's Context is already persisted, so the Note append
     // simply waits for the user.
     if (session.match.kind === 'append' && !appendConfirmed) return;
+    filing = true;
     try {
       const result = await finalizeCapture(session, {
         ...storeDeps(),
@@ -989,10 +996,14 @@
       }
     } catch (e) {
       status = `Error: ${(e as Error).message}`;
+    } finally {
+      filing = false;
     }
   }
 
   // The one-tap confirm for an append suggestion: mark confirmed, then finalize now.
+  // The confirmation is set before the flight starts, so a tap arriving a frame later is
+  // refused by the flight guard rather than dropped with the confirmation lost.
   async function confirmAppend() {
     if (!session || session.saved) return;
     appendConfirmed = true;
@@ -1697,8 +1708,8 @@
             <!-- The app files and the user signs once: the suggested Append is the primary
                  action, and founding a new Note stays available as the quiet override. Nothing
                  files until one of them is pressed. -->
-            <button class="primary" on:click={confirmAppend}>
-              Append
+            <button class="primary" on:click={confirmAppend} disabled={filing}>
+              {filing ? 'Filing…' : 'Append'}
               <span class="primary__sub">merge in and re-organize the note</span>
             </button>
             <button on:click={chooseNewNote}>Save as new Note</button>
@@ -1710,8 +1721,8 @@
             <!-- "Save now" forces the autosave, and after a Hold it is the only thing that
                  files the Note. It is only shown where a save will actually happen — an
                  unconfirmed append no-ops, so on that path the two buttons above are the save. -->
-            <button class="primary" on:click={() => autosaver.flush()}>
-              Save now
+            <button class="primary" on:click={() => autosaver.flush()} disabled={filing}>
+              {filing ? 'Filing…' : 'Save now'}
               <span class="primary__sub">file to the vault</span>
             </button>
             {#if !held}

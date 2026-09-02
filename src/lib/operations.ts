@@ -566,6 +566,14 @@ export async function finalizeCapture(
     // failure the user is actually watching, so it must back off and be retried on the
     // timer rather than sit at `in-flight` waiting for a restart to notice it. The open
     // session is excluded from recovery, so the retry cannot race the user's own save.
+    // The failure is logged here and only here (capture-latency ticket 09) — every other
+    // path names its failure in the durable log, and the save must too.
+    (deps.log ?? noopLog)({
+      level: 'error',
+      op: 'save',
+      message: 'the save failed — the Dump stays Pending for retry',
+      detail: { dumpId: session.dump.id, error: (error as Error).message },
+    });
     const record = await deps.pending?.get(session.dump.id);
     if (record) await recordFailure(record, error as Error, deps.pending!, deps.now());
     return {
