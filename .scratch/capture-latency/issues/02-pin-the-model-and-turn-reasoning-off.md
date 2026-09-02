@@ -138,3 +138,12 @@ ticket deliberately declined, would become warranted then.
 resolved `ms` for Organize/Match/Related and `completion_tokens_details.reasoning_tokens`
 per call — to be recorded here at the next dogfooding session. The replay ranking is
 unchanged (57/63 cache hits, same top-5).
+
+**2026-09-02 — desktop "after" numbers recorded** (the phone capture is still outstanding,
+but the gate question for ticket 07 did not need the phone — generation time dominates, not
+the phone network). Seven live Organize calls from the desktop with `reasoning: { enabled:
+false }` against `deepseek/deepseek-v4-flash-0731`, ~230–260 completion tokens each, every
+call reporting `reasoning_tokens: 0`: **2.9s, 3.1s, 9.6s, 11.2s, 11.3s, 11.7s, 16.0s**.
+Bimodal — fast calls exist, but the dominant mode sits at or past the 10-second attention
+limit, at ~20 tok/s from the provider. Reasoning-off removed the *thinking* part of the
+wait; the generation part remains, which is why ticket 07 built the streamed Organize.

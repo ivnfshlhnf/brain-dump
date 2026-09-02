@@ -30,14 +30,21 @@ import type {
   VaultDoc,
 } from './types';
 
-export function createOrganizer(settings: Settings, log: Log = noopLog): Organizer {
+export function createOrganizer(
+  settings: Settings,
+  log: Log = noopLog,
+  /** Called with each content delta as it arrives (capture-latency ticket 07). Supplying
+   *  it switches the transport to a streamed request whose reply is still consumed whole
+   *  and parsed exactly as the non-streamed one — only the delivery differs. Callers
+   *  without a watcher (recovery, re-organize) keep the simplest request shape. */
+  onToken?: (chunk: string) => void,
+): Organizer {
   return {
     async organize(content, modality): Promise<OrganizeOutput> {
-      const reply = await chat(
-        settings,
-        buildOrganizePrompt(content, modality, settings.organizeInstruction),
-        log,
-      );
+      const prompt = buildOrganizePrompt(content, modality, settings.organizeInstruction);
+      const reply = onToken
+        ? await chatStream(settings, prompt, onToken, log)
+        : await chat(settings, prompt, log);
       return parseOrganizeOutput(reply);
     },
   };
@@ -368,6 +375,113 @@ async function timedPost<T>(opts: {
     detail: { ...detail, ms: elapsed(), ...(data?.usage ? { usage: data.usage } : {}) },
   });
   return data;
+}
+
+/** One streamed chat-completions chunk: content arrives on `choices[].delta`, and the
+ *  token accounting arrives on the final chunk (only when the request asked for it). */
+type ChatStreamChunk = Usage & { choices?: { delta?: { content?: string } }[] };
+
+/** The streamed transport behind the capture sheet's Organize call (capture-latency
+ *  ticket 07). Measured Organize still sits at or past the 10-second attention limit on
+ *  ~240 completion tokens (~20 tok/s from the provider, reasoning off — the recorded gate
+ *  numbers are in `.scratch/capture-latency/issues/07`), so the sheet shows liveness: the
+ *  callback fires as output arrives. The reply is still consumed whole and parsed exactly
+ *  as the non-streamed one — `parseOrganizeOutput` is untouched, no incremental JSON —
+ *  and the three-line log contract (request / resolved / failed, with `ms` and `usage`)
+ *  holds identically. Every failure mode is a failed call, the same as a failed request:
+ *  the fetch rejects, a non-OK status, a stream that errors mid-reply, a stream that ends
+ *  without `[DONE]` — partial output is never parsed, because a truncated reply would
+ *  fail downstream with an error blaming the model rather than the transport. */
+async function chatStream(
+  settings: Settings,
+  prompt: string,
+  onToken: (chunk: string) => void,
+  log: Log = noopLog,
+): Promise<string> {
+  const url = `${baseUrl(settings)}/chat/completions`;
+  const detail = { url, model: settings.llmModel, stream: true };
+  log({ op: 'http', message: 'chat request', detail });
+
+  const startedAt = Date.now();
+  const elapsed = () => Date.now() - startedAt;
+  const fail = (error: string, extra: Record<string, unknown>): Error => {
+    log({
+      level: 'error',
+      op: 'http',
+      message: 'chat request failed',
+      detail: { ...detail, ms: elapsed(), ...extra },
+    });
+    return new Error(`LLM request failed: ${error}`);
+  };
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: authHeaders(settings),
+      body: JSON.stringify({
+        model: settings.llmModel,
+        stream: true,
+        // Usage arrives only when asked for: with include_usage the final chunk carries the
+        // same token accounting the non-streamed reply does, so ticket 01's log contract
+        // holds on the stream too.
+        stream_options: { include_usage: true },
+        response_format: { type: 'json_object' },
+        reasoning: { enabled: false },
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+  } catch (e) {
+    throw fail((e as Error).message, {});
+  }
+
+  if (!res.ok || !res.body) {
+    throw fail(`${res.status} ${res.statusText} (POST ${url})`, {
+      status: res.status,
+      statusText: res.statusText,
+    });
+  }
+
+  let reply = '';
+  try {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let usage: Record<string, unknown> | undefined;
+    let doneSentinel = false;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        const text = line.trim();
+        if (!text.startsWith('data:')) continue; // SSE comments, keep-alives
+        const payload = text.slice('data:'.length).trim();
+        if (payload === '[DONE]') {
+          doneSentinel = true;
+          continue;
+        }
+        const chunk = JSON.parse(payload) as ChatStreamChunk;
+        if (chunk.usage) usage = chunk.usage;
+        const delta = chunk.choices?.[0]?.delta?.content;
+        if (delta) {
+          reply += delta;
+          onToken(delta);
+        }
+      }
+    }
+    if (!doneSentinel) throw new Error('the stream ended without [DONE]');
+    log({
+      op: 'http',
+      message: 'chat request resolved',
+      detail: { ...detail, ms: elapsed(), ...(usage ? { usage } : {}) },
+    });
+  } catch (e) {
+    throw fail((e as Error).message, {});
+  }
+  return reply;
 }
 
 /** Parse the model's JSON reply onto OrganizeOutput, tolerating fences and loose typing. */

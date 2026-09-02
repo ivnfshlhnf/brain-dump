@@ -1,4 +1,34 @@
-**Status:** blocked — decide from ticket 02's measurements
+**Status:** done
+
+## Comments
+
+2026-09-02 — **the gate resolved in favour of building, but not for the reason the ticket
+expected.** With reasoning verified off (`reasoning_tokens: 0` on every call), seven live
+Organize calls from the desktop measured **2.9s, 3.1s, 9.6s, 11.2s, 11.3s, 11.7s, 16.0s** on
+~230–260 completion tokens — roughly 20 tok/s from the provider, and bimodal. The dominant
+mode sits at or past the 10-second attention limit, so the wait the ticket guards against is
+still real; what reasoning-off removed was only the *thinking* part of the wait. (Ticket 02's
+phone capture remains outstanding for the ticket-02 record; these desktop numbers are what
+the gate needed — generation time, not phone network, dominates.)
+
+Built as specified: `chatStream` in `llm.ts` (`stream: true`, `stream_options:
+{ include_usage: true }`, JSON mode and reasoning-off unchanged), and `createOrganizer`
+takes an optional `onToken` third argument — the Organizer interface is untouched, every
+existing fake keeps working, and callers without a watcher (recovery, re-organize) keep the
+non-streamed request, pinned by test. The capture sheet's organizer passes a callback that
+flips the Capture button from "Capturing…" to "Writing…" when the first delta lands; the
+preview still renders only when the whole reply has arrived and parsed. Every stream failure
+is a failed call with the same three-line log contract — verified: mid-stream error, a
+stream that ends without `[DONE]`, and a non-OK status each reject with a `failed` line and
+no resolved line, so partial output is never parsed.
+
+Live-verified against OpenRouter: 141 deltas, full usage on the final chunk
+(`reasoning_tokens: 0`), same OrganizeOutput as the non-streamed shape. The check harness
+gained `fulfillChat` (SSE when the request streams, JSON otherwise) used by the
+committed-sheet and recovery-refresh checks.
+
+Verified: 293 tests pass (5 new at the llm seam), svelte-check clean, all 9 browser checks
+pass, tokens clean.
 
 # 07 — Stream the Organize call for liveness
 

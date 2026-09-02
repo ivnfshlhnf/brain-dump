@@ -385,3 +385,145 @@ describe('call timing and usage are recorded (capture-latency ticket 01)', () =>
     expect(entries[0].detail!.url).toBe(`${base}/chat/completions`);
   });
 });
+
+// Ticket 07 streams the Organize call for liveness. The reply is still consumed whole and
+// parsed exactly as today, so the contract is equivalence: a streamed reply of the same
+// content must parse to the same OrganizeOutput a non-streamed reply produces, the request
+// must keep every field the non-streamed request carries (JSON mode, reasoning off), and a
+// stream that dies mid-reply is a failed call whose partial output is never parsed. The
+// non-streamed request shape stays pinned above — streaming is the capture sheet's call
+// only, and only when a token callback is watching.
+describe('the streamed Organize transport (capture-latency ticket 07)', () => {
+  const organizeJson = JSON.stringify({
+    title: 'T', tags: ['a'], category: 'C', summary: 'S', keyPoints: ['k'], related: [], body: 'B',
+  });
+
+  /** One SSE data line carrying a content delta — or, with no delta, the usage block the
+   *  final chunk carries (OpenRouter sends it only when `stream_options.include_usage`
+   *  is asked for). */
+  function sseData(delta?: string, usage?: unknown): string {
+    const payload = {
+      ...(delta === undefined ? {} : { choices: [{ delta: { content: delta } }] }),
+      ...(delta === undefined ? { choices: [] } : {}),
+      ...(usage ? { usage } : {}),
+    };
+    return `data: ${JSON.stringify(payload)}\n\n`;
+  }
+
+  /** A real streaming Response: Node's Response/ReadableStream pair behaves like the
+   *  browser's, so the implementation's reader path runs against it. `failAfter` errors
+   *  the stream after that many events, simulating a connection that dies mid-reply. */
+  function sseResponse(events: string[], failAfter?: number): Response {
+    const encoder = new TextEncoder();
+    let sent = 0;
+    const body = new ReadableStream({
+      start(controller) {
+        for (const event of events) {
+          if (failAfter !== undefined && sent === failAfter) {
+            controller.error(new Error('connection reset mid-stream'));
+            return;
+          }
+          controller.enqueue(encoder.encode(event));
+          sent += 1;
+        }
+        controller.close();
+      },
+    });
+    return new Response(body, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  }
+
+  /** Install the streaming mock: same request capture as beforeEach, but the reply is an
+   *  SSE stream rather than a JSON body. */
+  function mockStream(events: string[], failAfter?: number) {
+    fetchMock.mockImplementation(async (input, init) => {
+      lastUrl = typeof input === 'string' ? input : (input as URL).toString();
+      lastOpts = init ?? {};
+      return sseResponse(events, failAfter);
+    });
+  }
+
+  it('accumulates the streamed reply and parses it exactly as a non-streamed reply', async () => {
+    mockStream([
+      sseData('{"titl'),
+      sseData('e":"T","ta'),
+      sseData('gs":["a"],"cat'),
+      sseData('egory":"C","summary":"S",'),
+      sseData('"keyPoints":["k"],"related":[],"body":"B"}'),
+      sseData(undefined, { prompt_tokens: 5, completion_tokens: 7, reasoning_tokens: 0 }),
+      'data: [DONE]\n\n',
+    ]);
+    const seen: string[] = [];
+    const { log, entries } = collectLog();
+
+    const out = await createOrganizer(settings(), log, (t) => void seen.push(t)).organize('a dump', 'text');
+
+    // The equivalence contract, field by field against the known-good literal — the same
+    // values the non-streamed reply above parses to.
+    expect(out.title).toBe('T');
+    expect(out.tags).toEqual(['a']);
+    expect(out.category).toBe('uncategorized');
+    expect(out.summary).toBe('S');
+    expect(out.keyPoints).toEqual(['k']);
+    expect(out.related).toEqual([]);
+    expect(out.body).toBe('B');
+    // The callback saw the output arriving — liveness, not content.
+    expect(seen.join('')).toBe(organizeJson);
+
+    const body = JSON.parse(lastOpts.body as string);
+    expect(body.stream).toBe(true);
+    // Usage arrives only when asked for; ticket 01's log contract holds on the stream too.
+    expect(body.stream_options).toEqual({ include_usage: true });
+    expect(body.response_format).toEqual({ type: 'json_object' });
+    expect(body.reasoning).toEqual({ enabled: false });
+    const line = resolved(entries);
+    expect(line).toBeDefined();
+    expect(line!.message).toBe('chat request resolved');
+    expect(typeof line!.detail!.ms).toBe('number');
+    expect(line!.detail!.usage).toEqual({ prompt_tokens: 5, completion_tokens: 7, reasoning_tokens: 0 });
+  });
+
+  it('keeps the non-streamed request when no callback is watching (recovery, re-organize)', async () => {
+    responseBody = { choices: [{ message: { content: organizeJson } }] };
+    await createOrganizer(settings()).organize('a dump', 'text');
+    expect(JSON.parse(lastOpts.body as string).stream).toBe(false);
+  });
+
+  it('a stream that fails mid-reply is a failed call — the partial output is never parsed', async () => {
+    mockStream([sseData('{"titl')], 1); // one chunk, then the connection dies
+    const { log, entries } = collectLog();
+
+    await expect(createOrganizer(settings(), log, () => {}).organize('a dump', 'text')).rejects.toThrow();
+
+    expect(failed(entries)).toBeDefined();
+    expect(typeof failed(entries)!.detail!.ms).toBe('number');
+    expect(resolved(entries)).toBeUndefined();
+  });
+
+  it('a stream that ends without [DONE] is a failed call, not a truncated parse', async () => {
+    // The reply so far is not valid JSON; parsing it would fail downstream with an error
+    // that blames the model rather than the transport. The stream is the thing that died.
+    mockStream([sseData('{"title":"T"')]);
+    const { log, entries } = collectLog();
+
+    await expect(createOrganizer(settings(), log, () => {}).organize('a dump', 'text')).rejects.toThrow();
+
+    expect(failed(entries)).toBeDefined();
+    expect(resolved(entries)).toBeUndefined();
+  });
+
+  it('a non-OK status on the streamed request is the same failure as ever', async () => {
+    responseStatus = 500;
+    responseBody = { error: 'boom' };
+    const { log, entries } = collectLog();
+
+    await expect(createOrganizer(settings(), log, () => {}).organize('a dump', 'text')).rejects.toThrow();
+
+    const line = failed(entries);
+    expect(line).toBeDefined();
+    expect(line!.detail!.status).toBe(500);
+    expect(resolved(entries)).toBeUndefined();
+  });
+});

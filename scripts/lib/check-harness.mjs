@@ -37,3 +37,35 @@ export async function seedStore(page, seed) {
     db.close();
   }, seed);
 }
+/** Fulfil a Playwright route for `chat/completions` the way the app's two transports
+ *  expect: a streamed request (`stream: true` on the body, capture-latency ticket 07)
+ *  gets an SSE reply whose chunks reassemble into the same JSON, everything else gets
+ *  the plain JSON body as before. `json` is the Organize-style output object. */
+export async function fulfillChat(route, json) {
+  const body = route.request().postDataJSON();
+  if (body?.stream !== true) {
+    return route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'check', choices: [{ message: { role: 'assistant', content: JSON.stringify(json) } }] }),
+    });
+  }
+  const content = JSON.stringify(json);
+  const chunk = (delta, usage) =>
+    `data: ${JSON.stringify({
+      ...(delta === undefined ? { choices: [] } : { choices: [{ delta: { content: delta } }] }),
+      ...(usage ? { usage } : {}),
+    })}\n\n`;
+  // Split the JSON mid-token so the accumulation path is exercised, like the real reply.
+  const pieces = content.match(/.{1,12}/gs) ?? [];
+  const sse = [
+    ...pieces.map((p) => chunk(p)),
+    chunk(undefined, { prompt_tokens: 10, completion_tokens: 20, reasoning_tokens: 0 }),
+    'data: [DONE]\n\n',
+  ].join('');
+  return route.fulfill({
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' },
+    body: sse,
+  });
+}

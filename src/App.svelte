@@ -141,6 +141,12 @@
   // stack: a sheet is a place you drop into from the grid and return from.
   let sheet: 'capture' | 'note' | 'ask' | 'settings' | null = null;
   let busy = false;
+  // Liveness on the capture sheet (capture-latency ticket 07): Organize streams, and the
+  // first token arriving flips the button from "Capturing…" to "Writing…". Measured
+  // Organize still sits at or past the 10-second attention limit on the provider, and past
+  // it a progress signal stops being polite and becomes required. Liveness, not content —
+  // the preview renders when the whole reply has arrived and parsed, exactly as before.
+  let organizeWriting = false;
 
   // The version line at the foot of the Settings sheet — fixed for the life of the page
   // load, because that is what it describes: which build the phone is actually running.
@@ -761,10 +767,17 @@
   async function captureDump() {
     busy = true;
     status = '';
+    organizeWriting = false;
     try {
       const outcome = await captureThought(text, {
         ...storeDeps(),
-        organizer: createOrganizer(settings, log),
+        // The capture sheet's Organize streams (capture-latency ticket 07): the callback
+        // is liveness only — the reply is still consumed whole and parsed exactly as the
+        // non-streamed one. Recovery and re-organize keep the simple non-streamed request;
+        // nobody waits on a result they cannot see there.
+        organizer: createOrganizer(settings, log, () => {
+          organizeWriting = true;
+        }),
         matcher: createMatcher(settings, log),
         // The preview's Related pass starts here, with the capture (ticket 04) — it runs
         // against the preview while the user reads, and the save reuses what it produced.
@@ -804,6 +817,7 @@
       savedPath = '';
       matchSettled = false;
       relatedSettled = false;
+      // (organizeWriting resets in `finally` — it is only meaningful while `busy` is true.)
       // The preview is on screen; the new-vs-append decision and the Related links both
       // settle behind it, and the 5s inactivity timer is armed only when both have landed
       // (or the Related deadline has passed) — arming at render let an autosave fire before
@@ -817,6 +831,7 @@
       status = `Error: ${(e as Error).message}`;
     } finally {
       busy = false;
+      organizeWriting = false; // the preview is on screen, or the capture failed — liveness has done its job
     }
   }
 
@@ -1668,7 +1683,7 @@
         <div class="actions">
           {#if !session}
             <button class="primary" on:click={captureDump} disabled={busy || !text.trim()}>
-              {busy ? 'Capturing…' : 'Capture'}
+              {busy ? (organizeWriting ? 'Writing…' : 'Capturing…') : 'Capture'}
               <span class="primary__sub">save the raw thought</span>
             </button>
           {:else if session.saved}

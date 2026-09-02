@@ -14,7 +14,7 @@
 // decision, no links), so the autosave is what files the Note — the committed sheet must
 // appear without anyone pressing Save now.
 import { chromium } from 'playwright';
-import { seedStore } from './lib/check-harness.mjs';
+import { seedStore, fulfillChat } from './lib/check-harness.mjs';
 
 const urlArg = process.argv.slice(2).find((a) => !a.startsWith('--'));
 
@@ -88,13 +88,7 @@ try {
     if (doc) return route.fulfill(couchJson({ _id: id, ...doc }));
     return route.fulfill({ status: 404, body: JSON.stringify({ error: 'not_found' }) });
   });
-  await page.route('**/llm/v1/chat/completions', (route) =>
-    route.fulfill({
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: 'check', choices: [{ message: { role: 'assistant', content: JSON.stringify(ORGANIZE) } }] }),
-    }),
-  );
+  await page.route('**/llm/v1/chat/completions', (route) => fulfillChat(route, ORGANIZE));
 
   await page.goto(url, { waitUntil: 'load' });
   await seedStore(page, seed);
