@@ -614,3 +614,69 @@ call sends the whole vault in one untruncated request, and any doc over 8192 tok
 oversized livesync logs are local-only and not in the CouchDB pool, but accumulating
 pool files will cross the line eventually); and the 8 Memos `_index.md` boilerplate
 files sit in the ranking pool and can waste shortlist slots.
+
+---
+
+## 09 — Capturing a thought takes tens of seconds
+
+**Date:** 2026-09-02
+
+**What I saw:** Every stage of a capture takes long enough to sit and wait through it.
+Pressing Capture and getting a preview took about **23 seconds**. Confirming that preview and
+getting a filed Note took **more than 15**. A re-organize took **44**.
+
+**What I expected:** A few seconds each. The app exists to catch a thought before it goes; a
+capture that outlasts the thought is the one thing it cannot afford.
+
+**Evidence:** Reconstructed from `logs/brain-dump-log-2026-09-01.jsonl.ndjson` by subtracting
+timestamps of adjacent lines — the log records that a request *started* and never how long it
+took, so these are gaps, not measurements.
+
+- Capture to preview is two sequential chat calls: `chat request` → 15.2s → `chat request` →
+  4.9s → `capture session ready`. A second capture the same session: 1.3s + 3.4s.
+- Save: `chat request` → 14.4s → `embedding request`, then the cached embedding batch
+  (`hits: 54, embedded: 0`) resolving ~1s later, then `chat request` → 3.8s →
+  `related links resolved`. Another pass ended `related links resolved` **20.2s** after its
+  judge request.
+- Embeddings are not the cost: the cache logged `texts: 54, hits: 53` and `texts: 57,
+  hits: 57`, about a second each.
+- Settings were changed mid-session on 2026-09-01 from `deepseek/deepseek-v4-flash` to
+  `z-ai/glm-5.3-flash` (`config` / `settings saved`). The next Organize, on the recovery path,
+  took **34.7s**.
+- The request body in `chat()` (`src/lib/llm.ts:277`) carries no reasoning field, so whatever
+  each model does by default is what has been happening on every call since the app was built.
+
+**Diagnosis** (done the same day, on request) is in `.scratch/capture-latency/spec.md` and
+ADR-0010, not here.
+
+---
+
+## 10 — Saving gives no sign the app is doing anything
+
+**Date:** 2026-09-02
+
+**What I saw:** After the capture preview appears, the save — whether it comes from the 5s
+timer running out or from pressing **Save now** — produces no visible change at all. The
+button stays looking pressable, no spinner appears, nothing greys out. The sheet simply sits
+there for fifteen-odd seconds and then vanishes to the grid. While it is sitting there it is
+indistinguishable from an app that has hung.
+
+**What I expected:** Something to tell me the press registered and the app is working.
+
+**Evidence:**
+
+- `saveAndFinalize` (`src/App.svelte:811`) has no busy flag. `busy` exists and is used for the
+  Capture press (`disabled={busy}`, `{busy ? 'Capturing…' : 'Capture'}`), but nothing
+  equivalent guards the save. `closeCapture()` runs only after the whole finalize resolves.
+- The countdown edge is not a substitute: `.burn` animates over `--autosave` (5s) and has
+  finished draining long before the save completes. During the save it is a static empty line.
+- The Save now button is `<button class="primary" on:click={() => autosaver.flush()}>` with no
+  `disabled` binding.
+- A double press is nonetheless **safe** — `createAutosaver`'s `saving` flag
+  (`src/lib/autosave.ts:29`) refuses re-entry, so `finalizeCapture` cannot run twice. This is a
+  feedback problem, not a data one; noting it because the opposite was assumed at first.
+- The one thing that should mark this moment already exists and has never run: `app.css:872`
+  defines a `.note.committed .burn` cross-fade — *"the edge stops, fills back to full, and
+  turns to dry ink… the one moment worth animating"* — but `committed` is only ever applied to
+  the Note sheet (`src/App.svelte:1572`) as a static state. The capture sheet closes before
+  the Note reaches the Vault, so the animation has never played once.

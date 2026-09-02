@@ -298,10 +298,12 @@ that follow-up; the original spec above is unchanged.
   must cost its own ranking entry, never the whole pass.
 - **No model, floor, or text-form change** (the tests say there is nothing to gain and a
   re-embed plus floor recalibration to pay).
-- **Out of scope, pending its own decision:** `recoverPending` never calls `fillRelated`, so
+- **Out of scope here, decided 2026-09-02:** `recoverPending` never calls `fillRelated`, so
   every Note founded by recovery — every offline Capture — lands with an empty `## Related`
   by construction (`src/lib/operations.ts:1533`). This is finding 08's other loss point; the
-  bake-off does not touch it. The user's decision on that gap is recorded in finding 08.
+  bake-off does not touch it. **Resolved elsewhere:** the capture-latency thread closes it,
+  under the rule that Related runs where the wait is free — see ADR-0010 and
+  `.scratch/capture-latency/issues/05-recovery-computes-related.md`.
 - **Ordering: 03 then 04,** per the user's decision — 03 fixes the observed failure, 04
   hardens the path that has not failed yet.
 - **Acceptance loop for 03:** `scripts/debug-related-replay.mjs` (untracked, `[DEBUG-replay]`
