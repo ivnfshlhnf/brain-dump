@@ -1617,6 +1617,12 @@ export interface RecoverDeps extends StoreDeps {
   pending: PendingStore;
   isOnline: () => boolean;
   now: () => number;
+  /** Optional, like everywhere else Related appears: no embedder and judge means no links,
+   *  and a failed pass logs and writes the Note anyway. Recovery is where the wait is
+   *  freest — nobody is watching — so the pass has no deadline here (capture-latency
+   *  ticket 05). */
+  embedder?: Embedder;
+  relater?: Relater;
   /** Dump ids the user is reviewing on screen right now. Their Notes are about to be
    *  written by the session itself, so recovering them would race it into a second Note. */
   exclude?: string[];
@@ -1676,7 +1682,19 @@ export async function recoverPending(deps: RecoverDeps): Promise<RecoveryResult>
       // is recovered rather than treated as filed.
       const dump = vault.dumps.get(path)?.dump ?? record.dump;
       const dumpWrite = await writeDump(dump, deps);
-      const note = await organizeNote(dump, deps.organizer, deps.settings);
+      // Related is computed here, between the Organize and the write, exactly as the
+      // founding path does (capture-latency ticket 05) — recovery is the path every offline
+      // Capture takes, and its Notes used to land with an empty section by construction.
+      // Nobody is watching, so the pass keeps its place and takes no deadline; the
+      // best-effort contract (`fillRelated`) means a failed pass costs links, never the Note.
+      // The organizer's own `related` output is dropped first, as on the append path: the
+      // organizer has never seen the Vault, and a link it invents is a dead one.
+      const organized = await organizeNote(dump, deps.organizer, deps.settings);
+      const note = await fillRelated(
+        { ...organized, related: [] },
+        `${deps.settings.managedFolder}/${noteFilename(organized)}`,
+        deps,
+      );
       const noteWrite = await writeNote(note, deps.db, deps.settings, deps.hash);
       await deps.pending.remove(dump.id);
       log({

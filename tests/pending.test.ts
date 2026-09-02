@@ -18,6 +18,7 @@ import {
   settleMatch,
   finalizeCapture,
   recoverPending,
+  writeNote,
   adoptInterrupted,
   retryPending,
   findStrandedDumps,
@@ -44,6 +45,9 @@ import {
   type Organizer,
   type OrganizeOutput,
   type Matcher,
+  type Modality,
+  type Embedder,
+  type Relater,
   type PendingStore,
 } from '../src/lib/types';
 import type { OnStatus } from '../src/lib/status';
@@ -970,5 +974,101 @@ describe('dismissed Dumps — listed and restored (ticket 08)', () => {
     await dismissed.restore(older.id);
     expect(await findStrandedDumps({ db, settings, hash: sha1Hex, dismissed })).toHaveLength(1);
     expect(await findDismissedDumps({ db, settings, hash: sha1Hex, dismissed })).toEqual([]);
+  });
+});
+
+describe('recovery computes Related (capture-latency ticket 05)', () => {
+  // One dimension per topic word, as in related.test.ts: similarity is exact topic overlap,
+  // so the test decides precisely which documents are close to the recovered Note.
+  const TOPICS = ['plants', 'taxes'];
+  const embedder: Embedder = {
+    embed: async (texts) =>
+      texts.map((t) => TOPICS.map((topic) => (t.toLowerCase().includes(topic) ? 1 : 0))),
+  };
+  let judged: number;
+  const acceptAll: Relater = {
+    related: async (_subject, candidates) => {
+      judged += 1;
+      return candidates.map((_, i) => i);
+    },
+  };
+
+  /** Seed an existing Note about plants, so the recovered Note has something to link to.
+   *  A different title from the organizer's output: same title and day would derive the
+   *  same path, and the seed would be excluded as the Note itself. */
+  async function seedPlantsNote(): Promise<string> {
+    return (
+      await writeNote(
+        {
+          ...sampleOutput,
+          title: 'Plants on the windowsill',
+          createdAt: fixedNow,
+          modality: 'text' as Modality,
+          source: '[[_dumps/20260821-000000-zzzzzz]]',
+        },
+        db,
+        settings,
+        sha1Hex,
+      )
+    ).path;
+  }
+
+  /** An offline capture — the Pending Dump recovery exists for. */
+  async function offlineCapture(text = 'I keep forgetting to water the plants') {
+    const outcome = await captureThought(text, captureDeps({ online: false }));
+    if (outcome.kind !== 'pending') throw new Error('expected a pending capture');
+    return outcome;
+  }
+
+  beforeEach(() => {
+    judged = 0;
+  });
+
+  it('a Note founded by recovery carries Related links that point at documents in the vault', async () => {
+    const seeded = await seedPlantsNote();
+    const capture = await offlineCapture();
+    const link = `[[${seeded.replace(/\.md$/, '')}]]`;
+
+    const result = await recoverPending(recoverDeps({ embedder, relater: acceptAll }));
+
+    expect(result.organized).toHaveLength(1);
+    const organized = result.organized[0];
+    expect(organized.note.related).toContain(link);
+    // The written file carries them too — asserted on what landed, not what was returned.
+    const content = await contentAt(organized.noteWrite.path);
+    expect(content).toContain('## Related');
+    expect(content).toContain(`- ${link}`);
+    // The dead-link guarantee holds on the recovery path as well.
+    expect(content).not.toContain('- [[plants]]'); // the organizer's invented link is not what landed
+  });
+
+  it('no embedder or judge — the Note still files, with an empty section, and the Dump leaves Pending', async () => {
+    await offlineCapture();
+
+    const result = await recoverPending(recoverDeps());
+
+    expect(result.organized).toHaveLength(1);
+    expect(judged).toBe(0);
+    expect(await contentAt(result.organized[0].noteWrite.path)).not.toContain('- [[');
+    expect(await pending.list()).toEqual([]);
+  });
+
+  it('a Relater that rejects still files the Note, and the Dump does not stay Pending', async () => {
+    await seedPlantsNote();
+    await offlineCapture();
+    const broken: Relater = {
+      related: async () => {
+        throw new Error('provider down');
+      },
+    };
+
+    const result = await recoverPending(recoverDeps({ embedder, relater: broken }));
+
+    // Losing the links is far better than losing the Note — and recovery must not gain a
+    // new way to strand a Dump (the failure this ticket could introduce).
+    expect(result.organized).toHaveLength(1);
+    expect(result.failed).toEqual([]);
+    expect(await contentAt(result.organized[0].noteWrite.path)).not.toContain('- [[');
+    expect(await pending.list()).toEqual([]);
   });
 });

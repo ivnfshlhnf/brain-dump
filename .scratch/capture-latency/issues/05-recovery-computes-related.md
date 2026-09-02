@@ -1,4 +1,23 @@
-**Status:** ready
+**Status:** done
+
+## Comments
+
+2026-09-02 — Built as specified: `recoverPending` now calls the founding path's `fillRelated`
+between the Organize and the write, with the Note's own (not-yet-existing) path as
+`excludePath` and no deadline. The organizer's own `related` output is dropped first — the
+append path already did this, and leaving it in meant a no-embedder recovery would write the
+organizer's invented (dead) links, which the dead-link guarantee forbids.
+
+Two test discoveries while writing the Seam A suite: (1) a Note file always carries a
+`## Related` header even when empty, so the degradation assertions check for absent link lines
+rather than an absent section; (2) the seed Note must not share the recovered Note's title and
+day — same title derives the same path, and the seed is then excluded as the Note itself,
+silently yielding zero candidates.
+
+Verified: 287 tests pass (3 new in the ticket-05 describe — links land and point at vault
+documents, no embedder/judge still files with an empty section, a rejecting judge still files
+and the Dump never stays Pending), svelte-check clean, all 8 browser checks pass. The App now
+passes its cached embedder and judge into every recovery run.
 
 # 05 — Recovery computes Related
 

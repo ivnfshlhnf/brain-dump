@@ -996,6 +996,11 @@
       const result = await recoverPending({
         ...storeDeps(),
         organizer: createOrganizer(settings, log),
+        // Recovery is where the wait is free — nobody is watching — so it computes Related
+        // with no deadline (capture-latency ticket 05). Offline captures get links like any
+        // other Note.
+        embedder: cachedEmbedder(),
+        relater: createRelater(settings, log),
         isOnline: () => navigator.onLine,
         now: () => Date.now(),
         // Never race the review flow into a second Note for the Dump on screen.
