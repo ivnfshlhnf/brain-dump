@@ -6,10 +6,30 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import PouchDB from 'pouchdb-core';
 import memory from 'pouchdb-adapter-memory';
-import { beginCapture, settleMatch, addContext, finalizeCapture, type CaptureSession } from '../src/lib/operations';
+import {
+  beginCapture,
+  settleMatch,
+  addContext,
+  finalizeCapture,
+  writeDump,
+  writeNote,
+  wikilink,
+  type CaptureSession,
+} from '../src/lib/operations';
 import { createAutosaver, AUTOSAVE_DELAY_MS } from '../src/lib/autosave';
 import { docIdForPath } from '../src/lib/livesync';
-import { DEFAULT_SETTINGS, type Settings, type DocStore, type Organizer, type OrganizeOutput, type Matcher } from '../src/lib/types';
+import {
+  DEFAULT_SETTINGS,
+  type Settings,
+  type DocStore,
+  type Organizer,
+  type OrganizeOutput,
+  type Matcher,
+  type MatchSuggestion,
+  type Note,
+  type Dump,
+  type Modality,
+} from '../src/lib/types';
 
 PouchDB.plugin(memory);
 
@@ -60,6 +80,13 @@ async function noteWritten(slug: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Read the current raw content of a Note or Dump file (its single chunk's `data`). */
+async function noteContent(path: string): Promise<string> {
+  const meta = await db.get<{ children: string[] }>(docIdForPath(path, settings));
+  const chunk = await db.get<{ data: string }>(meta.children[0]);
+  return chunk.data;
 }
 
 async function sessionWithContext(): Promise<CaptureSession> {
@@ -195,5 +222,96 @@ describe('autosave timing (Seam A — ticket 03)', () => {
     createAutosaver({ save: saveOf(settled) }).schedule();
     await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
     expect(await waitForNote('water-the-plants')).toBe(true);
+  });
+
+  // The other half of the sequencing contract: a decision that arrives *after* the idle
+  // window has elapsed must still be honored. The late save appends to the matched Note —
+  // it does not found the second Note a save that guessed `new` would create.
+  it('a match resolving to append after the delay has elapsed still appends (capture-latency ticket 03)', async () => {
+    // The Note the delayed decision will land on: a Dump file its `source` resolves to,
+    // or the append path would fall back to founding.
+    const dump: Dump = {
+      id: 'aaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      content: 'First verbatim capture.',
+      context: '',
+      createdAt: fixedNow,
+      modality: 'text' as Modality,
+    };
+    const dumpWritten = await writeDump(dump, { db, settings, hash: sha1Hex });
+    const note: Note = {
+      title: 'Water the plants',
+      tags: ['home', 'plants'],
+      createdAt: fixedNow,
+      modality: 'text' as Modality,
+      source: wikilink(dumpWritten.path),
+      category: 'personal',
+      summary: 'A reminder to water the plants.',
+      body: 'I keep forgetting to water the plants.',
+      keyPoints: ['Water the plants regularly'],
+      related: ['[[plants]]'],
+    };
+    const existingPath = (await writeNote(note, db, settings, sha1Hex)).path;
+
+    // The matcher says append — to the Note actually seeded, not whichever candidate
+    // happens to come first.
+    const appendToSeededMatcher: Matcher = {
+      match: (_topic, candidates) => {
+        const target = candidates.find((c) => c.path === existingPath);
+        return Promise.resolve<MatchSuggestion>(
+          target ? { kind: 'append', path: target.path } : { kind: 'new' },
+        );
+      },
+    };
+    const s = await beginCapture('the basil needs pruning', {
+      ...beginDeps(),
+      matcher: appendToSeededMatcher,
+    });
+
+    let finalizedPath = '';
+    let saveError = '';
+    const save = async (session: CaptureSession) => {
+      try {
+        const result = await finalizeCapture(session, finalizeDeps());
+        if (result.ok) finalizedPath = result.written.path;
+        else saveError = result.error.message;
+      } catch (e) {
+        saveError = (e as Error).message;
+      }
+    };
+    const a = createAutosaver({ save: () => save(s) });
+    a.schedule();
+
+    // Two idle windows over the undecided session: nothing is filed.
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 2);
+    expect(finalizedPath).toBe('');
+    expect(saveError).toBe('Cannot save: the new-vs-append decision has not been made yet.');
+
+    // The decision arrives late — after the windows have elapsed — and says append.
+    // Re-arming, as the app does when the match settles, the late save honors it.
+    const settled = await settleMatch(s, { db, settings, matcher: appendToSeededMatcher });
+    saveError = '';
+    createAutosaver({ save: () => save(settled) }).schedule();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+    // The timer's fire-and-forget save chain interleaves PouchDB macrotasks with
+    // microtasks — alternate flushing both until it lands, the way waitForNote does
+    // for the founding path.
+    for (let i = 0; i < 100 && !finalizedPath && !saveError; i++) {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(1);
+    }
+    expect(saveError).toBe('');
+    // The capture joined the target's Dump as a dated section, and the Note was
+    // rewritten in place at its frozen path — no second Note was founded.
+    expect(finalizedPath).toBe(existingPath);
+    const dumpContent = await noteContent(dumpWritten.path);
+    expect(dumpContent).toContain('## Appended');
+    expect(dumpContent).toContain('the basil needs pruning');
+    const all = await db.allDocs({ include_docs: true });
+    const managedNotes = all.rows.filter(
+      (r) =>
+        (r.doc as { type?: string; path?: string })?.type === 'plain' &&
+        (r.doc as { path?: string }).path?.startsWith(`${settings.managedFolder}/`),
+    );
+    expect(managedNotes).toHaveLength(1);
   });
 });

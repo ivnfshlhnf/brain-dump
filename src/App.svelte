@@ -883,7 +883,7 @@
   async function settleCaptureRelated() {
     if (!session || session.saved) return;
     const settling = session;
-    const settled = await settleRelated(session);
+    const settled = await settleRelated(session, {}, log);
     if (!sameCapture(settling)) return;
     session = { ...session, ...relatedFields(settled) };
     relatedSettled = true;
@@ -896,7 +896,7 @@
   async function settleCaptureRelatedFollowUp(dumpId: string) {
     const settling = session;
     if (!settling || settling.dump.id !== dumpId || settling.saved) return;
-    const settled = await settleRelated(settling, { timeoutMs: Number.POSITIVE_INFINITY });
+    const settled = await settleRelated(settling, { timeoutMs: Number.POSITIVE_INFINITY }, log);
     if (!session || !sameCapture(settling)) return;
     session = { ...session, ...relatedFields(settled) };
   }

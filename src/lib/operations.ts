@@ -367,7 +367,11 @@ export async function beginCapture(
   deps: BeginCaptureDeps,
 ): Promise<CaptureSession> {
   const { dump } = await capture(text, deps);
-  const preview = await organizeNote(dump, deps.organizer, deps.settings);
+  // The organizer's own `related` output is dropped, as on the append and recovery paths:
+  // it has never seen the Vault, so anything it put there is an invented (dead) link. The
+  // links that land are only ever the ones the preview's own pass computed.
+  const organized = await organizeNote(dump, deps.organizer, deps.settings);
+  const preview: Note = { ...organized, related: [] };
   const session: CaptureSession = {
     dump,
     preview,
@@ -430,6 +434,7 @@ function startPreviewRelated(session: CaptureSession, deps: BeginCaptureDeps): v
 export async function settleRelated(
   session: CaptureSession,
   wait: { timeoutMs?: number } = {},
+  log?: Log,
 ): Promise<CaptureSession> {
   if (!session.relatedRun) return session;
   const remaining =
@@ -442,7 +447,19 @@ export async function settleRelated(
     session.relatedRun,
     new Promise<typeof RELATED_MISSED>((resolve) => setTimeout(() => resolve(RELATED_MISSED), timerMs)),
   ]);
-  if (result === RELATED_MISSED) return { ...session, related: 'missed' };
+  if (result === RELATED_MISSED) {
+    // Logged on the transition only — a settle that finds the miss already recorded (the
+    // save's own settle after the sheet's) must not log it twice.
+    if (session.related === 'resolving') {
+      (log ?? noopLog)({
+        level: 'info',
+        op: 'related',
+        message: 'preview Related pass missed its deadline — the Note will be filed without links unless the pass lands first',
+        detail: { waitedMs: remaining },
+      });
+    }
+    return { ...session, related: 'missed' };
+  }
   if (result === null) {
     // The pass failed outright — terminal, so the run is dropped; nothing more is coming,
     // and a follow-up settle must not wait on a settled run. Renders the same as a miss.
@@ -571,15 +588,19 @@ async function foundNewNote(
   session: CaptureSession,
   deps: FinalizeDeps,
 ): Promise<{ note: Note; written: WriteResult; session: CaptureSession }> {
-  const ready = session.dump.context ? session : await settleRelated(session);
-  const organized = ready.dump.context
-    ? await organizeNote(ready.dump, deps.organizer, deps.settings)
-    : ready.preview;
-  const note = ready.dump.context
-    ? await withRelated(organized, ready, deps)
-    : organized;
+  if (!session.dump.context) {
+    // No Context: the held preview already is the Organize of the unchanged Dump, so the
+    // save gives the Related pass the rest of its deadline and writes the preview as it
+    // stands — no second ranking whose only possible effect was to disagree with the first.
+    const ready = await settleRelated(session, {}, deps.log);
+    const written = await writeNote(ready.preview, deps.db, deps.settings, deps.hash);
+    return { note: ready.preview, written, session: ready };
+  }
+  // With Context the Note changed, so the links are recomputed at save, as they always were.
+  const organized = await organizeNote(session.dump, deps.organizer, deps.settings);
+  const note = await withRelated(organized, session, deps);
   const written = await writeNote(note, deps.db, deps.settings, deps.hash);
-  return { note, written, session: ready };
+  return { note, written, session };
 }
 
 /** Read one file from the Vault, matching the bare path or the path with its `.md`

@@ -1,9 +1,11 @@
 // The sheet becomes the saved Note (capture-latency ticket 06): a successful save must
-// keep the capture sheet open as the filed Note — the countdown edge refilled and dry, a
-// Filed stamp linking into the Vault, the Context field replaced by the frozen line — and
-// the user closes it, after which the next Capture opens blank. The failure this guards:
-// the sheet tearing itself down at the moment the Note lands (the pre-ticket behaviour),
-// which threw away the one thing worth showing and left filing without a visible end.
+// keep the capture sheet open as the filed Note — a Filed stamp linking into the Vault,
+// the Context field replaced by the frozen line, the countdown hint gone — and the user
+// closes it, after which the next Capture opens blank. The failure this guards: the sheet
+// tearing itself down at the moment the Note lands (the pre-ticket behaviour), which threw
+// away the one thing worth showing and left filing without a visible end. This check sees
+// the DOM and content only; the wet→dry cross-fade on the countdown edge is styling,
+// verified by eye on the phone (ticket 06's hand test).
 //
 //   node scripts/check-committed-sheet.mjs   — starts its own dev server
 //

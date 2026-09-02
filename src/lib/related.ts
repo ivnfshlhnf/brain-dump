@@ -88,8 +88,9 @@ function shortlistOf(ranked: ScoredDoc[]): VaultDoc[] {
  *
  *  Out-of-range and duplicate indexes are dropped rather than trusted. A model that invents an
  *  index must not be able to turn that into a link, and the same index twice must not produce
- *  the same link twice. If the call fails, the Note is saved with no Related links — losing the
- *  links is a far better outcome than losing the Note. */
+ *  the same link twice. A failed call throws: the failure is logged here, and every caller
+ *  treats the rejection as "file without links" — losing the links is a far better outcome
+ *  than losing the Note. */
 async function judge(
   shortlist: VaultDoc[],
   note: Note,
