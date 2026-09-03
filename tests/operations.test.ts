@@ -304,6 +304,12 @@ describe('capture review flow (Seam A — ticket 03)', () => {
     expect(session.preview.title).toBe('Water the plants');
     expect(organizeCalls).toHaveLength(1);
     expect(organizeCalls[0].content).toBe('I keep forgetting to water the plants');
+
+    // The organizer's invented links die at the source (review fix): the fake replies
+    // with `related: ['[[plants]]']`, but a link to a Note that does not exist is not a
+    // Related link — the capture preview carries none, and the real Related pass computes
+    // them (as the append and recovery paths already did).
+    expect(session.preview.related).toEqual([]);
   });
 
   it('adds Context: edits the Dump while preserving the verbatim original in a ## Original section', async () => {

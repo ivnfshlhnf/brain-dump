@@ -179,7 +179,16 @@ export async function readVaultFiles(
   }
   const files: VaultFile[] = [];
   for (const doc of wanted) {
-    const content = doc.children.map((id) => chunks.get(id)?.data ?? '').join('');
+    // No silent skip (see the ticket 08 comment above): every child id went into the
+    // chunk fetch and a missing one already threw in the zip — this is the belt to that
+    // brace, failing loudly rather than joining an empty string into a Note's content.
+    const content = doc.children
+      .map((id) => {
+        const chunk = chunks.get(id);
+        if (!chunk) throw new Error(`chunk ${id} is missing from the database`);
+        return chunk.data;
+      })
+      .join('');
     files.push({
       path: doc.path,
       content,

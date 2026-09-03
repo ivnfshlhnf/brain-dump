@@ -99,6 +99,28 @@ describe('reading the vault', () => {
     ]);
   });
 
+  it('fetches a chunk shared between two files once, not once per owner', async () => {
+    // Content addressing means identical chunks are shared between files — the dedup
+    // property ticket 08 promised: the request carries each id once, and every owner
+    // reassembles from the one reply.
+    await db.put({ _id: 'h:shared', type: 'leaf', data: 'the same words' });
+    const shared = { type: 'plain', children: ['h:shared'], eden: {} };
+    await db.put({
+      _id: docIdForPath('Brain Dump/first.md', settings), path: 'Brain Dump/first.md',
+      ctime: now, mtime: now, size: 14, ...shared,
+    });
+    await db.put({
+      _id: docIdForPath('Brain Dump/second.md', settings), path: 'Brain Dump/second.md',
+      ctime: now, mtime: now, size: 14, ...shared,
+    });
+
+    const watched = counting(db);
+    const files = await readVaultFiles(watched, (p) => p.startsWith('Brain Dump/'));
+
+    expect(watched.calls.allDocs).toBe(2); // one metadata scan + one fetch, whatever the sharing
+    expect(files.map((f) => f.content)).toEqual(['the same words', 'the same words']);
+  });
+
   it('still fails the whole read when a chunk is missing', async () => {
     await write('Brain Dump/note.md', 'the note');
     const doc = await meta('Brain Dump/note.md');

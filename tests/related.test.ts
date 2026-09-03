@@ -13,6 +13,7 @@ import PouchDB from 'pouchdb-core';
 import memory from 'pouchdb-adapter-memory';
 import { beginCapture, settleMatch, settleRelated, finalizeCapture, addContext, RELATED_DEADLINE_MS } from '../src/lib/operations';
 import { RELATED_MAX } from '../src/lib/related';
+import { type Log } from '../src/lib/logger';
 import { writeFile, readVaultFiles } from '../src/lib/livesync';
 import {
   DEFAULT_SETTINGS,
@@ -345,6 +346,27 @@ describe('Related for the preview (capture-latency ticket 04)', () => {
     expect(result.ok && result.session.related).toBe('missed');
     const links = await relatedLinksOf(result.ok ? result.written.path : '');
     expect(links).toEqual([]);
+  });
+
+  it('a deadline miss is logged once — the save follows the sheet, and must not log the same miss twice', async () => {
+    // Ticket 04 promised both outcomes reach the durable log: the failure (pinned above)
+    // and the miss. The miss is logged on the resolving → missed transition only, because
+    // the save's own settle arrives after the sheet's and must stay silent.
+    await seedDoc('Brain Dump/2026-01-01-plants.md', 'Notes on plants.');
+    const { relater } = deferredRelater();
+    const session = await settleMatch(await beginCapture('The plants need water', captureDeps({ relater })), { db, settings, matcher: newMatcher });
+    session.relatedStartedAt = Date.now() - RELATED_DEADLINE_MS - 1; // already exhausted
+
+    const entries: Array<{ level: string; message: string }> = [];
+    const log: Log = (e) => entries.push({ level: e.level ?? 'info', message: e.message });
+    const sheet = await settleRelated(session, {}, log);
+    const save = await settleRelated(sheet, {}, log); // the save's own settle, after the sheet's
+
+    expect(sheet.related).toBe('missed');
+    expect(save.related).toBe('missed');
+    expect(entries).toHaveLength(1);
+    expect(entries[0].level).toBe('info');
+    expect(entries[0].message).toContain('missed its deadline');
   });
 
   it('a Relater that rejects behaves like a deadline miss — the Note is still filed', async () => {
