@@ -1,6 +1,32 @@
-**Status:** built, awaiting the phone acceptance number
+**Status:** done
 
 ## Comments
+
+**2026-09-02 — phone acceptance number recorded, and met.** Capture `b74561ae` (27 chars),
+the first on this build:
+
+- `capture session ready` → first Related embed request: **~1.05s** (was **~13.4s** in the
+  10:47 capture the ticket was written from).
+- Match request sent **0.5s** after the preview (was 4.4s), and the call itself resolved in
+  **2662ms** (was 12317ms — provider mood, but the pre-read is gone either way).
+- The preview's whole Related pass — vault read, cache check, subject embed, floor —
+  finished in **3.0s**, inside ticket 04's 5s deadline for the first time on the phone. No
+  deadline-miss line in the log.
+- Preview at 7.6s; match decided at 10.8s; Related settled (honest empty — nothing cleared
+  the 0.35 floor, so the judge call was never needed) at 11.0s. Capture pipeline complete
+  in ~11s, against 52.5s for the append capture eight hours earlier.
+
+One anomaly recorded for the next look, not caused by this ticket: the append path ran
+**twice** — two re-organizes of the same merged Dump (`prompt_tokens: 287` in both), at
+11:19:49 and 11:20:11, each followed by a floor-empty Related pass. Between the two runs the
+durable log is silent — `recordFailure` writes the Pending record but logs no line, so a save
+that failed after its re-organize leaves nothing in the log but a gap. Either the first
+save's write failed and the user pressed Save now, or the save ran twice for one tap
+(`saveAndFinalize` guards only on `session.saved`, which is still false during an in-flight
+finalize). The merge's idempotency kept the Note correct both ways; the spend was one extra
+7s call. Two follow-ups nominated, neither urgent: log the finalize failure (the save path is
+the one path whose failure the durable log cannot currently show), and an in-flight guard on
+`saveAndFinalize`.
 
 2026-09-02 — built as specified. `readVaultFiles` now scans the metadata, collects the chunk
 ids of every included, live document, and fetches them with one `allDocs({ keys })`, zipping
