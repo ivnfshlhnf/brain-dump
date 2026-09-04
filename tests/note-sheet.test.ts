@@ -294,28 +294,35 @@ describe('reorganizeNote — rebuild the Note wholesale from its Dump (the appen
     expect(organizedBody).not.toContain('An old summary');
   });
 
-  it('when the Note\'s Dump is gone, the body on the file is preserved and only the frontmatter is re-derived', async () => {
-    // No Dump seeded: the file's own body is all there is, so the pre-rework
-    // metadata-refresh behavior is kept for exactly that case.
+  it('when the Note\'s Dump is gone, the Re-organize refuses — it never organizes the Note from itself', async () => {
+    // The no-Dump fallback organized from the Note's own body, so repeated Re-organizes
+    // drifted the derived fields away from the Dump's context (the user saw this). A Note
+    // without its Dump is a view with no source: refusal, surfaced to the user, not a
+    // silent re-derivation from the last output.
     const path = await seedNote(makeNote({ title: 'Old Title', tags: ['old'], category: 'uncategorized', summary: 'Old summary.', body: 'The body that remains.' }));
 
-    const view = await reorganizeNote(path, {
-      db,
-      settings,
-      organizer: { organize: async () => ({ ...sampleOutput, title: 'New Title', tags: ['new'], category: 'personal', summary: 'New summary.' }) },
-      hash: sha1Hex,
-      now: () => fixedNow,
-    });
+    let called = 0;
+    await expect(
+      reorganizeNote(path, {
+        db,
+        settings,
+        organizer: { organize: async () => { called += 1; return { ...sampleOutput, title: 'New Title', tags: ['new'], category: 'personal', summary: 'New summary.' }; } },
+        hash: sha1Hex,
+        now: () => fixedNow,
+      }),
+    ).rejects.toThrow(/Dump is gone/);
 
-    expect(view!.note.title).toBe('New Title');
-    expect(view!.note.tags).toEqual(['new']);
-    expect(view!.note.summary).toBe('New summary.');
+    expect(called).toBe(0);
+    const view = await readNote(path, { db, settings, hash: sha1Hex });
+    expect(view!.note.title).toBe('Old Title'); // untouched
     expect(view!.note.body).toBe('The body that remains.');
   });
 
   it('assigns a member Category to a legacy Note — old Notes join the colour system when touched', async () => {
     // A legacy Note carries a free-form Category ('Hardware'); it reads as `uncategorized`.
+    const dump = sourceDump();
     const path = await seedNote(makeNote({ category: 'uncategorized' }));
+    await seedDump(dump);
     expect((await readNote(path, { db, settings, hash: sha1Hex }))!.note.category).toBe('uncategorized');
 
     // Re-organizing assigns a member Category from the closed set.

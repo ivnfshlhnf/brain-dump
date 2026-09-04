@@ -472,8 +472,9 @@
   /** Re-organize the Note on screen (ADR-0009): rebuild it wholesale from its Dump — body
    *  and title alike — and paint the rebuilt Note back into the sheet. The card on the grid
    *  is now stale, so the grid is refreshed too — this is where re-organize finally lives
-   *  (ticket 05 left it with no surface). When the Note's Dump is gone, the operation falls
-   *  back to re-deriving only the frontmatter against the body on the file. */
+   *  (ticket 05 left it with no surface). When the Note's Dump is gone, the operation
+   *  refuses rather than organize the Note from itself — the error says so, and the file is
+   *  untouched. */
   async function reorganizeCurrentNote() {
     if (!noteView) return;
     reorganizing = true;
@@ -1965,9 +1966,10 @@
         ></textarea>
       </label>
       <p class="hint">
-        Left empty, Notes are organized by the built-in rules alone. Anything written here is
+        Comes filled with the Style: Notes are written as you write — your language, register,
+        and length, never translated, never padded. Anything written here replaces it and is
         passed to the model with every organize — where it conflicts with the built-in rules,
-        your instruction wins.
+        your instruction wins. Left empty, Notes fall back to the built-in rules alone.
       </p>
     </fieldset>
 

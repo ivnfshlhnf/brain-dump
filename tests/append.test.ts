@@ -656,28 +656,35 @@ describe('refreshNoteMetadata (Seam A — the append rework)', () => {
     expect(content).toContain(`created: ${fixedNow}`);
   });
 
-  it('when the Note\'s Dump is gone, the body on the file is preserved and only the frontmatter is re-derived', async () => {
-    // No dump file seeded — the Note's `source` points at a Dump that does not exist.
+  it('when the Note\'s Dump is gone, the Re-organize refuses — nothing is organized from the Note body', async () => {
+    // The no-Dump fallback used to organize from the Note's own body: title, tags, summary
+    // and Category re-derived from the last organized output — exactly the drift the user
+    // saw across repeated Re-organizes. The Note is a view of the Dump (CONTEXT.md); a view
+    // with no source must not pretend to refresh itself. Refusal surfaces (the caller
+    // catches and reports), and the file is untouched — a failed Organize leaves the Note
+    // intact, as everywhere else.
     const path = await seedNote(
       makeNote({ title: 'Old Title', summary: 'Old summary.', body: 'The body that remains.' }),
     );
 
-    const { organizer: refreshOrganizer } = recordingOrganizer({
+    const { calls, organizer: refreshOrganizer } = recordingOrganizer({
       title: 'New Title', summary: 'New summary.',
     });
 
-    await refreshNoteMetadata(path, {
-      db,
-      settings,
-      organizer: refreshOrganizer,
-      hash: sha1Hex,
-      now: () => fixedNow,
-    });
+    await expect(
+      refreshNoteMetadata(path, {
+        db,
+        settings,
+        organizer: refreshOrganizer,
+        hash: sha1Hex,
+        now: () => fixedNow,
+      }),
+    ).rejects.toThrow(/Dump is gone/);
 
+    expect(calls).toHaveLength(0); // no LLM call against the Note body
     const content = await noteContent(path);
-    expect(content).toContain('title: New Title'); // frontmatter re-derived…
-    expect(content).toContain('summary: New summary.');
-    expect(content).toContain('The body that remains.'); // …and the body preserved.
+    expect(content).toContain('title: Old Title'); // the file is unchanged
+    expect(content).toContain('The body that remains.');
   });
 
   it('organizes once even when a 409 forces a retry (not once per retry)', async () => {

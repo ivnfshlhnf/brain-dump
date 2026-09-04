@@ -209,6 +209,44 @@ describe('OpenAI-compatible chat seam (createOrganizer / createAnswerer)', () =>
     expect(prompt).not.toMatch(/instruction/i);
   });
 
+  it('asks for summary and keyPoints only when they add something, and forbids template headings (the Style rework)', async () => {
+    // The corporate Note template (## Issue / ## Steps to Reproduce / ## Workaround) and the
+    // triple redundancy (a 27-word Dump whose body, summary and sole key point were the same
+    // sentence) came from the field contract itself: it demanded a summary and bullets of
+    // every Dump, however thin. The contract now makes summary and keyPoints additive —
+    // each must say what the rest of the Note does not, and empty is a correct answer — and
+    // names the template headings so the model cannot reach for them. A rephrase is fine;
+    // re-demanding boilerplate is not — assert the load-bearing intent only.
+    responseBody = {
+      choices: [{ message: { content: JSON.stringify({
+        title: 'T', tags: [], category: 'C', summary: 'S', keyPoints: [], related: [], body: 'B',
+      }) } }],
+    };
+    await createOrganizer(settings()).organize('a short dump', 'text');
+    const prompt = (JSON.parse(lastOpts.body as string).messages[0] as { content: string }).content;
+    expect(prompt).toMatch(/adds something the title and body do not already say/);
+    expect(prompt).toMatch(/empty string when there is nothing to add/);
+    expect(prompt).toMatch(/empty array when there\s+are none/);
+    expect(prompt).toMatch(/no template headings/i);
+    expect(prompt).toMatch(/Steps to Reproduce/);
+    expect(prompt).toMatch(/own voice/);
+    expect(prompt).toMatch(/empty\s+summary or empty keyPoints is correct, not a failure/);
+  });
+
+  it('parses an empty summary and empty keyPoints as valid output (the Style rework)', async () => {
+    // The contract now asks the model for empty summary/keyPoints on thin Dumps, so the
+    // parser must accept them as first-class answers, not defaults it happens to tolerate.
+    responseBody = {
+      choices: [{ message: { content: JSON.stringify({
+        title: 'T', tags: [], category: 'personal', summary: '', keyPoints: [], body: 'B',
+      }) } }],
+    };
+    const out = await createOrganizer(settings()).organize('a short dump', 'text');
+    expect(out.summary).toBe('');
+    expect(out.keyPoints).toEqual([]);
+    expect(out.body).toBe('B');
+  });
+
   it('instructs the model to be faithful to the Dump (finding 03 guard)', async () => {
     // CONTEXT.md's Organize contract: "Every part of this is derived from the Dump alone
     // except the related links." The prompt must say so to the model — without it, given a

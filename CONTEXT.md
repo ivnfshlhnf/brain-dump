@@ -21,7 +21,7 @@ The organized artifact derived from exactly one Dump. The Dump is the record; th
 _Avoid_: document, file, entry, source of truth
 
 **Organize**:
-The rendering of a Dump into a Note — a title, tags, summary, key points, category, and body — without altering the source Dump. Every part of this is derived from the Dump alone. On an Append the Note is re-organized wholesale from the accumulated Dump: body and title alike are rewritten, not patched.
+The rendering of a Dump into a Note — a title, tags, summary, key points, category, and body — without altering the source Dump. Every part of this is derived from the Dump and the Style. On an Append the Note is re-organized wholesale from the accumulated Dump: body and title alike are rewritten, not patched.
 _Avoid_: process, format, clean up, additive enrichment
 
 **Category**:
@@ -31,6 +31,10 @@ _Avoid_: type, kind, folder
 **Tag**:
 A fine-grained keyword Organize derives from a Dump. A Note has many, drawn from no fixed set — the open counterpart to the one closed Category.
 _Avoid_: label, keyword, topic
+
+**Style**:
+The way the user writes, as the Dumps show it. Organize adopts the Style for everything it writes in prose — title, summary, key points, body — so a Note reads as the user's own words, organized, and never as an assistant's report about the user. The Style matches each Dump's language and register exactly (colloquial stays colloquial; a mixed Dump stays mixed) and cleans only typos and disfluency. Tags and the Category are retrieval keys, not prose, and take no Style.
+_Avoid_: tone, persona, template
 
 **Capture**:
 Creating a Dump from a voice or text input.
@@ -61,7 +65,7 @@ Answering a natural-language question by reading the relevant Notes and synthesi
 _Avoid_: search, query, lookup
 
 **Instruction**:
-A standing instruction the user writes once, which the app applies to every Organize — shaping how the Dump is rendered into the Note, such as the language the Note is written in. It never reaches the judgments about where content belongs: founding, Appending, and Related are not its business.
+A standing instruction the user writes once, which the app applies to every Organize — shaping how the Dump is rendered into the Note, such as the language the Note is written in. It never reaches the judgments about where content belongs: founding, Appending, and Related are not its business. The app ships the Instruction pre-filled with the Style; writing one replaces it, and emptying it returns Notes to the built-in rules alone.
 _Avoid_: preference, prompt tweak, system prompt
 
 **Modality**:

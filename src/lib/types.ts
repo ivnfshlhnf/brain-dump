@@ -277,13 +277,19 @@ export interface Settings {
   llmApiKey: string;
   embedderModel: string;
   /** The user's standing Instruction for how every Note is organized (CONTEXT.md:
-   *  Instruction) — e.g. "always write in English regardless of the dump's language".
-   *  Applied verbatim to the organizer prompt on every Organize call; never reaches the
-   *  matcher or the Related judge. Empty means no Instruction. */
+   *  Instruction) — applied verbatim to the organizer prompt on every Organize call;
+   *  never reaches the matcher or the Related judge. Ships as the Style (CONTEXT.md:
+   *  Style) — the way the user writes, so a Note reads as their own words and never as
+   *  an assistant's report about them. Editing it here replaces the Style; emptying it
+   *  turns Notes back to the built-in rules alone. */
   organizeInstruction: string;
   /** The app-owned CouchDB database holding cached embeddings — a sibling of the vault
    *  database, never the vault itself (ADR-0004). */
   embeddingsDb: string;
+  /** The schema version of the stored settings record, bumped when a new default needs a
+   *  one-time migration of records saved before it (see loadSettings). Absent or lower on
+   *  a stored record means it predates that migration. */
+  settingsVersion: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -303,13 +309,42 @@ export const DEFAULT_SETTINGS: Settings = {
   llmProvider: 'https://openrouter.ai/api/v1',
   // A dated snapshot, not `~deepseek/deepseek-v4-flash-latest`: the alias resolves to 0731
   // today and buys nothing now, but its failure mode is invisible — the Organize prompt is
-  // tuned by hand for faithfulness, and a model changing underneath it produces no error and
-  // no log line, only Notes that gradually get worse. Taking a future snapshot is a Settings
-  // edit. 0731 scores 51.8 on OpenRouter's intelligence index against 42.1 for the 0423
-  // snapshot this default was pinned to before, at the same price (capture-latency ticket 02).
+  // tuned by hand for faithfulness and the Style (the default standing Instruction), and a
+  // model changing underneath it produces no error and no log line, only Notes that
+  // gradually get worse. Taking a future snapshot is a Settings edit. 0731 scores 51.8 on
+  // OpenRouter's intelligence index against 42.1 for the 0423 snapshot this default was
+  // pinned to before, at the same price (capture-latency ticket 02).
   llmModel: 'deepseek/deepseek-v4-flash-0731',
   llmApiKey: '',
   embedderModel: 'openai/text-embedding-3-small',
   embeddingsDb: 'brain-dump-embeddings',
-  organizeInstruction: '',
+  settingsVersion: 1,
+  // The Style (CONTEXT.md: Style), shipped verbatim as the default standing Instruction:
+  // write as the user, match the Dump's language and register, no template, no padding,
+  // no invention. Deliberately global — no one user's slang is named; the Dump itself is
+  // the evidence the model obeys. Editable in Settings; the settings migration fills it
+  // into records that predate it (settings.ts).
+  organizeInstruction: [
+    'Write every Note as the user would write it themselves — never as an assistant reporting',
+    'on them. Write in first person; never say "the user".',
+    '',
+    "Match the Dump's language exactly: whatever language and register the Dump is written in —",
+    'formal or slang, one language or several mixed — the Note is written in exactly that.',
+    'Never translate. Never upgrade casual wording to formal or dictionary language; slang,',
+    'particles, and texting conventions stay exactly as written.',
+    '',
+    "Keep the Dump's personality: its emoji, laughter, asides, and trailing expressions stay",
+    "where the user wrote them. Fix only real typos and slips; keep the user's casing and",
+    'punctuation habits.',
+    '',
+    "A word is a word, not a brand or product name — never correct or reinterpret the user's",
+    'terminology.',
+    '',
+    "The user's hunches stay hunches: keep their hedging as written — never escalate it into",
+    'formal investigation language or numbered next steps.',
+    '',
+    "Note length follows Dump length: a 10-word thought is a ~10-word Note. Never pad, never",
+    "add sections, and never add advice, steps, causes, or facts the user didn't write — not",
+    'even plausible ones.',
+  ].join('\n'),
 };

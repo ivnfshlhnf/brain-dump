@@ -1213,73 +1213,39 @@ export interface RefreshDeps {
  *  of its Dump, so anything worth keeping belongs in the Dump, and this regenerates the
  *  view from the record.
  *
- *  The Organize runs once per user action. In the dump-present branch the rebuilt file
- *  content is computed on the first attempt and re-applied to each 409 retry — a
- *  concurrent hand edit is regenerated over rather than preserved, which is the contract
- *  (the Note is a view of its Dump). In the no-Dump fallback the derived frontmatter is
- *  what is cached; each retry re-applies it to the freshest body on the file, so a
- *  concurrent hand edit there survives.
+ *  The Organize runs once per user action: the rebuilt file content is computed on the
+ *  first attempt and re-applied to each 409 retry — a concurrent hand edit is regenerated
+ *  over rather than preserved, which is the contract (the Note is a view of its Dump).
  *
- *  When the Note's Dump is gone (deleted by the user), the body on the file is all there
- *  is: the frontmatter is re-derived against it and the body preserved byte-for-byte —
- *  the pre-rework metadata-refresh behavior, kept for exactly that case. */
+ *  When the Note's Dump is gone (deleted by the user, or the `source` link is broken),
+ *  this refuses — it throws rather than organize the Note from itself, which would drift
+ *  the derived fields a little further from the Dump's context on every Re-organize. The
+ *  error surfaces to the user; the file is untouched, as with any failed Organize. */
 export async function refreshNoteMetadata(
   notePath: string,
   deps: RefreshDeps,
 ): Promise<WriteResult> {
-  let plan:
-    | { mode: 'note'; content: string }
-    | { mode: 'frontmatter'; fields: RefreshFrontmatter }
-    | null = null; // built once, re-applied across 409 retries
+  let plan: string | null = null; // built once, re-applied across 409 retries
   const { metadataId, chunkId } = await modifyFile(
     deps.db,
     notePath,
     async (current) => {
-      if (plan === null) plan = await buildReorganized(current, notePath, deps);
-      if (plan.mode === 'note') return plan.content;
-      // The fallback re-applies only the derived frontmatter to the freshest body — a
-      // concurrent hand edit lands between retries is kept, as the pre-rework refresh did.
-      return withFrontmatter(plan.fields, splitFrontmatter(current).body);
+      if (plan === null) plan = (await buildReorganized(current, notePath, deps)).content;
+      return plan;
     },
     { mtime: deps.now(), hash: deps.hash, settings: deps.settings },
   );
   return { path: notePath, metadataId, chunkId };
 }
 
-/** A Note file with `frontmatter` re-derived and its existing body untouched — the
- *  trailing sections and any hand-written prose included. */
-function withFrontmatter(
-  fields: {
-    title: string;
-    tags: string[];
-    createdAt: number;
-    modality: Modality;
-    source: string;
-    category: Category;
-    summary: string;
-  },
-  body: string,
-): string {
-  return `${noteFrontmatter(fields)}${body.replace(/^\n+/, '')}`;
-}
-
-/** The frontmatter a Re-organize re-derives in the no-Dump fallback — the v1 schema's
- *  identity fields, with the body left exactly as the file holds it. */
-type RefreshFrontmatter = Pick<
-  Note,
-  'title' | 'tags' | 'createdAt' | 'modality' | 'source' | 'category' | 'summary'
->;
-
-/** The rebuilt file content for a Re-organize: from the Note's Dump when it exists, from
- *  the file's own body when it does not. */
+/** The rebuilt file content for a Re-organize: the Note regenerated from its Dump. A Note
+ *  whose Dump cannot be read has nothing to organize from — it throws (see
+ *  refreshNoteMetadata). */
 async function buildReorganized(
   current: string,
   notePath: string,
   deps: RefreshDeps,
-): Promise<
-  | { mode: 'note'; content: string }
-  | { mode: 'frontmatter'; fields: RefreshFrontmatter }
-> {
+): Promise<{ mode: 'note'; content: string }> {
   const fm = parseFrontmatter(current);
   const dumpFilePath = fm.source ? wikilinkTarget(fm.source) : '';
   const dumpFile = dumpFilePath ? await readSingleFile(dumpFilePath, deps) : null;
@@ -1314,25 +1280,16 @@ async function buildReorganized(
     return { mode: 'note', content: noteFileContent(await fillRelated(note, notePath, deps)) };
   }
 
-  // No Dump behind the Note: the file's own body is all there is. Organize against the
-  // user's content alone (never the trailing sections this file appends), preserve the
-  // body verbatim — hand-written prose under the trailing sections included — and
-  // refresh only the derived frontmatter.
-  const { body: raw } = splitFrontmatter(current);
-  const { body } = splitNoteBody(raw);
-  const out = await deps.organizer.organize(body, fm.modality);
-  return {
-    mode: 'frontmatter',
-    fields: {
-      title: out.title,
-      tags: out.tags,
-      createdAt: fm.created,
-      modality: fm.modality,
-      source: fm.source,
-      category: out.category,
-      summary: out.summary,
-    },
-  };
+  // No Dump behind the Note: refuse. Organizing from the Note's own body re-derives title,
+  // tags, summary and Category from the last organized output — a feedback loop that drifts
+  // the Note away from the Dump's context a little more on every Re-organize. The Note is a
+  // view of the Dump (CONTEXT.md): a view with no source must not pretend to refresh itself.
+  // The error surfaces through the caller; the file is untouched, as with any failed
+  // Organize.
+  throw new Error(
+    "the Note's Dump is gone — deleted, or its source link is broken — and the Note is all " +
+      'there is. Nothing was changed; restore the Dump to re-organize.',
+  );
 }
 
 // --- The Note sheet (ticket 06) ------------------------------------------
