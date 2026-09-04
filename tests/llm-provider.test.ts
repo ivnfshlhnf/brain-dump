@@ -18,6 +18,14 @@ import type { Log, LogInput } from '../src/lib/logger';
 import { DEFAULT_SETTINGS, type Settings } from '../src/lib/types';
 
 const base = 'https://example.test/v1';
+
+/** The degenerate key points from the real 2026-09-04 packing-list meltdown, plus the
+ *  one clean point the same sample produced. Shared by the guard tests and the streamed
+ *  guard test, which both exercise the sanitize layer. */
+const SOUP =
+  'glasses case + sunglasses, laptop, charger, powerbank, matiin ac, set lampu otomatis,' +
+  ' -environment set lamp BMC <|place_holder_mm_span_0350|> ' + 'drift'.repeat(60);
+const good = ['watch charger, tablet, neck pillow'];
 const apiKey = 'secret-key';
 
 function settings(overrides: Partial<Settings> = {}): Settings {
@@ -290,6 +298,70 @@ describe('OpenAI-compatible chat seam (createOrganizer / createAnswerer)', () =>
       expect(prompt).toContain(member);
     }
     expect(prompt).toMatch(/exactly one/i);
+  });
+});
+
+// --- the degeneracy guard: a sampling meltdown never reaches a Note --------
+
+describe('the organizer guards against a degenerate reply (2026-09-04 bandung packing list)', () => {
+  // The real failure: deepseek-v4-flash merged the packing list into one bullet, then
+  // spiraled into multilingual token soup, `Infinity`, `6.06e+45` and an `<|EOT|>` marker —
+  // and parseOrganizeOutput wrote every character of it into the Note. Two layers: one
+  // retry when a reply looks degenerate (a second sample usually recovers), and a
+  // sanitize that strips whatever degenerate strings survive either sample.
+
+  const reply = (keyPoints: string[], summary = 'S') =>
+    ({ choices: [{ message: { content: JSON.stringify({
+      title: 'T', tags: [], category: 'personal', summary, keyPoints, related: [], body: 'B',
+    }) } }] } as unknown);
+
+  /** Queue of per-call responses: the mock shifts one off per fetch. */
+  function responses(...bodies: unknown[]): void {
+    const queue = [...bodies];
+    fetchMock.mockImplementation(async (input, init) => {
+      lastUrl = typeof input === 'string' ? input : (input as URL).toString();
+      lastOpts = init ?? {};
+      return jsonResponse(queue.shift() ?? {}, 200);
+    });
+  }
+
+  it('retries once on a degenerate reply and keeps the clean second sample', async () => {
+    responses(reply([SOUP, ...good]), reply(good, 'A list for Bandung.'));
+
+    const out = await createOrganizer(settings()).organize('a dump', 'text');
+
+    expect(fetchMock).toHaveBeenCalledTimes(2); // the retry happened
+    expect(out.keyPoints).toEqual(good); // the meltdown sample is gone wholesale
+    expect(out.summary).toBe('A list for Bandung.');
+  });
+
+  it('calls the model once when the reply is clean — no unconditional retry tax', async () => {
+    responses(reply(good, 'S'));
+
+    await createOrganizer(settings()).organize('a dump', 'text');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('sanitizes the reply when the retry degenerates too — clean points survive, junk does not', async () => {
+    responses(
+      reply([SOUP, '6.061029991606538e+45', 'Infinity', '511684468', ...good]),
+      reply([SOUP, ...good]),
+    );
+
+    const out = await createOrganizer(settings()).organize('a dump', 'text');
+
+    expect(out.keyPoints).toEqual(good); // soup, sci-notation, Infinity, bare numbers out
+  });
+
+  it('blanks a degenerate summary — a soup sentence is empty, not written', async () => {
+    const soupSummary = 'A summary ' + 'of drifting tokens '.repeat(30) + '<|EOT|>';
+    responses(reply(good, soupSummary), reply(good, soupSummary));
+
+    const out = await createOrganizer(settings()).organize('a dump', 'text');
+
+    expect(out.summary).toBe(''); // blanked, not written
+    expect(out.keyPoints).toEqual(good); // the clean fields survive
   });
 });
 
@@ -567,5 +639,25 @@ describe('the streamed Organize transport (capture-latency ticket 07)', () => {
     expect(line).toBeDefined();
     expect(line!.detail!.status).toBe(500);
     expect(resolved(entries)).toBeUndefined();
+  });
+
+  it('the degeneracy guard never retries the streamed path — the watcher already received the deltas', async () => {
+    // The capture sheet streams the reply as it arrives; a second reply would concatenate
+    // into the same displayed stream. The streamed path is therefore sanitized but not
+    // retried — the degenerate sample is stripped, not resampled.
+    mockStream([
+      sseData('{"title":"T","tags":[],"category":"personal","summary":"S","keyPoints":['),
+      sseData(JSON.stringify(SOUP) + ',"watch charger, tablet, neck pillow"],"related":[],"body":"B"}'),
+      sseData(undefined, { prompt_tokens: 5, completion_tokens: 7 }),
+      'data: [DONE]\n\n',
+    ]);
+
+    const seen: string[] = [];
+    const out = await createOrganizer(settings(), () => {}, (chunk) => seen.push(chunk))
+      .organize('a dump', 'text');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(out.keyPoints).toEqual(['watch charger, tablet, neck pillow']); // soup stripped
+    expect(seen.length).toBeGreaterThan(0);
   });
 });

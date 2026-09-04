@@ -45,8 +45,47 @@ export function createOrganizer(
       const reply = onToken
         ? await chatStream(settings, prompt, onToken, log)
         : await chat(settings, prompt, log);
-      return parseOrganizeOutput(reply);
+      const out = parseOrganizeOutput(reply);
+      // A small model can melt down mid-reply — the 2026-09-04 packing-list Note caught
+      // multilingual token soup, `Infinity` and `6.06e+45` in its key points. One retry,
+      // because a second sample usually recovers; then sanitize whatever sample is used.
+      // The streamed path never retries: the watcher already received the deltas, and a
+      // second reply would concatenate into the same displayed stream.
+      if (!onToken && hasDegenerateContent(out)) {
+        return sanitizeOrganizeOutput(parseOrganizeOutput(await chat(settings, prompt, log)));
+      }
+      return sanitizeOrganizeOutput(out);
     },
+  };
+}
+
+/** Signatures of a sampling meltdown, from the real 2026-09-04 sample: a key point longer
+ *  than a paragraph, provider special tokens (`<|EOT|>`, also their fullwidth variants),
+ *  bare `Infinity`/`NaN`, scientific notation (`6.06e+45`), or a bare 6+ digit number. A
+ *  compressed view never looks like any of these. */
+function isDegenerate(s: string): boolean {
+  return (
+    s.length > 300 ||
+    /<\|[^>]{0,40}\|>/.test(s) ||
+    /<｜[^>]{0,40}｜>/.test(s) ||
+    /\b(?:Infinity|NaN)\b/.test(s) ||
+    /[0-9](?:\.[0-9]+)?e[+-][0-9]{1,3}\b/.test(s) ||
+    /\b[0-9]{6,}\b/.test(s)
+  );
+}
+
+function hasDegenerateContent(out: OrganizeOutput): boolean {
+  return out.keyPoints.some(isDegenerate) || isDegenerate(out.summary) || isDegenerate(out.body);
+}
+
+/** Strip the degenerate strings a meltdown left behind: junk key points are dropped, a
+ *  degenerate summary is blanked. The body is never touched — the guard's trigger reads it
+ *  (garbage can garble prose too) but only the list fields are safe to excise. */
+function sanitizeOrganizeOutput(out: OrganizeOutput): OrganizeOutput {
+  return {
+    ...out,
+    summary: isDegenerate(out.summary) ? '' : out.summary,
+    keyPoints: out.keyPoints.filter((k) => !isDegenerate(k)),
   };
 }
 
