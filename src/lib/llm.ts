@@ -208,10 +208,11 @@ function buildOrganizePrompt(content: string, modality: Modality, instruction: s
     '- title: short title (string)',
     '- tags: lowercase one-word tags (array of strings)',
     `- category: exactly one of: ${CATEGORIES.join(', ')} (lowercase string)`,
-    '- summary: one sentence that adds something the title and body do not already say —',
-    '  empty string when there is nothing to add (string)',
-    '- keyPoints: distinct points the body does not already make — empty array when there',
-    '  are none (array of strings)',
+    '- summary: one sentence that says what this Note is about — an empty string only when',
+    '  the body is a single short sentence that already says it all (string)',
+    "- keyPoints: the content's distinct points, compressed — bullets restating the body in",
+    '  fewer words are correct; an empty array only when the body makes exactly one point',
+    '  (array of strings)',
     "- body: the Dump's content restated in the user's own voice — the Dump's own language,",
     "  register, and length scale. No template headings (no \"Issue\", \"Steps to Reproduce\",",
     '  "Workaround", "Next Steps"): a heading exists only where the Dump itself has',
@@ -224,8 +225,8 @@ function buildOrganizePrompt(content: string, modality: Modality, instruction: s
     'did not write. Do not invent section headings the Dump does not support. The body',
     "restates and lightly structures the Dump's actual content — it does not answer,",
     'solve, or expand it. A short Dump yields a short Note — no boilerplate: an empty',
-    'summary or empty keyPoints is correct, not a failure. When in doubt, leave something',
-    'out rather than invent it.',
+    'summary or empty keyPoints is correct only when the body makes a single point, never',
+    'a way to skip them. When in doubt, leave something out rather than invent it.',
   ];
   // The user's standing Instruction (CONTEXT.md: Instruction), verbatim. It sits after the
   // built-in rules and wins where the two conflict: the user opting out of faithfulness is

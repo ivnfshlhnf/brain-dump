@@ -209,14 +209,17 @@ describe('OpenAI-compatible chat seam (createOrganizer / createAnswerer)', () =>
     expect(prompt).not.toMatch(/instruction/i);
   });
 
-  it('asks for summary and keyPoints only when they add something, and forbids template headings (the Style rework)', async () => {
+  it('asks for summary and keyPoints as compressed views, and forbids template headings (the Style rework)', async () => {
     // The corporate Note template (## Issue / ## Steps to Reproduce / ## Workaround) and the
-    // triple redundancy (a 27-word Dump whose body, summary and sole key point were the same
-    // sentence) came from the field contract itself: it demanded a summary and bullets of
-    // every Dump, however thin. The contract now makes summary and keyPoints additive —
-    // each must say what the rest of the Note does not, and empty is a correct answer — and
-    // names the template headings so the model cannot reach for them. A rephrase is fine;
-    // re-demanding boilerplate is not — assert the load-bearing intent only.
+    // triple redundancy came from the field contract demanding a summary and bullets of every
+    // Dump. But the first tightening over-corrected: "adds something the body does not
+    // already say" is nearly unsatisfiable when the body is itself a restatement of the Dump,
+    // so the model answered empty on substantive Dumps too (three live Re-organizes,
+    // 2026-09-04: an espresso log, a design reflection, a bug report — all empty). Summary
+    // and keyPoints are the Note's compressed views, not its novelty column: they restate
+    // the body in fewer words, and empty is reserved for the single-point Dump. A rephrase
+    // is fine; re-demanding boilerplate or re-allowing blanket emptiness is not — assert the
+    // load-bearing intent only.
     responseBody = {
       choices: [{ message: { content: JSON.stringify({
         title: 'T', tags: [], category: 'C', summary: 'S', keyPoints: [], related: [], body: 'B',
@@ -224,13 +227,14 @@ describe('OpenAI-compatible chat seam (createOrganizer / createAnswerer)', () =>
     };
     await createOrganizer(settings()).organize('a short dump', 'text');
     const prompt = (JSON.parse(lastOpts.body as string).messages[0] as { content: string }).content;
-    expect(prompt).toMatch(/adds something the title and body do not already say/);
-    expect(prompt).toMatch(/empty string when there is nothing to add/);
-    expect(prompt).toMatch(/empty array when there\s+are none/);
+    expect(prompt).toMatch(/one sentence that says what this Note is about/);
+    expect(prompt).toMatch(/empty string only when\s+the body is a single short sentence/);
+    expect(prompt).toMatch(/compressed/);
+    expect(prompt).toMatch(/empty array only when\s+the body makes exactly one point/);
     expect(prompt).toMatch(/no template headings/i);
     expect(prompt).toMatch(/Steps to Reproduce/);
     expect(prompt).toMatch(/own voice/);
-    expect(prompt).toMatch(/empty\s+summary or empty keyPoints is correct, not a failure/);
+    expect(prompt).toMatch(/empty\s+summary or empty keyPoints is correct only when the body makes a single point/);
   });
 
   it('parses an empty summary and empty keyPoints as valid output (the Style rework)', async () => {

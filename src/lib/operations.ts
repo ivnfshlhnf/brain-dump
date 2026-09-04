@@ -258,22 +258,21 @@ summary: ${note.summary}
 `;
 }
 
-/** Note file: v1 frontmatter schema + cleaned body + Summary/Key points/Related sections. */
+/** Note file: v1 frontmatter schema + cleaned body + the Summary/Key points/Related
+ *  sections — each written only when it has content. The contract allows an empty summary
+ *  and empty keyPoints (a single-point Dump), and an empty heading shell is not what the
+ *  user approved: a section with nothing to say is not written. */
 export function noteFileContent(note: Note): string {
-  return `${noteFrontmatter(note)}${note.body}
-
-## Summary
-
-${note.summary}
-
-## Key points
-
-${note.keyPoints.map((p) => `- ${p}`).join('\n')}
-
-## Related
-
-${note.related.map((r) => `- ${r}`).join('\n')}
-`;
+  const sections: string[] = [];
+  if (note.summary.trim()) sections.push(`## Summary\n\n${note.summary.trim()}`);
+  if (note.keyPoints.length) {
+    sections.push(`## Key points\n\n${note.keyPoints.map((p) => `- ${p}`).join('\n')}`);
+  }
+  if (note.related.length) {
+    sections.push(`## Related\n\n${note.related.map((r) => `- ${r}`).join('\n')}`);
+  }
+  const tail = sections.length ? `\n\n${sections.join('\n\n')}\n` : '\n';
+  return `${noteFrontmatter(note)}${note.body}${tail}`;
 }
 
 // --- Capture review flow (ticket 03) -------------------------------------
@@ -946,14 +945,18 @@ function splitNoteBody(raw: string): {
   };
 
   const keyPoints = kpIdx >= 0 ? sectionScan(kpIdx, relIdx >= 0 ? relIdx : raw.length, '## Key points').items : [];
-  const rel = relIdx >= 0 ? sectionScan(relIdx, raw.length, '## Related') : { items: [], end: raw.length };
-  // Content after the Related list — an `## Appended …` section below the sections — is
-  // body again, so the sheet shows the whole journal and the refresh re-organizes all of it.
-  const tail = raw.slice(rel.end).trim();
+  // Related is written only when it has content now — the empty section is no longer
+  // printed as a shell — so the last trailing section may be Key points, or none at all.
+  // Whatever section is last, content below its bullet list (a finding-06 `## Appended …`
+  // section) is body again, so the sheet shows the whole journal and the refresh
+  // re-organizes all of it.
+  const rel = relIdx >= 0 ? sectionScan(relIdx, raw.length, '## Related') : null;
+  const kp = kpIdx >= 0 ? sectionScan(kpIdx, relIdx >= 0 ? relIdx : raw.length, '## Key points') : null;
+  const tail = raw.slice(rel ? rel.end : kp ? kp.end : raw.length).trim();
   return {
     body: tail ? `${body}\n\n${tail}` : body,
     keyPoints,
-    related: rel.items,
+    related: rel ? rel.items : [],
     bodyEnd: tail ? raw.length : bodyEnd,
   };
 }

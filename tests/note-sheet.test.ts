@@ -206,6 +206,43 @@ describe('readNote — the full Note and its verbatim source (ticket 06)', () =>
   });
 });
 
+// --- noteFileContent: empty sections are omitted, not printed as shells ----
+
+describe('noteFileContent — empty sections are omitted, not printed as shells', () => {
+  // The Style's contract allows an empty summary and empty keyPoints on a single-point
+  // Dump. Printing their heading shells anyway turned "empty" into dead boilerplate the
+  // user read as breakage (2026-09-04: three live Notes with bare `## Summary` headings).
+  // A section with nothing to say is not written; a section with content keeps its shape.
+  it('omits Summary, Key points, and Related when empty, and round-trips through parseNote', () => {
+    const note = makeNote({ summary: '', keyPoints: [], related: [] });
+    const content = noteFileContent(note);
+    expect(content).not.toContain('## Summary');
+    expect(content).not.toContain('## Key points');
+    expect(content).not.toContain('## Related');
+    expect(content).toContain(note.body);
+
+    const back = parseNote(content);
+    expect(back!.summary).toBe('');
+    expect(back!.keyPoints).toEqual([]);
+    expect(back!.related).toEqual([]);
+    expect(back!.body).toContain('The basil is wilting again.'); // the body survives
+  });
+
+  it('keeps every section that has content, and omits only the empty ones', () => {
+    const note = makeNote({ summary: 'Still worth one line.', keyPoints: [], related: ['[[Brain Dump/x]]'] });
+    const content = noteFileContent(note);
+    expect(content).toContain('## Summary');
+    expect(content).toContain('Still worth one line.');
+    expect(content).not.toContain('## Key points');
+    expect(content).toContain('## Related');
+
+    const back = parseNote(content);
+    expect(back!.summary).toBe('Still worth one line.');
+    expect(back!.keyPoints).toEqual([]);
+    expect(back!.related).toEqual(['[[Brain Dump/x]]']);
+  });
+});
+
 // --- reorganizeNote: the manual Re-organize (ADR-0009) ---------------------
 
 describe('reorganizeNote — rebuild the Note wholesale from its Dump (the append rework)', () => {
